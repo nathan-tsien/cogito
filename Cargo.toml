@@ -1,0 +1,116 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cogito-core",
+    "crates/cogito-protocol",
+    "crates/cogito-conversation",
+    "crates/cogito-model",
+    "crates/cogito-tools",
+    "crates/cogito-sandbox",
+    "crates/cogito-jobs",
+    "crates/cogito-mcp",
+    "crates/cogito-cli",
+    "crates/cogito-tui",
+    "crates/testing/cogito-test-fixtures",
+    "crates/testing/cogito-mock-model",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.83"
+authors = ["cogito contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourorg/cogito"
+
+[workspace.dependencies]
+# Internal crates
+cogito-core = { path = "crates/cogito-core" }
+cogito-protocol = { path = "crates/cogito-protocol" }
+cogito-conversation = { path = "crates/cogito-conversation" }
+cogito-model = { path = "crates/cogito-model" }
+cogito-tools = { path = "crates/cogito-tools" }
+cogito-sandbox = { path = "crates/cogito-sandbox" }
+cogito-jobs = { path = "crates/cogito-jobs" }
+cogito-mcp = { path = "crates/cogito-mcp" }
+cogito-test-fixtures = { path = "crates/testing/cogito-test-fixtures" }
+cogito-mock-model = { path = "crates/testing/cogito-mock-model" }
+
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+tokio-stream = "0.1"
+futures = "0.3"
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+toml = "0.8"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging / observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros", "chrono", "uuid"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+
+# Schemas
+jsonschema = "0.18"
+schemars = "0.8"
+
+# IDs and time
+uuid = { version = "1.10", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+ulid = "1.1"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# TUI (Sprint 6+)
+ratatui = "0.28"
+crossterm = "0.28"
+
+# Testing
+tokio-test = "0.4"
+mockito = "1.5"
+insta = "1.40"
+proptest = "1.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+rstest = "0.22"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "deny"
+print_stdout = "warn"
+print_stderr = "warn"
+
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1
+
+[profile.bench]
+debug = true

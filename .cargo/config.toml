@@ -1,0 +1,7 @@
+[build]
+rustflags = ["-D", "warnings"]
+
+[alias]
+ci-check = "fmt --all -- --check"
+ci-clippy = "clippy --workspace --all-targets --all-features -- -D warnings"
+ci-test = "nextest run --workspace --all-features"

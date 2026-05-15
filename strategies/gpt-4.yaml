@@ -1,0 +1,18 @@
+id: gpt-4-default
+applicable_models:
+  - "gpt-4*"
+
+prompt_framing:
+  cache_breakpoint_policy: conservative
+  context_anxiety_mitigation: false
+
+tool_call_parser: openai_v2
+
+context_compression:
+  max_history_turns: 30
+  summarization_threshold_tokens: 8000
+
+retry_policy:
+  on_rate_limit: exponential_backoff
+  on_context_overflow: compress_and_retry
+  on_parse_error: feedback_to_llm
