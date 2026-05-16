@@ -18,9 +18,9 @@ members = [
 [workspace.package]
 edition = "2024"
 rust-version = "1.83"
-authors = ["cogito contributors"]
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourorg/cogito"
+authors = ["Nathan(qiannengsheng@163.com)"]
+license = "Apache-2.0"
+repository = "https://github.com/nathan-tsien/cogito"
 
 [workspace.dependencies]
 # Internal crates

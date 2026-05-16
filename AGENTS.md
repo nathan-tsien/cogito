@@ -51,6 +51,22 @@ When a tool call fails (bad args, schema mismatch, runtime error),
 return a `ToolResult::Error` with an LLM-readable message.
 Do not propagate panics or `unwrap`s to the Harness layer.
 
+### 6. Brain may only see Hands / Session / Boundary through Protocol
+
+`cogito-core::harness` is Brain. It may import **only** `cogito-protocol`.
+Concrete crates (`cogito-conversation`, `cogito-model`, `cogito-tools`,
+`cogito-sandbox`, `cogito-jobs`, `cogito-mcp`) are imported by the
+Runtime layer and injected into Brain as trait objects.
+
+If you find yourself wanting to write `use cogito_tools::…` inside
+`harness/`, the answer is to **add a trait to `cogito-protocol`**, not
+to relax the import. The same rule applies to hooks: a `HookHandler`
+does not get to do I/O — if it needs to, it goes through a
+`ToolProvider` or `JobManager` like any other Hand.
+
+See ADR-0004 for the full layer map and import rules. See
+`docs/components/H09-hook-pipeline.md` for the hook purity rule.
+
 ## Coding standards
 
 - **Edition**: Rust 2024, MSRV 1.83
