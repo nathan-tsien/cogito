@@ -16,11 +16,11 @@ If `AGENTS.md` and this file conflict, `AGENTS.md` wins.
 
 ## What this project is
 
-**cogito** is an experimental Rust workspace that validates a 10-component Harness design for AI agent systems. It is *not* a product; it is a controlled experiment to verify the design before building a production agent platform.
+**cogito** is a **production-grade Agent Runtime core, packaged as an embeddable Rust library**. Consumer Rust services depend on it and run it in-process to gain agent-loop capability inside their product.
 
 - **Harness = the thinking part** of an agent (orchestration core that drives one turn), separated from execution (hands) and memory (session).
 - Naming convention: `cogito` = "thinking"; the runtime never *acts* directly, it decides.
-- Do **not** mark anything "production-ready" — this is an experiment.
+- Version-driven roadmap: v0.1 foundation → v0.2 storage/multimodal → v0.3 subagent → v0.4 SaaS-ready → ... → v1.0 GA. See `ADR-0005` for production scope and quality gates.
 
 ## Inviolable design rules (summary; see AGENTS.md §"Inviolable design principles")
 
@@ -29,7 +29,7 @@ If `AGENTS.md` and this file conflict, `AGENTS.md` wins.
 3. **State lives in Conversation Service, not Harness memory.** If a Harness instance crashes mid-turn, a new instance must resume from the event log. No cross-turn state in structs. Ask: "can this be rebuilt from the event log?"
 4. **Turn Driver is a state machine**, not a function chain. States: `Init → PromptBuilt → ModelCalling → ModelCompleted → ToolDispatching → {Completed | Paused | Failed}`. Each transition writes an event *before* transitioning.
 5. **Tool failures are structured `ToolResult::Error`**, not panics or `unwrap`s.
-6. **Brain only sees Hands / Session / Boundary through Protocol traits.** `cogito-core::harness` may import **only** `cogito-protocol`. Concrete crates (`cogito-conversation`, `cogito-model`, `cogito-tools`, `cogito-sandbox`, `cogito-jobs`, `cogito-mcp`) are wired in by the Runtime layer and injected as trait objects. If you want to `use cogito_tools::…` inside `harness/`, add a trait to `cogito-protocol` instead. Hooks (H09) follow the same rule: pure policy gates, no I/O — side effects go through `ToolProvider`/`JobManager`. See **ADR-0004** for the full layer map.
+6. **Brain only sees Hands / Session / Boundary through Protocol traits.** `cogito-core::harness` may import **only** `cogito-protocol`. Concrete crates (`cogito-store-jsonl`, `cogito-model`, `cogito-tools`, `cogito-sandbox`, `cogito-jobs`, `cogito-mcp`, `cogito-subagent`, `cogito-storage-local`) are wired in by the Runtime layer and injected as trait objects. If you want to `use cogito_tools::…` inside `harness/`, add a trait to `cogito-protocol` instead. Hooks (H09) follow the same rule: pure policy gates, no I/O — side effects go through `ToolProvider`/`JobManager`. See **ADR-0004** for the full layer map.
 
 ## Commands
 
@@ -59,22 +59,26 @@ When finishing a task:
 
 ## Workspace layout
 
-Each crate maps to exactly one layer in the Brain / Hands / Session design (ADR-0004):
+Each crate maps to exactly one layer in the Brain / Hands / Session design (ADR-0004). v0.1 crates listed; later crates (storage, subagent, multimedia, SaaS-ready stores) land in subsequent versions per ARCHITECTURE.md §"Version evolution path".
 
-| Crate | Layer | Role |
-|---|---|---|
-| `cogito-protocol` | Protocol | Events, traits, shared types. No internal cogito deps. |
-| `cogito-core` | Brain + Runtime (will split) | `harness/` is Brain (H01–H10), may only `use cogito_protocol::*`; `runtime/` hosts Brain. |
-| `cogito-conversation` | Session | Event log; implements `ConversationStore` |
-| `cogito-model` | Boundary | Model Gateway; implements `ModelGateway` |
-| `cogito-tools` | Hands | Builtin tools; implements `ToolProvider` |
-| `cogito-sandbox` | Hands | Subprocess sandbox; implements `Sandbox` |
-| `cogito-jobs` | Hands | Async jobs; implements `JobManager` |
-| `cogito-mcp` | Hands | MCP client; another `ToolProvider` (Sprint 5+) |
-| `cogito-cli` | Surface | CLI entry point |
-| `cogito-tui` | Surface | TUI (Sprint 6+) |
-| `testing/cogito-test-fixtures` | Testing | Test fixtures |
-| `testing/cogito-mock-model` | Testing | Mock `ModelGateway` |
+| Crate | Layer | When | Role |
+|---|---|---|---|
+| `cogito-protocol` | Protocol | v0.1 | All traits + events + `Vec<ContentBlock>` + value types. No internal deps. |
+| `cogito-core` | Brain + Runtime (will split) | v0.1 | `harness/` is Brain (H01–H10), may only `use cogito_protocol::*`; `runtime/` hosts Brain + implements `BrainSpawner` (v0.3+). |
+| `cogito-store-jsonl` | Session | v0.1 | Per-session JSONL backend; sole v0.1 store. |
+| `cogito-store-postgres` | Session | v0.4 | Production multi-replica backend. |
+| `cogito-model` | Boundary | v0.1 | `ModelGateway` impls (Anthropic + OpenAI) with ContentBlock serialization. |
+| `cogito-tools` | Hands | v0.1 | Builtin tools + `CompositeToolProvider` utility. |
+| `cogito-sandbox` | Hands (internal primitive) | v0.1 | Subprocess sandbox; not visible to Brain. |
+| `cogito-jobs` | Hands | v0.1 | `JobManager` impl. |
+| `cogito-mcp` | Hands | v0.2 | MCP client; another `ToolProvider`. |
+| `cogito-storage-local` | Hands (Storage) | v0.2 | Local FS / HTTP-cache / `blob://` backend. |
+| `cogito-tools-multimedia` | Hands | v0.2+ | Audio / video / image tools. |
+| `cogito-subagent` | Hands | v0.3 | `SubagentToolProvider` with 4 tools. |
+| `cogito-cli` | Surface | v0.1 | CLI entry point. |
+| `cogito-tui` | Surface | v0.2 | TUI. |
+| `testing/cogito-test-fixtures` | Testing | v0.1 | Test fixtures. |
+| `testing/cogito-mock-model` | Testing | v0.1 | Mock `ModelGateway`. |
 
 **Brain importing a Hand directly is a build error.** Don't bloat `cogito-core` either: if something could live in `cogito-protocol` or another crate, put it there. (Codex learned this the hard way.) Adding a new crate requires explicit approval.
 

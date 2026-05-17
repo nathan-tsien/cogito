@@ -5,16 +5,23 @@ Read this first, every time, before making changes.
 
 ## What this project is
 
-**cogito** is an experimental Rust project that validates a 10-component
-Harness design for AI agent systems.
+**cogito** is a **production-grade Agent Runtime core, packaged as an embeddable Rust library.**
+Consumer Rust services depend on it and run it in-process to gain
+agent-loop capability inside their product.
 
-It is **not** a production agent. It is a controlled experiment.
+cogito provides:
 
-The goal: validate that the Harness design works in practice before
-building the production Agent Platform.
+- **Brain**: 10-component Harness (H01–H10)
+- **Session**: event-sourced `ConversationStore` trait + reference backend
+- **Hands / Boundary**: trait surface for tools, model gateway, jobs, hooks, storage
+- **Subagent (v0.3+)**: recursive Brain via `BrainSpawner`
 
-See `ARCHITECTURE.md` for the full design.
-See `ROADMAP.md` for the current sprint and what to focus on.
+cogito does NOT provide deployment artifacts, inbound transport, authentication,
+multi-tenant isolation enforcement, or Web UI — those are the consumer's
+responsibility (or a future SaaS layer wrapping cogito).
+
+See `ARCHITECTURE.md` for the full design, `ROADMAP.md` for the current
+version and sprint, and `ADR-0005` for production scope + quality gates.
 
 ## Inviolable design principles
 
@@ -110,9 +117,8 @@ just ci               # the CI gate locally
 1. `just fmt && just fix <crate>` — ensure clean
 2. `just test -p <crate-you-touched>` — verify tests pass
 3. Update `docs/components/H0X-*.md` if you changed component behavior
-4. If you completed a sprint goal, write/update the experiment report
-   in `docs/experiments/`
-5. **Do NOT mark anything as "production-ready".** This is an experiment.
+4. Update `CHANGELOG.md` if you added a public-API change
+5. If you completed a sprint or version milestone, update `ROADMAP.md`'s checklist
 
 ## When you're uncertain
 
@@ -127,9 +133,10 @@ What's **not** OK:
 
 - Inventing your own architecture
 - Adding new crates without asking
-- Skipping tests because "this is just experimental"
+- Skipping tests because "we're early" or "this is just a sprint thing"
 - Importing a framework that violates the "no Agent framework" rule
 - Marking tests as `#[ignore]` to make them pass
+- Marking work "production-ready" without the relevant ADR-0005 quality gate evidence
 
 ## Patience note
 
@@ -137,7 +144,9 @@ When running `cargo` commands (`just fix`, `cargo test`), be patient.
 Rust lock-file resolution can be slow. Don't kill the command by PID —
 that corrupts the lock file. Wait it out.
 
-## Current sprint
+## Current version and sprint
 
-See `ROADMAP.md`. The current sprint is the only thing you should be
-working on unless explicitly directed otherwise.
+See `ROADMAP.md`. The current version + sprint is the only thing you
+should be working on unless explicitly directed otherwise. cogito is
+version-driven (v0.1 → v0.2 → ... → v1.0); each version has a clear
+theme and gate-able exit criteria in `ADR-0005`.
