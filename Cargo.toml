@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "crates/cogito-core",
     "crates/cogito-protocol",
-    "crates/cogito-conversation",
+    "crates/cogito-store-jsonl",
     "crates/cogito-model",
     "crates/cogito-tools",
     "crates/cogito-sandbox",
@@ -26,7 +26,7 @@ repository = "https://github.com/nathan-tsien/cogito"
 # Internal crates
 cogito-core = { path = "crates/cogito-core" }
 cogito-protocol = { path = "crates/cogito-protocol" }
-cogito-conversation = { path = "crates/cogito-conversation" }
+cogito-store-jsonl = { path = "crates/cogito-store-jsonl" }
 cogito-model = { path = "crates/cogito-model" }
 cogito-tools = { path = "crates/cogito-tools" }
 cogito-sandbox = { path = "crates/cogito-sandbox" }
