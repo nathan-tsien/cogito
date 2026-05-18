@@ -17,6 +17,29 @@
 - Each task ends with a commit. Branch: `impl/sprint-0-closure` off `main` (created in Task 1).
 - After plan completes: open PR `nathan-tsien:impl/sprint-0-closure -> main`, base = main.
 
+**Test snippet adaptation** (Tasks 7-10, learned from Task 7 review):
+
+All serde-roundtrip test snippets in this plan use `.unwrap()` for brevity. The workspace lints `unwrap_used = "deny"` and `expect_used = "deny"` will reject those as written. Implementers MUST adapt each test to return `serde_json::Result<()>` (or `Result<(), serde_json::Error>`) and propagate with `?`:
+
+```rust
+#[test]
+fn name() -> serde_json::Result<()> {
+    let json = serde_json::to_string(&value)?;
+    let back: T = serde_json::from_str(&json)?;
+    assert_eq!(value, back);
+    Ok(())
+}
+```
+
+**Serde representation guidance** (Tasks 7-10, learned from Task 7 review):
+
+Internally-tagged enums (`#[serde(tag = "...")]`) have two restrictions that bit Task 7:
+
+1. The tag key must not collide with a field name in any struct variant. Example: `Error { kind: ToolErrorKind, ... }` cannot coexist with `#[serde(tag = "kind")]`.
+2. Variant bodies must serialise as JSON objects. Tuple/newtype variants whose payload is a primitive (`String`, `i64`, `Vec<...>`) violate this and serde will refuse at runtime. Example: `Output(Vec<Value>)` cannot be internally-tagged.
+
+**Decision rule for this plan**: prefer externally-tagged (the serde default — just `#[serde(rename_all = "snake_case")]` without `tag = ...`) unless every variant is unit or struct with no field-name collisions. When in doubt, externally-tag. The wire format is slightly larger but unambiguous and future-proof.
+
 ---
 
 ## File structure (created or modified)
@@ -624,8 +647,17 @@ pub enum InvokeOutcome {
 /// Result body returned by a tool. `Vec<ContentBlock>` arrives in v0.2 when
 /// the multimodal upgrade lands; v0.1 uses plain text via the convenience
 /// constructor `ToolResult::text`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+///
+/// **Serde representation note**: externally-tagged (the serde default).
+/// Internally-tagged (`#[serde(tag = ...)]`) cannot be used here because
+/// (a) the `Error` variant has a field literally named `kind`, which
+/// collides with any internal tag named `kind`, and (b) serde refuses to
+/// serialize a tagged newtype variant whose body is a sequence — and
+/// `Output(Vec<...>)` is exactly that. Wire format:
+/// - `ToolResult::text("ok")` → `{"output":["ok"]}`
+/// - `ToolResult::Error { ... }` → `{"error":{"kind":"timeout", ...}}`
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ToolResult {
     /// Successful output. v0.1 represents content as a list of opaque
     /// JSON values; v0.2 replaces this with `Vec<ContentBlock>`.
@@ -1104,12 +1136,12 @@ fn paused_carries_job_id() {
 }
 
 #[test]
-fn all_failure_reasons_roundtrip() {
+fn all_failure_reasons_roundtrip() -> serde_json::Result<()> {
     let reasons = [
         TurnFailureReason::StoreUnavailable,
-        TurnFailureReason::ModelGatewayFailed("503".into()),
+        TurnFailureReason::ModelGatewayFailed { message: "503".into() },
         TurnFailureReason::TurnPanicked {
-            location: "stream demux",
+            location: "stream demux".into(),
         },
         TurnFailureReason::TurnTimedOut,
         TurnFailureReason::HookRejected {
@@ -1118,10 +1150,11 @@ fn all_failure_reasons_roundtrip() {
         },
     ];
     for r in reasons {
-        let json = serde_json::to_string(&r).unwrap();
-        let back: TurnFailureReason = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&r)?;
+        let back: TurnFailureReason = serde_json::from_str(&json)?;
         assert_eq!(r, back);
     }
+    Ok(())
 }
 ```
 
@@ -1167,15 +1200,23 @@ pub enum TurnOutcome {
 /// Why a turn ended in `Failed`. Only Runtime-level errors (store I/O,
 /// gateway hard failure, panic, timeout, hook reject) escape here; tool
 /// errors stay inside `ToolResult::Error` and never bubble up.
+///
+/// **Serde representation note**: internally-tagged with `tag = "kind"`.
+/// All variants are unit or struct (no newtype-with-primitive), so the
+/// internal-tag restriction is satisfied. `ModelGatewayFailed` uses a
+/// struct variant `{ message: String }` rather than `ModelGatewayFailed(String)`
+/// to remain compatible with internal tagging (a newtype around a String
+/// would serialise as a JSON string, not an object, and serde would refuse
+/// to merge the `kind` tag into it).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TurnFailureReason {
     /// `ConversationStore::append` returned an error.
     StoreUnavailable,
     /// `ModelGateway::stream` returned `Err(...)`.
-    ModelGatewayFailed(String),
+    ModelGatewayFailed { message: String },
     /// A panic was caught by Layer 2 (TurnDriver task). See spec §9.
-    TurnPanicked { location: &'static str },
+    TurnPanicked { location: String },
     /// `tokio::time::timeout` fired around the turn task.
     TurnTimedOut,
     /// An H09 hook returned `HookDecision::Reject`.
