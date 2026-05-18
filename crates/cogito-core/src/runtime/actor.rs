@@ -25,6 +25,8 @@ pub(super) enum InFlight {
     },
     /// The turn paused awaiting a `JobManager` callback. `job_id` is the
     /// router key; `paused_at_event_id` lets resume reconstruct context.
+    // TODO(Plan 2 / Sprint 1): switch `paused_at_event_id` to the
+    // `cogito_protocol::event::EventId` newtype once that module lands.
     PausedOnJob {
         /// The background job this session is waiting on.
         job_id: JobId,

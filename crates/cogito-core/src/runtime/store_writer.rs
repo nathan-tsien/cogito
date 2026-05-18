@@ -9,9 +9,14 @@ use tokio::sync::{mpsc, oneshot};
 
 /// Commands the actor (or `TurnDriver` via `persist_tx`) sends to the
 /// store writer subtask.
+///
+/// Crate-private: this is the internal wire between the actor task
+/// and the store writer subtask, not a public API. External callers
+/// observe persistence indirectly through the `ConversationStore`
+/// trait (defined in `cogito-protocol` per ADR-0004 §3).
 #[derive(Debug)]
-#[non_exhaustive]
-pub enum PersistCommand {
+#[allow(dead_code)] // Plan 2 fills in the producers
+pub(crate) enum PersistCommand {
     /// Append one event. If `ack` is `Some`, the writer signals completion
     /// (after fsync) by sending on the oneshot.
     Append {
@@ -34,8 +39,8 @@ pub enum PersistCommand {
 /// Errors from the store writer subtask. Surfaced to the caller via the
 /// `ack` oneshots above.
 #[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum StoreWriteError {
+#[allow(dead_code)] // Plan 2 fills in the error sites
+pub(crate) enum StoreWriteError {
     /// File / network I/O failure when appending.
     #[error("store I/O failed: {0}")]
     Io(String),

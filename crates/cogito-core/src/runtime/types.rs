@@ -28,7 +28,10 @@ pub enum OpenMode {
     /// Session must not exist in the store. Writes a `SessionStarted` event.
     New,
     /// Session must exist; replay through H03 establishes resume point.
-    /// Panics on missing log (contract violation).
+    /// Returns `Err(RuntimeError::ResumeFailed)` with a clear "no such
+    /// session" message on missing log — distinct from `Attach`, which
+    /// returns a typed `NotFound`-style error. `Resume` is the
+    /// "I know this session exists" form: missing log is a caller bug.
     Resume,
     /// Like `Resume` but returns `Err(ResumeError::NotFound)` instead of
     /// panicking on a missing log.

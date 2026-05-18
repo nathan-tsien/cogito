@@ -15,14 +15,24 @@ use super::types::{SessionCommand, ShutdownOutcome};
 /// same session route through the same actor.
 #[allow(dead_code)] // Plan 2 fills in the consumers
 pub(super) struct SessionShared {
+    /// Identifier of the session this handle fronts. Stored so error
+    /// sites can construct `SessionError::SessionClosed { session_id }`
+    /// without needing to thread the id through every call.
+    pub(super) session_id: super::types::SessionId,
     /// Inbound command channel to the actor.
     pub(super) mailbox_tx: mpsc::Sender<SessionCommand>,
     /// Outbound broadcast of real-time events to all subscribers.
     pub(super) events_tx: broadcast::Sender<StreamEvent>,
     /// Token for the *currently* in-flight turn. The actor replaces it on
     /// each turn start; the caller's `cancel_turn` always operates on
-    /// whichever token is current at call time. Guarded by a `Mutex` so
-    /// the actor can swap atomically without a writer lock.
+    /// whichever token is current at call time.
+    ///
+    /// Uses `parking_lot::Mutex` rather than `std::sync::Mutex` for
+    /// non-poisoning ergonomics — this lock sits in the cancel hot path
+    /// (every `cancel_turn` call acquires it), and a poison on actor
+    /// panic would force every subsequent cancel to bubble an
+    /// unrelated `PoisonError`. `parking_lot` is already a workspace
+    /// dependency so the cost is minimal.
     pub(super) current_cancel_token: parking_lot::Mutex<CancellationToken>,
 }
 
@@ -90,10 +100,18 @@ impl SessionHandle {
     /// store writer, and waits up to `deadline` for any in-flight turn
     /// to complete before forcing a cancel + abort.
     ///
+    /// **Multi-handle semantics**: Calling `shutdown` on one clone closes
+    /// the session for **all** clones. Subsequent operations on any
+    /// surviving clone (`send_user`, `cancel_turn`) will return
+    /// `SessionError::SessionClosed` once the actor exits. This is by
+    /// design — sessions are per-actor, not per-handle.
+    ///
     /// # Errors
     ///
-    /// Returns `SessionError::ShuttingDown` if another shutdown is already
-    /// in progress for this session.
+    /// Returns `SessionError::ShuttingDown { session_id }` if another
+    /// shutdown is already in progress for this session. Returns
+    /// `SessionError::SessionClosed { session_id }` if the actor has
+    /// already exited.
     #[allow(clippy::unused_async)] // Plan 2 (Sprint 2) replaces todo!() with real await points
     #[allow(clippy::todo)] // intentional stub — Plan 2 fills in the body
     pub async fn shutdown(self, deadline: Duration) -> Result<ShutdownOutcome, SessionError> {
@@ -108,10 +126,17 @@ impl SessionHandle {
 
 impl Drop for SessionHandle {
     fn drop(&mut self) {
-        // Plan 2 (Sprint 2): if this is the last Arc clone, best-effort
-        // send Shutdown with default timeout so the actor task doesn't
-        // leak. Today the Arc keeps the channel alive and the actor would
-        // park forever — the explicit shutdown() call is the safe path.
+        // When the last clone goes away without an explicit shutdown,
+        // surface a warning so the leaked actor task is visible during
+        // development. Plan 2 (Sprint 2) will replace this with a
+        // best-effort fire-and-forget Shutdown send.
+        if Arc::strong_count(&self.shared) == 1 {
+            tracing::warn!(
+                "last SessionHandle dropped without calling shutdown(); \
+                 the session actor task will leak until process exit. \
+                 Plan 2 (Sprint 2) will fix this with a Drop-time shutdown."
+            );
+        }
     }
 }
 
@@ -120,9 +145,16 @@ impl Drop for SessionHandle {
 #[non_exhaustive]
 pub enum SessionError {
     /// Actor task has exited and is no longer accepting commands.
-    #[error("session is closed")]
-    SessionClosed,
-    /// Caller tried to use the handle after `shutdown` returned.
-    #[error("shutdown already in progress")]
-    ShuttingDown,
+    #[error("session {session_id} is closed")]
+    SessionClosed {
+        /// Identifier of the closed session, for caller-side logging
+        /// and metric labelling.
+        session_id: super::types::SessionId,
+    },
+    /// Caller tried to use the handle after `shutdown` started.
+    #[error("session {session_id} shutdown already in progress")]
+    ShuttingDown {
+        /// Identifier of the session being shut down.
+        session_id: super::types::SessionId,
+    },
 }
