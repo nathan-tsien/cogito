@@ -70,3 +70,34 @@ The full enum is defined in `cogito-protocol::hands::ToolResult`.
 - ARCHITECTURE.md §"Tool execution classes"
 - ADR-0004 §3 (Hands traits in protocol)
 - AGENTS.md §"Inviolable design principles" #5
+
+## Implementation note (v0.1)
+
+H08 branches on two signals:
+
+1. `ToolDescriptor.execution_class`
+   (`AlwaysSync` / `AlwaysAsync` / `Adaptive`) — checked before invoke
+2. `InvokeOutcome` returned by `ToolProvider::invoke`
+   (`Sync(ToolResult)` / `Async(JobId)`)
+
+Contract violations (e.g., a tool descriptor declared `AlwaysSync`
+returning `Async`) are `debug_assert!`s in dev builds and a structured
+`ToolResult::Error { kind: InvocationFailed }` in release. Strategy
+filtering (e.g., `allow_async_tools: false`) is H05's responsibility,
+not H08's; H08 trusts the descriptor it receives.
+
+Cancellation: each `invoke()` call runs inside
+`tokio::select!(provider.invoke(...), ctx.cancel.cancelled())`. On
+cancel, in-flight tool futures are *dropped on next yield*
+(cooperative) — cogito does not `task.abort()` them, leaving cleanup
+to the tool's RAII. Tools that want to honor cancel must `select!` on
+`ctx.cancel` internally.
+
+Panic isolation: each `invoke()` is wrapped in `catch_unwind` (Layer 3
+of the three-layer panic isolation described in
+`docs/superpowers/specs/2026-05-18-runtime-h01-execution-model-design.md`
+§9). A panicking tool surfaces as `ToolResult::Error { kind:
+ToolPanicked }`; the turn continues.
+
+See spec §6 for the full sync/async judgment table and §9 for
+cancellation + panic propagation.

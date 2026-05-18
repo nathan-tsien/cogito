@@ -1,0 +1,40 @@
+# cargo-deny configuration. Enforces ADR-0005 §4 Security: no known
+# vulnerabilities, no incompatible licenses, no wildcard versions, no
+# unknown registries.
+
+[advisories]
+yanked = "deny"
+# RUSTSEC-2024-0436: `paste` is unmaintained. Pulled transitively by ratatui -> cogito-tui.
+# No drop-in safe upgrade; ratatui upstream tracks the migration. Revisit when ratatui drops paste.
+ignore = ["RUSTSEC-2024-0436"]
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    # webpki-roots ships the Mozilla CA bundle; CDLA-Permissive-2.0 is a permissive data license.
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Internal workspace crates are declared as `{ path = "..." }` without an explicit
+# version, which cargo-deny reads as a wildcard. That is the standard pattern for
+# unpublished workspace members and not a real wildcard pin.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

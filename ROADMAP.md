@@ -6,7 +6,7 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprint 0 (skeleton) in progress.
+> **v0.1 · Foundation** — Sprint 0 complete; Sprint 1 (H02 + JSONL store + SLO benchmark) entering implementation.
 
 ## Version plan
 
@@ -20,10 +20,12 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] AGENTS.md, ARCHITECTURE.md, ROADMAP.md, ADR-0001/0002/0003/0004 written
 - [x] CLAUDE.md added; ADR-0004 (Brain/Hands/Session) ratified
 - [x] ADR-0005 (production scope) ratified
-- [ ] 13 crates created with stub `lib.rs` / `main.rs` (drop `cogito-conversation`; add `cogito-store-jsonl`)
-- [ ] Workspace `Cargo.toml` builds clean
-- [ ] CI workflow runs `just ci`
-- [ ] `cargo test` passes (empty)
+- [x] ADR-0006 (Runtime + H01 execution model) ratified
+- [x] Workspace topology fixed per ADR-0004: dropped `cogito-conversation`, added `cogito-store-jsonl`, stripped Hands/Boundary/Session deps from `cogito-core`
+- [x] Protocol types landed: `ExecutionClass`, `StreamEvent`, `JobCompletionEvent`, `JobManager::on_complete`, `TurnOutcome`, `TurnFailureReason` (12+ serde-roundtrip tests passing)
+- [x] Runtime module scaffolded (stubs): `Runtime`, `RuntimeBuilder`, `SessionHandle`, `SessionActor`, `store_writer`
+- [x] CI runs `just ci` (fmt + clippy + layer-check + test) + cargo-deny job
+- [x] Toolchain aligned to MSRV 1.85 (edition 2024 requirement)
 
 #### Sprint 1 · H02 Step Recorder + JSONL store (1.5 day)
 - [ ] `cogito-protocol` defines `ConversationEvent` with `schema_version: u32` + `Vec<ContentBlock>` payload (Text + ToolUse + ToolResult variants)
@@ -149,7 +151,7 @@ storage HTTP backend.
 - [ ] Load test scaffolding: 1000 concurrent sessions per process target
 - [ ] Soak test: 24h continuous run with no leaks / no degradation
 - [ ] Event log migration tooling (v(N-1) → vN converter, with `replay_equivalence` test)
-- [ ] **ADR-0006**: Storage HTTP wire protocol
+- [ ] **ADR-0013**: Storage HTTP wire protocol
 - [ ] `cogito-storage-http` crate: HTTP backend adapter
 - [ ] Tag `v0.6.0`
 

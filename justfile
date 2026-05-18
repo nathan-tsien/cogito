@@ -33,13 +33,17 @@ chaos:
     cargo test --test resume_chaos -p cogito-core --release -- --nocapture
 
 # CI gate
-ci: fmt-check clippy test
+ci: fmt-check clippy layer-check test
 
 fmt-check:
     cargo fmt --all -- --check
 
 clippy:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+# Check ADR-0004 layer import rule
+layer-check:
+    @./scripts/check-layer.sh
 
 # Run the CLI
 chat:

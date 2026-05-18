@@ -1,3 +1,3 @@
-//! stream_demux — stub, implement per the sprint roadmap.
+//! `stream_demux` — stub, implement per the sprint roadmap.
 //!
 //! See `docs/components/` for the design doc.

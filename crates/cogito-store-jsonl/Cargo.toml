@@ -1,9 +1,10 @@
 [package]
-name = "cogito-conversation"
+name = "cogito-store-jsonl"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 cogito-protocol.workspace = true
@@ -14,14 +15,14 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-sqlx.workspace = true
-chrono.workspace = true
 uuid.workspace = true
+chrono.workspace = true
 
 [dev-dependencies]
 cogito-test-fixtures.workspace = true
 tokio-test.workspace = true
 rstest.workspace = true
+tempfile = "3.10"
 
 [lints]
 workspace = true

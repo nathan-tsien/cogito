@@ -47,7 +47,7 @@ just inspect <session>   # dump a session's event log
 just replay <session>    # replay a session
 ```
 
-Prereqs: Rust 1.83+ (rustup), `cargo install just cargo-nextest`.
+Prereqs: Rust 1.85+ (rustup; edition 2024 requirement — see `rust-toolchain.toml`), `cargo install just cargo-nextest`.
 
 When finishing a task:
 1. `just fmt && just fix <crate>` → clean
@@ -84,13 +84,14 @@ Each crate maps to exactly one layer in the Brain / Hands / Session design (ADR-
 
 ## Coding standards (workspace-wide)
 
-- Rust 2024 edition, MSRV 1.83
+- Rust 2024 edition, MSRV 1.85 (edition 2024 stabilized in 1.85)
 - `unsafe_code = "forbid"`, `missing_docs = "warn"` at workspace level
 - Clippy: `pedantic` (warn) plus `unwrap_used`, `expect_used`, `panic`, `dbg_macro` all **deny**
 - `print_stdout` / `print_stderr` warn — use `tracing` instead
 - Errors: `thiserror` for libraries, `anyhow` for binaries
 - All workspace deps go through `[workspace.dependencies]`; members declare `{ workspace = true }`
 - `RUSTFLAGS=-Dwarnings` via `.cargo/config.toml` — warnings break the build
+- **All code comments (doc comments `///`, module docs `//!`, inline `//`) are written in English.** Chinese is reserved for design docs (`docs/superpowers/specs/`), ADRs, commit messages, and human-facing conversation. Rationale: code is read by future maintainers and AI agents who default to English; mixing languages in source hurts grep and review.
 
 ## Testing requirements
 

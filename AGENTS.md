@@ -61,7 +61,7 @@ Do not propagate panics or `unwrap`s to the Harness layer.
 ### 6. Brain may only see Hands / Session / Boundary through Protocol
 
 `cogito-core::harness` is Brain. It may import **only** `cogito-protocol`.
-Concrete crates (`cogito-conversation`, `cogito-model`, `cogito-tools`,
+Concrete crates (`cogito-store-jsonl`, `cogito-model`, `cogito-tools`,
 `cogito-sandbox`, `cogito-jobs`, `cogito-mcp`) are imported by the
 Runtime layer and injected into Brain as trait objects.
 
@@ -76,7 +76,7 @@ See ADR-0004 for the full layer map and import rules. See
 
 ## Coding standards
 
-- **Edition**: Rust 2024, MSRV 1.83
+- **Edition**: Rust 2024, MSRV 1.85 (edition 2024 stabilized in 1.85)
 - **Lints**: `#![warn(clippy::pedantic)]` at crate root
 - **Forbidden**: `unwrap_used`, `expect_used`, `panic` (denied by clippy)
 - **Errors**: `thiserror` for libraries, `anyhow` for binaries

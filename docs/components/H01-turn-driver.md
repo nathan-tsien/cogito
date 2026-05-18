@@ -78,3 +78,21 @@ Init → PromptBuilt → ModelCalling → ModelCompleted
 - ARCHITECTURE.md §"Turn state machine"
 - ADR-0003 (state-machine Turn Driver)
 - AGENTS.md §"Inviolable design principles" #1, #3, #4
+
+## Implementation note (v0.1)
+
+H01 runs as a per-turn tokio task spawned by `SessionActor`
+(`crates/cogito-core/src/runtime/actor.rs`). The FSM is an `enum
+TurnState` where each variant carries the data its transition needs
+(prompt, stream, surface, strategy), so the type system enforces
+state-data invariants and forbids skipped transitions.
+
+A single TurnDriver task = one `input → final answer or paused`
+cycle. Multi-turn tool loops are an *inner* loop within the FSM
+(re-entering `TurnState::Init` after `DispatchOutcome::AllSync`); a
+paused turn ends the current task and is later resumed by *another*
+TurnDriver task that starts at `TurnState::ToolDispatching` with the
+async result. The actor coordinates the handoff.
+
+See `docs/superpowers/specs/2026-05-18-runtime-h01-execution-model-design.md`
+§5 for the FSM pseudocode and ADR-0006 for the load-bearing decisions.

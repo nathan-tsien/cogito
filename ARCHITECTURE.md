@@ -474,7 +474,7 @@ for a strategy by name.
 | `cogito-core` | Brain + Runtime | v0.1 | `harness/` is Brain (H01–H10), may only `use cogito_protocol::*`. `runtime/` is the hosting platform (DI, panic catch, resource budget, `BrainSpawner` impl). |
 | `cogito-store-jsonl` | Session | v0.1 | First backend: per-session JSONL files, `fsync` per event. Layout: `<root>/sessions/<session_id>.jsonl`. |
 | `cogito-store-postgres` | Session | v0.4 | Production multi-replica backend. |
-| `cogito-store-http` | Session | v0.6 | Generic HTTP-backed adapter against the Storage HTTP wire protocol (ADR-0006). |
+| `cogito-store-http` | Session | v0.6 | Generic HTTP-backed adapter against the Storage HTTP wire protocol (ADR-0013). |
 | `cogito-model` | Boundary | v0.1 | `ModelGateway` impls (Anthropic + OpenAI). Handles ContentBlock ↔ provider format serialization. |
 | `cogito-tools` | Hands | v0.1 | `BuiltinToolProvider` + `CompositeToolProvider` utility. |
 | `cogito-tools-multimedia` | Hands | v0.2+ | Audio / video / image tools (transcribe, summarize, extract_frames, describe_image, ...). |
@@ -505,8 +505,11 @@ Notes:
 | `ContentBlock` (type) | (value type) | Tagged union of `Text` / `ToolUse` / `ToolResult` / `Image` / ... | v0.1 (Text + ToolUse + ToolResult); `Image` lands v0.2 |
 | `ModelGateway` | `cogito-model` | Streamed turn against an external LLM; ContentBlock serialization | v0.1 |
 | `ToolProvider` | `cogito-tools` / `cogito-mcp` / `cogito-subagent` / consumer | Tool catalog + `invoke(name, args, ctx) → InvokeOutcome` | v0.1 |
-| `JobManager` | `cogito-jobs` / consumer | Async work state tracking (no `submit` — that's a `ToolProvider` internal concern) | v0.1 |
+| `JobManager` | `cogito-jobs` / consumer | Async work state tracking (`status` / `result` / `cancel`) plus mailbox-injected completion callback (`on_complete`). Submission lives on the concrete `LocalJobManager` type per ADR-0004 (Hands-internal). | v0.1 |
 | `HookHandler` | (Sprint 6) | Brain-side policy gates (see H09) | v0.1 |
+| `StreamEvent` (type) | (value type) | Real-time event stream observable via `SessionHandle::subscribe()`; broadcast fanout; per-chunk text deltas; not persisted (see spec §7) | v0.1 |
+| `ExecutionClass` (type) | (value type) | `ToolDescriptor.execution_class` ∈ {`AlwaysSync`, `AlwaysAsync`, `Adaptive`}; H08 uses it to validate `InvokeOutcome` variant (see spec §6) | v0.1 |
+| `TurnOutcome` / `TurnFailureReason` (types) | (value types) | Terminal turn states + structured failure reasons returned by the actor (see spec §9) | v0.1 |
 | `StorageSystem` | `cogito-storage-*` / consumer | Non-text I/O via URI strings: `resolve` / `open` / `create` | v0.2 |
 | `BrainSpawner` | `cogito-core::runtime` | Recursive Brain spawning — used only by `cogito-subagent` | v0.3 |
 | `MetricsRecorder` | `cogito-observability-otel` / consumer | Pluggable metrics sink (no hard Prometheus dep) | v0.4 |
@@ -529,7 +532,7 @@ adds a specific capability without breaking prior protocol guarantees
 | **v0.3** | Subagent | `BrainSpawner` trait + `cogito-subagent` crate + 4 subagent tools + session metadata (`parent_session_id`, `depth`) + new `ConversationEvent` variants |
 | **v0.4** | SaaS-ready | `cogito-store-postgres` + `cogito-storage-s3` + `TenantContext` (optional field on `ExecCtx`) + `MetricsRecorder` trait + `cogito-observability-otel` + resource budget enforcement + ADR-0010 / 0011 (sandbox lifecycle, credential isolation) |
 | **v0.5** | Multimedia breadth | Expand `cogito-tools-multimedia` (extract_frames, summarize_video, describe_image, analyze_frame, synthesize_speech) + opt-in `model_visible` ContentBlock wired through ModelGateway adapters |
-| **v0.6** | Hardening | Hook policy maturity + load tests + soak tests + migration tooling docs + `cogito-storage-http` + Storage HTTP wire protocol (ADR-0006) |
+| **v0.6** | Hardening | Hook policy maturity + load tests + soak tests + migration tooling docs + `cogito-storage-http` + Storage HTTP wire protocol (ADR-0013) |
 | **v1.0** | API freeze | Public API stability commitment + event log forward-compat strict mode + 1.0 GA release |
 | **v1.x+** | Advanced | Resource Registry (P4) + cross-brain hand sharing + real-time video + generative video + MCP resources/prompts/sampling |
 
@@ -542,13 +545,14 @@ adds a specific capability without breaking prior protocol guarantees
 | ADR-0003 | State-machine Turn Driver | Accepted (v0.1) |
 | ADR-0004 | Brain / Hands / Session crate boundaries | Accepted (v0.1) |
 | **ADR-0005** | **Production scope, quality gates, SLO posture, compatibility commitments** | **Accepted (v0.1)** |
-| ADR-0006 | Storage HTTP wire protocol | TBD (v0.6) |
+| **ADR-0006** | **Runtime + H01 Turn Driver execution model** | **Accepted (v0.1)** |
 | ADR-0007 | `StorageSystem` trait + URI scheme + `ContentBlock` upgrade | TBD (v0.2) |
 | ADR-0008 | Multimedia tool conventions (MIME, `model_visible` flag, etc.) | TBD (v0.2) |
 | ADR-0009 | Subagent execution model (BrainSpawner + 4 tools + session tree) | TBD (v0.3) |
 | ADR-0010 | Sandbox lifecycle (lazy provisioning, pets-vs-cattle) | TBD (v0.4) |
 | ADR-0011 | Credential isolation (sandbox proxy pattern, vault integration) | TBD (v0.4) |
 | ADR-0012 | TenantContext propagation + multi-tenant SaaS conventions | TBD (v0.4) |
+| ADR-0013 | Storage HTTP wire protocol (moved from ADR-0006 in 2026-05-18 to free 0006 for the runtime ADR) | TBD (v0.6) |
 
 ## v0.1 scope (IN / OUT)
 
@@ -592,7 +596,7 @@ See **ADR-0005** for the authoritative version of these commitments.
 - **Event log schema**: every `ConversationEvent` carries `schema_version: u32` from day 1. 0.x allows breaking changes if accompanied by a migration tool. At 1.0 we switch to strict forward-compat (any future version must read any past version).
 - **Content blocks**: new variants are additive (b-档 compatible). Removing variants is a major version event.
 - **StorageSystem URI resolvability**: not guaranteed across time; lifecycle is the backend's concern.
-- **Storage HTTP wire protocol**: defined at v0.6 (ADR-0006); independent versioning from event log schema.
+- **Storage HTTP wire protocol**: defined at v0.6 (ADR-0013); independent versioning from event log schema.
 
 ## Design references
 
@@ -606,5 +610,6 @@ See **ADR-0005** for the authoritative version of these commitments.
 1. Read `AGENTS.md` for working rules and inviolable principles
 2. Read `ROADMAP.md` for the current version and sprint
 3. Read the design doc for the component you're touching: `docs/components/H0X-*.md`
-4. Read the relevant ADR — especially **ADR-0004** for layer / import rules and **ADR-0005** for quality gates
-5. Run `just test` to verify your environment
+4. Read the relevant ADR — especially **ADR-0004** for layer / import rules, **ADR-0005** for quality gates, and **ADR-0006** for the runtime + H01 execution model
+5. For runtime / threading / lifecycle questions, the detailed reference is `docs/superpowers/specs/2026-05-18-runtime-h01-execution-model-design.md` (ADR-0006 is the durable contract; the spec is the full discussion)
+6. Run `just test` to verify your environment

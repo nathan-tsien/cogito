@@ -4,10 +4,10 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 cogito-protocol.workspace = true
-cogito-conversation.workspace = true
 
 tokio.workspace = true
 async-trait.workspace = true
