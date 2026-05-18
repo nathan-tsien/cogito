@@ -61,7 +61,7 @@ Do not propagate panics or `unwrap`s to the Harness layer.
 ### 6. Brain may only see Hands / Session / Boundary through Protocol
 
 `cogito-core::harness` is Brain. It may import **only** `cogito-protocol`.
-Concrete crates (`cogito-conversation`, `cogito-model`, `cogito-tools`,
+Concrete crates (`cogito-store-jsonl`, `cogito-model`, `cogito-tools`,
 `cogito-sandbox`, `cogito-jobs`, `cogito-mcp`) are imported by the
 Runtime layer and injected into Brain as trait objects.
 

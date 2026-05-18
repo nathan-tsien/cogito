@@ -151,7 +151,7 @@ storage HTTP backend.
 - [ ] Load test scaffolding: 1000 concurrent sessions per process target
 - [ ] Soak test: 24h continuous run with no leaks / no degradation
 - [ ] Event log migration tooling (v(N-1) → vN converter, with `replay_equivalence` test)
-- [ ] **ADR-0006**: Storage HTTP wire protocol
+- [ ] **ADR-0013**: Storage HTTP wire protocol
 - [ ] `cogito-storage-http` crate: HTTP backend adapter
 - [ ] Tag `v0.6.0`
 

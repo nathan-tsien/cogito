@@ -115,7 +115,7 @@ respective components.
 | `ConversationEvent` schema | Breaking allowed with migration tool + runbook; `schema_version` carries forward | Strict forward-compat: every future version reads every past version |
 | `ContentBlock` variants | Additive only (new variants OK); removing variants = major version | Same |
 | `StorageSystem` URI resolvability | Not guaranteed across time (backend's concern) | Same |
-| Storage HTTP wire protocol (ADR-0006, lands v0.6) | Independent versioning from event log; documented matrix in ADR-0006 | Same |
+| Storage HTTP wire protocol (ADR-0013, lands v0.6) | Independent versioning from event log; documented matrix in ADR-0013 | Same |
 | Trait shapes (`ToolProvider`, `JobManager`, etc.) | Breaking allowed in minor; default-method additions are non-breaking | SemVer strict |
 | Strategy YAML schema | Additive fields only (existing fields keep meaning) | Same; deprecation cycle for removals |
 

@@ -47,7 +47,7 @@ just inspect <session>   # dump a session's event log
 just replay <session>    # replay a session
 ```
 
-Prereqs: Rust 1.83+ (rustup), `cargo install just cargo-nextest`.
+Prereqs: Rust 1.85+ (rustup; edition 2024 requirement — see `rust-toolchain.toml`), `cargo install just cargo-nextest`.
 
 When finishing a task:
 1. `just fmt && just fix <crate>` → clean

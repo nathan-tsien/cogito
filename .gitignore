@@ -17,3 +17,6 @@ Thumbs.db
 *.db-shm
 *.db-wal
 .cogito/
+
+# Local debug / scratch artefacts (e.g. Claude Code session graphs)
+debug/
