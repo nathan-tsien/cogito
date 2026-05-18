@@ -4,6 +4,9 @@
 
 [advisories]
 yanked = "deny"
+# RUSTSEC-2024-0436: `paste` is unmaintained. Pulled transitively by ratatui -> cogito-tui.
+# No drop-in safe upgrade; ratatui upstream tracks the migration. Revisit when ratatui drops paste.
+ignore = ["RUSTSEC-2024-0436"]
 
 [licenses]
 allow = [
@@ -18,12 +21,18 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "MPL-2.0",
+    # webpki-roots ships the Mozilla CA bundle; CDLA-Permissive-2.0 is a permissive data license.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.93
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Internal workspace crates are declared as `{ path = "..." }` without an explicit
+# version, which cargo-deny reads as a wildcard. That is the standard pattern for
+# unpublished workspace members and not a real wildcard pin.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"

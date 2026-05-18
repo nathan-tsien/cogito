@@ -21,6 +21,10 @@ rust-version = "1.85"
 authors = ["Nathan(qiannengsheng@163.com)"]
 license = "Apache-2.0"
 repository = "https://github.com/nathan-tsien/cogito"
+# Not published to crates.io until v1.0 GA (see ADR-0005). Each member
+# opts in via `publish.workspace = true`; this also lets cargo-deny's
+# `allow-wildcard-paths` apply to our internal path dependencies.
+publish = false
 
 [workspace.dependencies]
 # Internal crates
