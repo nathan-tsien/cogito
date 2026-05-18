@@ -91,6 +91,7 @@ Each crate maps to exactly one layer in the Brain / Hands / Session design (ADR-
 - Errors: `thiserror` for libraries, `anyhow` for binaries
 - All workspace deps go through `[workspace.dependencies]`; members declare `{ workspace = true }`
 - `RUSTFLAGS=-Dwarnings` via `.cargo/config.toml` — warnings break the build
+- **All code comments (doc comments `///`, module docs `//!`, inline `//`) are written in English.** Chinese is reserved for design docs (`docs/superpowers/specs/`), ADRs, commit messages, and human-facing conversation. Rationale: code is read by future maintainers and AI agents who default to English; mixing languages in source hurts grep and review.
 
 ## Testing requirements
 
