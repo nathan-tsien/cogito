@@ -12,9 +12,8 @@
 //! - [`turn`]: `TurnOutcome`, `TurnFailureReason`
 //! - [`error`]: shared error kinds and helpers
 //!
-//! Modules `tool`, `stream`, `job`, `turn` land in Tasks 7-10 of the
-//! Sprint 0 closure plan; their declarations are commented out until
-//! the corresponding implementation tasks ship.
+//! All v0.1 contract modules ship as part of Sprint 0 (Tasks 7-10 of
+//! the Sprint 0 closure plan).
 
 pub mod error;
 pub mod job;
