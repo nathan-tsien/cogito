@@ -7,16 +7,14 @@ license.workspace = true
 
 [dependencies]
 cogito-protocol.workspace = true
-cogito-conversation.workspace = true
-cogito-model.workspace = true
-cogito-tools.workspace = true
-cogito-sandbox.workspace = true
-cogito-jobs.workspace = true
 
 tokio.workspace = true
 tokio-stream.workspace = true
+tokio-util.workspace = true
 futures.workspace = true
 async-trait.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

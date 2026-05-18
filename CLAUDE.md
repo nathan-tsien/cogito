@@ -84,7 +84,7 @@ Each crate maps to exactly one layer in the Brain / Hands / Session design (ADR-
 
 ## Coding standards (workspace-wide)
 
-- Rust 2024 edition, MSRV 1.83
+- Rust 2024 edition, MSRV 1.85 (edition 2024 stabilized in 1.85)
 - `unsafe_code = "forbid"`, `missing_docs = "warn"` at workspace level
 - Clippy: `pedantic` (warn) plus `unwrap_used`, `expect_used`, `panic`, `dbg_macro` all **deny**
 - `print_stdout` / `print_stderr` warn — use `tracing` instead

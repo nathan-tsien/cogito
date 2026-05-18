@@ -76,7 +76,7 @@ See ADR-0004 for the full layer map and import rules. See
 
 ## Coding standards
 
-- **Edition**: Rust 2024, MSRV 1.83
+- **Edition**: Rust 2024, MSRV 1.85 (edition 2024 stabilized in 1.85)
 - **Lints**: `#![warn(clippy::pedantic)]` at crate root
 - **Forbidden**: `unwrap_used`, `expect_used`, `panic` (denied by clippy)
 - **Errors**: `thiserror` for libraries, `anyhow` for binaries

@@ -12,7 +12,10 @@ path = "src/main.rs"
 [dependencies]
 cogito-core.workspace = true
 cogito-protocol.workspace = true
-cogito-conversation.workspace = true
+cogito-store-jsonl.workspace = true
+cogito-model.workspace = true
+cogito-tools.workspace = true
+cogito-jobs.workspace = true
 
 tokio.workspace = true
 anyhow.workspace = true
