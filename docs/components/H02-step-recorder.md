@@ -64,3 +64,27 @@ small per-session text-delta buffer.
 - ARCHITECTURE.md §"State storage planes" P1
 - ADR-0002 (event-sourced conversation log)
 - AGENTS.md §"Inviolable design principles" #2
+
+## Implementation note (v0.1)
+
+H02 has no standalone object in v0.1. Logically it splits into:
+
+- **Producer side**: every call site (TurnDriver state transitions,
+  actor main loop, hooks) sends `PersistCommand::Append { event, ack }`
+  on a `persist_tx: mpsc::Sender<PersistCommand>` (capacity 256), then
+  awaits the `ack` oneshot before transitioning.
+
+- **Consumer side**: a `store_writer` tokio subtask owns the
+  `ConversationStore` handle (`crates/cogito-core/src/runtime/store_writer.rs`).
+  It batches text-delta events on a 200ms timer or 500-char threshold,
+  force-flushes before any non-delta event, calls `store.append` with
+  per-event `fsync` (via `spawn_blocking`), and signals the `ack` oneshot.
+
+The producer/consumer split is what makes the inviolable rule "every
+state transition writes an event before transitioning" cheap: the
+producer awaits one mpsc round-trip + one ack — the actor's mailbox
+stays polled the whole time because the producer is the TurnDriver
+task, not the actor itself.
+
+See `docs/superpowers/specs/2026-05-18-runtime-h01-execution-model-design.md`
+§8 for fsync strategy, batching rules, and the Sprint 1 SLO benchmark plan.

@@ -505,8 +505,11 @@ Notes:
 | `ContentBlock` (type) | (value type) | Tagged union of `Text` / `ToolUse` / `ToolResult` / `Image` / ... | v0.1 (Text + ToolUse + ToolResult); `Image` lands v0.2 |
 | `ModelGateway` | `cogito-model` | Streamed turn against an external LLM; ContentBlock serialization | v0.1 |
 | `ToolProvider` | `cogito-tools` / `cogito-mcp` / `cogito-subagent` / consumer | Tool catalog + `invoke(name, args, ctx) → InvokeOutcome` | v0.1 |
-| `JobManager` | `cogito-jobs` / consumer | Async work state tracking (no `submit` — that's a `ToolProvider` internal concern) | v0.1 |
+| `JobManager` | `cogito-jobs` / consumer | Async work state tracking (`status` / `result` / `cancel`) plus mailbox-injected completion callback (`on_complete`). Submission lives on the concrete `LocalJobManager` type per ADR-0004 (Hands-internal). | v0.1 |
 | `HookHandler` | (Sprint 6) | Brain-side policy gates (see H09) | v0.1 |
+| `StreamEvent` (type) | (value type) | Real-time event stream observable via `SessionHandle::subscribe()`; broadcast fanout; per-chunk text deltas; not persisted (see spec §7) | v0.1 |
+| `ExecutionClass` (type) | (value type) | `ToolDescriptor.execution_class` ∈ {`AlwaysSync`, `AlwaysAsync`, `Adaptive`}; H08 uses it to validate `InvokeOutcome` variant (see spec §6) | v0.1 |
+| `TurnOutcome` / `TurnFailureReason` (types) | (value types) | Terminal turn states + structured failure reasons returned by the actor (see spec §9) | v0.1 |
 | `StorageSystem` | `cogito-storage-*` / consumer | Non-text I/O via URI strings: `resolve` / `open` / `create` | v0.2 |
 | `BrainSpawner` | `cogito-core::runtime` | Recursive Brain spawning — used only by `cogito-subagent` | v0.3 |
 | `MetricsRecorder` | `cogito-observability-otel` / consumer | Pluggable metrics sink (no hard Prometheus dep) | v0.4 |
@@ -606,5 +609,6 @@ See **ADR-0005** for the authoritative version of these commitments.
 1. Read `AGENTS.md` for working rules and inviolable principles
 2. Read `ROADMAP.md` for the current version and sprint
 3. Read the design doc for the component you're touching: `docs/components/H0X-*.md`
-4. Read the relevant ADR — especially **ADR-0004** for layer / import rules and **ADR-0005** for quality gates
-5. Run `just test` to verify your environment
+4. Read the relevant ADR — especially **ADR-0004** for layer / import rules, **ADR-0005** for quality gates, and **ADR-0006** for the runtime + H01 execution model
+5. For runtime / threading / lifecycle questions, the detailed reference is `docs/superpowers/specs/2026-05-18-runtime-h01-execution-model-design.md` (ADR-0006 is the durable contract; the spec is the full discussion)
+6. Run `just test` to verify your environment
