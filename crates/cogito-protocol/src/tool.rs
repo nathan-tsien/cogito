@@ -11,13 +11,21 @@ use serde::{Deserialize, Serialize};
 // TODO(Task 8): replace with `crate::job::JobId` once that module lands.
 /// Placeholder for the `JobId` type; Task 8 of the Sprint 0 plan replaces
 /// this with a real Ulid-backed identifier in the `job` module.
+///
+/// `JobIdStub::default()` returns the all-zero id. The real `JobId`
+/// will return a freshly-generated Ulid from its `Default` impl, so
+/// any code relying on `Default` semantics needs updating in Task 8.
+#[deprecated(
+    since = "0.1.0",
+    note = "Sprint 0 Task 8 placeholder; use cogito_protocol::job::JobId once Task 8 lands. Do not depend on this in downstream code."
+)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct JobIdStub(pub u64);
 
 /// A tool exposed by a `ToolProvider`. `ToolDescriptor` is the metadata the
 /// LLM (and H05 Tool Surface Builder) sees; the actual call goes through
 /// `ToolProvider::invoke`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolDescriptor {
     /// Unique name; the LLM uses this in tool calls.
     pub name: String,
@@ -50,7 +58,8 @@ pub enum ExecutionClass {
 }
 
 /// Outcome of a single `ToolProvider::invoke` call.
-#[derive(Debug, Clone)]
+#[allow(deprecated)] // JobIdStub usage; remove with Task 8
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum InvokeOutcome {
     /// Result is available immediately.
     Sync(ToolResult),
@@ -65,7 +74,7 @@ pub enum InvokeOutcome {
 /// the multimodal upgrade lands; v0.1 uses plain text via the convenience
 /// constructor [`ToolResult::text`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum ToolResult {
     /// Successful output. v0.1 represents content as a list of opaque
     /// JSON values; v0.2 replaces this with `Vec<ContentBlock>`.

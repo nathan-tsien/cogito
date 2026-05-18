@@ -34,10 +34,12 @@ fn tool_descriptor_round_trips() -> serde_json::Result<()> {
     let back: ToolDescriptor = serde_json::from_str(&json)?;
     assert_eq!(descriptor.name, back.name);
     assert_eq!(descriptor.execution_class, back.execution_class);
+    assert_eq!(descriptor, back);
     Ok(())
 }
 
 #[test]
+#[allow(deprecated)]
 fn invoke_outcome_distinguishes_sync_and_async() {
     let sync_out = InvokeOutcome::Sync(ToolResult::Output(vec![]));
     assert!(matches!(sync_out, InvokeOutcome::Sync(_)));
@@ -63,5 +65,42 @@ fn tool_error_kind_serde_covers_all_variants() -> serde_json::Result<()> {
         let back: ToolErrorKind = serde_json::from_str(&json)?;
         assert_eq!(kind, back);
     }
+    Ok(())
+}
+
+#[test]
+fn tool_result_output_round_trips() -> serde_json::Result<()> {
+    let out = ToolResult::text("ok");
+    let json = serde_json::to_string(&out)?;
+    let back: ToolResult = serde_json::from_str(&json)?;
+    assert!(matches!(back, ToolResult::Output(ref v) if v.len() == 1));
+    Ok(())
+}
+
+#[test]
+fn tool_result_error_round_trips() -> serde_json::Result<()> {
+    let err = ToolResult::Error {
+        kind: ToolErrorKind::Timeout,
+        message: "deadline exceeded".into(),
+        retryable: false,
+    };
+    let json = serde_json::to_string(&err)?;
+    let back: ToolResult = serde_json::from_str(&json)?;
+    assert!(matches!(back, ToolResult::Error { kind: ToolErrorKind::Timeout, .. }));
+    Ok(())
+}
+
+#[test]
+#[allow(deprecated)]
+fn invoke_outcome_serde_roundtrips() -> serde_json::Result<()> {
+    let sync_out = InvokeOutcome::Sync(ToolResult::text("ok"));
+    let json = serde_json::to_string(&sync_out)?;
+    let back: InvokeOutcome = serde_json::from_str(&json)?;
+    assert!(matches!(back, InvokeOutcome::Sync(_)));
+
+    let async_out = InvokeOutcome::Async(cogito_protocol::tool::JobIdStub(42));
+    let json = serde_json::to_string(&async_out)?;
+    let back: InvokeOutcome = serde_json::from_str(&json)?;
+    assert!(matches!(back, InvokeOutcome::Async(stub) if stub.0 == 42));
     Ok(())
 }
