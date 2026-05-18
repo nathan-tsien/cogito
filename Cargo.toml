@@ -71,7 +71,7 @@ schemars = "0.8"
 # IDs and time
 uuid = { version = "1.10", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-ulid = "1.1"
+ulid = { version = "1.1", features = ["serde"] }
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }

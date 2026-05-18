@@ -17,7 +17,7 @@
 //! the corresponding implementation tasks ship.
 
 pub mod error;
-// pub mod job;
+pub mod job;
 // pub mod stream;
 pub mod tool;
 // pub mod turn;

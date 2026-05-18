@@ -3,6 +3,7 @@
 //! These tests pin down serde stability and enum coverage. They run as
 //! part of `cargo nextest run -p cogito-protocol`.
 
+use cogito_protocol::job::JobId;
 use cogito_protocol::tool::{
     ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolResult,
 };
@@ -39,13 +40,10 @@ fn tool_descriptor_round_trips() -> serde_json::Result<()> {
 }
 
 #[test]
-#[allow(deprecated)]
 fn invoke_outcome_distinguishes_sync_and_async() {
     let sync_out = InvokeOutcome::Sync(ToolResult::Output(vec![]));
     assert!(matches!(sync_out, InvokeOutcome::Sync(_)));
-    // TODO(Task 8): replace JobIdStub with cogito_protocol::job::JobId
-    // once the job module lands. The stub is a temporary u64 wrapper.
-    let async_out = InvokeOutcome::Async(cogito_protocol::tool::JobIdStub::default());
+    let async_out = InvokeOutcome::Async(JobId::default());
     assert!(matches!(async_out, InvokeOutcome::Async(_)));
 }
 
@@ -91,16 +89,19 @@ fn tool_result_error_round_trips() -> serde_json::Result<()> {
 }
 
 #[test]
-#[allow(deprecated)]
 fn invoke_outcome_serde_roundtrips() -> serde_json::Result<()> {
     let sync_out = InvokeOutcome::Sync(ToolResult::text("ok"));
     let json = serde_json::to_string(&sync_out)?;
     let back: InvokeOutcome = serde_json::from_str(&json)?;
     assert!(matches!(back, InvokeOutcome::Sync(_)));
 
-    let async_out = InvokeOutcome::Async(cogito_protocol::tool::JobIdStub(42));
+    let original_id = JobId::default();
+    let async_out = InvokeOutcome::Async(original_id);
     let json = serde_json::to_string(&async_out)?;
     let back: InvokeOutcome = serde_json::from_str(&json)?;
-    assert!(matches!(back, InvokeOutcome::Async(stub) if stub.0 == 42));
+    match back {
+        InvokeOutcome::Async(id) => assert_eq!(id, original_id),
+        InvokeOutcome::Sync(_) => unreachable!("expected Async variant"),
+    }
     Ok(())
 }
