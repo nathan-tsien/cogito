@@ -19,6 +19,13 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  layer-check:
+    runs-on: ubuntu-latest
+    needs: format
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-layer.sh
+
   clippy:
     runs-on: ubuntu-latest
     needs: format
@@ -39,3 +46,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --workspace --all-features
+
+  deny:
+    runs-on: ubuntu-latest
+    needs: format
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: EmbarkStudios/cargo-deny-action@v2
