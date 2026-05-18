@@ -90,8 +90,13 @@ impl ToolResult {
 /// Classification of why a tool call failed. The model only ever sees
 /// `ToolResult::Error`; this kind helps H09 hooks and H10 strategy decide
 /// whether to retry or surface to the user.
+///
+/// Marked `#[non_exhaustive]` so v0.2+ multimedia / MCP / subagent tools
+/// can introduce new failure shapes (e.g. `StorageUnavailable`,
+/// `McpServerDisconnected`) without breaking downstream `match` arms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ToolErrorKind {
     /// H07 schema validation rejected the args.
     InvalidArgs,

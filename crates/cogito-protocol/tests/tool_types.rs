@@ -84,7 +84,13 @@ fn tool_result_error_round_trips() -> serde_json::Result<()> {
     };
     let json = serde_json::to_string(&err)?;
     let back: ToolResult = serde_json::from_str(&json)?;
-    assert!(matches!(back, ToolResult::Error { kind: ToolErrorKind::Timeout, .. }));
+    assert!(matches!(
+        back,
+        ToolResult::Error {
+            kind: ToolErrorKind::Timeout,
+            ..
+        }
+    ));
     Ok(())
 }
 

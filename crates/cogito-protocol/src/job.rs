@@ -89,7 +89,12 @@ pub struct JobCompletionEvent {
 }
 
 /// Error kind for `JobManager` operations.
+///
+/// Marked `#[non_exhaustive]` so v0.4 distributed backends can add variants
+/// (e.g. `AlreadyCompleted`, `PermissionDenied`, `Timeout`) without forcing
+/// a SemVer-major bump on downstream `match` arms.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum JobError {
     /// `JobManager` does not know about this `JobId` (typo, expired, or
     /// state lost across restart).
