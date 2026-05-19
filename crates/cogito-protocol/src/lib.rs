@@ -7,19 +7,21 @@
 //!
 //! Module map (1:1 with the Brain/Hands/Session boundaries in ADR-0004):
 //! - [`content`]: `ContentBlock` — wire-format unit shared between model, tools, persisted events
-//! - [`tool`]: `ToolProvider` trait, `ToolDescriptor`, `InvokeOutcome`, `ExecutionClass`
-//! - [`stream`]: `StreamEvent` enum (real-time fanout to subscribers)
+//! - [`error`]: shared error kinds and helpers
+//! - [`event`]: `ConversationEvent` + `EventPayload` + `SCHEMA_VERSION` (persisted event log)
+//! - [`ids`]: strongly-typed ULID newtypes (`EventId`, `SessionId`, `TurnId`)
 //! - [`job`]: `JobManager` trait, `JobId`, `JobStatus`, `JobCompletionEvent`
 //! - [`session`]: `SessionMeta` — per-session pass-through metadata
+//! - [`stream`]: `StreamEvent` enum (real-time fanout to subscribers)
+//! - [`tool`]: `ToolProvider` trait, `ToolDescriptor`, `InvokeOutcome`, `ExecutionClass`
 //! - [`turn`]: `TurnOutcome`, `TurnFailureReason`
-//! - [`error`]: shared error kinds and helpers
-//! - [`ids`]: strongly-typed ULID newtypes (`EventId`, `SessionId`, `TurnId`)
 //!
 //! All v0.1 contract modules ship as part of Sprint 0 (Tasks 7-10 of
-//! the Sprint 0 closure plan).
+//! the Sprint 0 closure plan) and Sprint 1 (`event`, `store`).
 
 pub mod content;
 pub mod error;
+pub mod event;
 pub mod ids;
 pub mod job;
 pub mod session;
@@ -28,5 +30,6 @@ pub mod tool;
 pub mod turn;
 
 pub use content::ContentBlock;
+pub use event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
 pub use ids::{EventId, SessionId, TurnId};
 pub use session::SessionMeta;
