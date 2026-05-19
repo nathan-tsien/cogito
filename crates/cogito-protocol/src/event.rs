@@ -132,26 +132,19 @@ pub enum EventPayload {
     /// Recorded at the start of the `Init -> ContextManaged` transition.
     /// v0.1 ships an immediate companion `ContextManageCompleted` because
     /// H11 is a pass-through; ADR-0008 will replace the body with real
-    /// context decisions.
-    ContextManageEntered {
-        /// Turn this event belongs to.
-        turn_id: TurnId,
-    },
+    /// context decisions. `turn_id` is on the envelope.
+    ContextManageEntered {},
 
     /// Recorded at the end of the `ContextManaged -> PromptBuilt`
-    /// transition. v0.1 pass-through carries no decision body.
-    ContextManageCompleted {
-        /// Turn this event belongs to.
-        turn_id: TurnId,
-    },
+    /// transition. v0.1 pass-through carries no decision body. `turn_id`
+    /// is on the envelope.
+    ContextManageCompleted {},
 
     /// Recorded after H04 composes the prompt and H05 builds the tool
     /// surface. Carries metadata only — the full prompt is NOT persisted
     /// (event log is a state-recovery source, not a prompt cache; see
-    /// ADR-0007).
+    /// ADR-0007). `turn_id` is on the envelope.
     PromptComposed {
-        /// Turn this event belongs to.
-        turn_id: TurnId,
         /// Provider model identifier used for this call.
         model: String,
         /// Number of tool descriptors in the surface.
@@ -159,10 +152,9 @@ pub enum EventPayload {
     },
 
     /// Recorded at the start of the `PromptBuilt -> ModelCalling`
-    /// transition (right before the gateway stream opens).
+    /// transition (right before the gateway stream opens). `turn_id` is
+    /// on the envelope.
     ModelCallStarted {
-        /// Turn this event belongs to.
-        turn_id: TurnId,
         /// Provider model identifier.
         model: String,
     },

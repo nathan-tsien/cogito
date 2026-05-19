@@ -299,7 +299,7 @@
       }
     },
     {
-      "description": "Recorded at the start of the `Init -> ContextManaged` transition. v0.1 ships an immediate companion `ContextManageCompleted` because H11 is a pass-through; ADR-0008 will replace the body with real context decisions.",
+      "description": "Recorded at the start of the `Init -> ContextManaged` transition. v0.1 ships an immediate companion `ContextManageCompleted` because H11 is a pass-through; ADR-0008 will replace the body with real context decisions. `turn_id` is on the envelope.",
       "type": "object",
       "required": [
         "data",
@@ -307,16 +307,7 @@
       ],
       "properties": {
         "data": {
-          "type": "object",
-          "required": [
-            "turn_id"
-          ],
-          "properties": {
-            "turn_id": {
-              "description": "Turn this event belongs to.",
-              "type": "string"
-            }
-          }
+          "type": "object"
         },
         "type": {
           "type": "string",
@@ -327,7 +318,7 @@
       }
     },
     {
-      "description": "Recorded at the end of the `ContextManaged -> PromptBuilt` transition. v0.1 pass-through carries no decision body.",
+      "description": "Recorded at the end of the `ContextManaged -> PromptBuilt` transition. v0.1 pass-through carries no decision body. `turn_id` is on the envelope.",
       "type": "object",
       "required": [
         "data",
@@ -335,16 +326,7 @@
       ],
       "properties": {
         "data": {
-          "type": "object",
-          "required": [
-            "turn_id"
-          ],
-          "properties": {
-            "turn_id": {
-              "description": "Turn this event belongs to.",
-              "type": "string"
-            }
-          }
+          "type": "object"
         },
         "type": {
           "type": "string",
@@ -355,7 +337,7 @@
       }
     },
     {
-      "description": "Recorded after H04 composes the prompt and H05 builds the tool surface. Carries metadata only — the full prompt is NOT persisted (event log is a state-recovery source, not a prompt cache; see ADR-0007).",
+      "description": "Recorded after H04 composes the prompt and H05 builds the tool surface. Carries metadata only — the full prompt is NOT persisted (event log is a state-recovery source, not a prompt cache; see ADR-0007). `turn_id` is on the envelope.",
       "type": "object",
       "required": [
         "data",
@@ -366,8 +348,7 @@
           "type": "object",
           "required": [
             "model",
-            "surface_size",
-            "turn_id"
+            "surface_size"
           ],
           "properties": {
             "model": {
@@ -379,10 +360,6 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0.0
-            },
-            "turn_id": {
-              "description": "Turn this event belongs to.",
-              "type": "string"
             }
           }
         },
@@ -395,7 +372,7 @@
       }
     },
     {
-      "description": "Recorded at the start of the `PromptBuilt -> ModelCalling` transition (right before the gateway stream opens).",
+      "description": "Recorded at the start of the `PromptBuilt -> ModelCalling` transition (right before the gateway stream opens). `turn_id` is on the envelope.",
       "type": "object",
       "required": [
         "data",
@@ -405,16 +382,11 @@
         "data": {
           "type": "object",
           "required": [
-            "model",
-            "turn_id"
+            "model"
           ],
           "properties": {
             "model": {
               "description": "Provider model identifier.",
-              "type": "string"
-            },
-            "turn_id": {
-              "description": "Turn this event belongs to.",
               "type": "string"
             }
           }

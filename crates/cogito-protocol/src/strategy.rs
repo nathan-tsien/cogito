@@ -35,7 +35,7 @@ pub struct HarnessStrategy {
     /// Sampling parameters + model id, copied into `ModelInput.params`.
     pub model_params: ModelParams,
     /// Safety budget: maximum number of inner-loop iterations
-    /// (Init -> ToolDispatching -> Init -> ...) before H01 stops the turn
+    /// (Init -> `ToolDispatching` -> Init -> ...) before H01 stops the turn
     /// with `TurnFailureReason::MaxTurnsExceeded`.
     pub max_turns: u32,
 }

@@ -181,7 +181,7 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
         envelope(
             9,
             Some(turn),
-            EventPayload::ContextManageEntered { turn_id: turn },
+            EventPayload::ContextManageEntered {},
         ),
     ]
 }

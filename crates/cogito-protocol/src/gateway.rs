@@ -6,8 +6,10 @@
 //!   for the gateway-pre-aggregation decision (X mode)
 //! - ADR-0006 §"Sprint 2 protocol-layer additions" for the layer-rule rationale
 
+use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
+use crate::ExecCtx;
 use crate::content::ContentBlock;
 use crate::tool::ToolDescriptor;
 
@@ -201,9 +203,6 @@ pub enum ModelError {
     #[error("cancelled")]
     Cancelled,
 }
-
-use crate::ExecCtx;
-use futures::stream::BoxStream;
 
 /// Boundary contract between Brain and external LLM providers.
 ///

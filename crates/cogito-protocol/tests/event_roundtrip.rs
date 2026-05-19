@@ -13,9 +13,7 @@ fn context_manage_entered_round_trip() -> serde_json::Result<()> {
         turn_id: Some(TurnId::new()),
         seq: 1,
         ts: Utc::now(),
-        payload: EventPayload::ContextManageEntered {
-            turn_id: TurnId::new(),
-        },
+        payload: EventPayload::ContextManageEntered {},
     };
     let back: ConversationEvent = serde_json::from_str(&serde_json::to_string(&evt)?)?;
     assert_eq!(evt.event_id, back.event_id);
@@ -29,7 +27,6 @@ fn context_manage_entered_round_trip() -> serde_json::Result<()> {
 #[test]
 fn prompt_composed_round_trip() -> serde_json::Result<()> {
     let payload = EventPayload::PromptComposed {
-        turn_id: TurnId::new(),
         model: "claude-opus-4-7".into(),
         surface_size: 3,
     };
@@ -41,7 +38,6 @@ fn prompt_composed_round_trip() -> serde_json::Result<()> {
 #[test]
 fn model_call_started_round_trip() -> serde_json::Result<()> {
     let payload = EventPayload::ModelCallStarted {
-        turn_id: TurnId::new(),
         model: "gpt-4o-mini".into(),
     };
     let back: EventPayload = serde_json::from_str(&serde_json::to_string(&payload)?)?;
