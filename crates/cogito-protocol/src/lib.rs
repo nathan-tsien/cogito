@@ -10,6 +10,7 @@
 //! - [`tool`]: `ToolProvider` trait, `ToolDescriptor`, `InvokeOutcome`, `ExecutionClass`
 //! - [`stream`]: `StreamEvent` enum (real-time fanout to subscribers)
 //! - [`job`]: `JobManager` trait, `JobId`, `JobStatus`, `JobCompletionEvent`
+//! - [`session`]: `SessionMeta` — per-session pass-through metadata
 //! - [`turn`]: `TurnOutcome`, `TurnFailureReason`
 //! - [`error`]: shared error kinds and helpers
 //! - [`ids`]: strongly-typed ULID newtypes (`EventId`, `SessionId`, `TurnId`)
@@ -21,9 +22,11 @@ pub mod content;
 pub mod error;
 pub mod ids;
 pub mod job;
+pub mod session;
 pub mod stream;
 pub mod tool;
 pub mod turn;
 
 pub use content::ContentBlock;
 pub use ids::{EventId, SessionId, TurnId};
+pub use session::SessionMeta;
