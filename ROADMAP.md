@@ -6,7 +6,7 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprint 0 complete; Sprint 1 (H02 + JSONL store + SLO benchmark) entering implementation.
+> **v0.1 · Foundation** — Sprint 0 + Sprint 1 complete; Sprint 2 (Minimal Loop) next.
 
 ## Version plan
 
@@ -28,13 +28,17 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] Toolchain aligned to MSRV 1.85 (edition 2024 requirement)
 
 #### Sprint 1 · H02 Step Recorder + JSONL store (1.5 day)
-- [ ] `cogito-protocol` defines `ConversationEvent` with `schema_version: u32` + `Vec<ContentBlock>` payload (Text + ToolUse + ToolResult variants)
-- [ ] `cogito-protocol` defines `ConversationStore` trait
-- [ ] `cogito-store-jsonl` implementation: per-session file, `fsync` per event, append-only
-- [ ] Contract test infrastructure (shared test consumed by every backend crate)
-- [ ] `cogito-core::harness::step_recorder` writes events
-- [ ] Text-delta batching: 200ms or 500 chars; explicit flush on transition
-- [ ] Benchmark: 10K events, target P99 write < 5 ms
+- [x] `cogito-protocol` defines `ConversationEvent` with `schema_version: u32` + `Vec<ContentBlock>` payload (Text + ToolUse + ToolResult variants)
+- [x] `cogito-protocol` defines `ConversationStore` trait
+- [x] `cogito-store-jsonl` implementation: per-session file, `flush` per event, append-only (durability scope: dev/debug — see ADR-0007)
+- [x] Contract test infrastructure (shared test consumed by every backend crate)
+- [x] `cogito-core::harness::step_recorder` writes events
+- [x] Text-block batching: per content_block boundary (matches Codex / Claude Code; see ADR-0007 + H02 doc)
+- [x] Benchmark: `append_throughput` against JSONL; baseline at `docs/quality/v0.1-jsonl-baseline.md` (informational only, ADR-0005 §3 footnote)
+- [x] ADR-0007 ratified (event log as cross-language contract)
+- [x] JSON Schema artifact at `docs/schemas/conversation-event-v1.json` + CI drift gate
+- [x] Canonical fixture at `testing/cogito-test-fixtures/fixtures/sessions/sample-v1.jsonl`
+- [x] `AGENTS.md` §2 + §7 inviolable rules amended
 
 #### Sprint 2 · Minimal Loop (2 days)
 - [ ] `read_file` tool only (in `cogito-tools`)

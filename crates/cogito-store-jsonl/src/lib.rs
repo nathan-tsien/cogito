@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cogito_protocol::{
-    ConversationEvent, ConversationStore, SessionId, StoreError, SCHEMA_VERSION,
+    ConversationEvent, ConversationStore, SCHEMA_VERSION, SessionId, StoreError,
 };
 use dashmap::DashMap;
 use futures::stream::BoxStream;
