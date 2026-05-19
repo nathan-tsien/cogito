@@ -484,8 +484,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "cogito-protocol",
+ "futures",
  "serde",
  "serde_json",
+ "tokio",
  "uuid",
 ]
 
