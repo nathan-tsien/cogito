@@ -11,18 +11,17 @@ name = "cogito"
 path = "src/main.rs"
 
 [dependencies]
-cogito-core.workspace = true
-cogito-protocol.workspace = true
-cogito-store-jsonl.workspace = true
-cogito-model.workspace = true
-cogito-tools.workspace = true
-cogito-jobs.workspace = true
-
-tokio.workspace = true
-anyhow.workspace = true
-clap.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
+cogito-protocol = { workspace = true }
+cogito-core = { workspace = true }
+cogito-model = { workspace = true }
+cogito-tools = { workspace = true }
+cogito-store-jsonl = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+ulid = { workspace = true }
 
 [lints]
 workspace = true

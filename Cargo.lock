@@ -371,7 +371,6 @@ dependencies = [
  "anyhow",
  "clap",
  "cogito-core",
- "cogito-jobs",
  "cogito-model",
  "cogito-protocol",
  "cogito-store-jsonl",
@@ -379,6 +378,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "ulid",
 ]
 
 [[package]]
