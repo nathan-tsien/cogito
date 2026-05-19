@@ -54,7 +54,23 @@ Called by:
 - H01 Turn Driver, at lifecycle points (`pre_prompt`, `pre_dispatch`,
   `post_model`, `post_turn`, `on_error`).
 
-Never called by H02–H10 directly; H09 is invoked by H01 only.
+Never called by H02–H11 directly; H09 is invoked by H01 only.
+
+### `pre_prompt` lifecycle position
+
+`pre_prompt` fires at the **end** of the prompt-build phase, after the full
+five-component sequence H10 → H11 → H04 → H05 has produced a complete
+`ModelInput`. Hooks therefore observe the **post-context-management**
+prompt — they see compaction replacements, system-prompt injections, and
+tool-filter overrides from H11 as already-applied. A hook that rejects on
+"prompt mentions sensitive data" reasons against the final, ready-to-ship
+prompt, not the raw history.
+
+A future `pre_context` / `post_context` hook lifecycle point (around H11
+itself) is an open question for the Context Management initiative
+(ADR-0008). It is **not** in this design as of the 2026-05-19 PR #6
+amendment. See `docs/components/H01-turn-driver.md` §"Init →
+ContextManaged → PromptBuilt sequence" for the canonical walkthrough.
 
 ## Critical invariants
 

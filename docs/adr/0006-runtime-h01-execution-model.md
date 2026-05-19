@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-05-18)
+Accepted (2026-05-18) · **Amended 2026-05-19 (PR #6)** — FSM extended with `ContextManaged` state between `Init` and `PromptBuilt` to host H11 Context Manage. See §"Amendments" at the bottom of this ADR and the full design discussion in `docs/components/H01-turn-driver.md` §"Init → ContextManaged → PromptBuilt sequence". Mechanism design is pending ADR-0008 (Context Management initiative).
 
 ## Context
 
@@ -272,3 +272,67 @@ and models; the LLM must not need to understand the runtime's scheduling model
   `ExecutionClass`, `InvokeOutcome`, `TurnOutcome`, `TurnFailureReason`, and
   the updated `JobManager::on_complete` shape are all defined in
   `cogito-protocol` per this ADR
+
+## Amendments
+
+### 2026-05-19 — `ContextManaged` FSM state added (PR #6)
+
+**Change**: The H01 Turn Driver finite state machine adds a new state
+`ContextManaged` between `Init` and `PromptBuilt`. The FSM transition
+diagram becomes:
+
+```
+Init → ContextManaged → PromptBuilt → ModelCalling → … → {Completed | Paused | Failed}
+```
+
+**Rationale**: H04 Prompt Composer is required to be pure (no I/O) so it
+can be cached, replayed deterministically, and reasoned about by H03
+Resume Coordinator. But context compaction (summarization) inherently
+requires a model call, which H04 cannot perform. The previous design had
+no home for context-management decisions; they leaked between H04 (which
+would violate purity to implement them) and consumer code (which would
+violate encapsulation).
+
+A new component **H11 Context Manage** owns these decisions: compaction
+triggering and summarization, per-turn system-prompt injection, per-turn
+tool-filter overrides. H11 is allowed to do I/O (call ModelGateway for
+summarization) and writes its own events via H02. Placing H11's work in
+a dedicated FSM state — rather than inline in `Init` — makes (1) the
+summarization model call visible to H03 Resume Coordinator, (2) the
+"crashed mid-summarization" scenario distinguishable from "crashed mid-
+strategy-lookup", and (3) the work auditable via the persisted event log.
+
+**Scope of this amendment**:
+
+- ✅ `ContextManaged` state added to the FSM (above diagram).
+- ✅ H11 component slot reserved in AGENTS.md / ARCHITECTURE.md / component
+  docs. Brain is now an 11-component design.
+- ✅ Component collaboration documented: see `docs/components/H01-turn-driver.md`
+  §"Init → ContextManaged → PromptBuilt sequence" for the canonical
+  H10/H11/H04/H05/H09 walkthrough.
+- ✅ H04 doc updated: history projection rule will skip
+  `ContextCompacted`-superseded events and emit the compaction's
+  `replacement` instead. Strict append-only invariant of ADR-0007 holds —
+  compacted events are skipped during projection, not deleted from the log.
+- ✅ H05 doc updated: dynamic per-turn tool narrowing is H11's job; H05
+  only intersects strategy filter with any `ToolFilterOverridden` event
+  H11 wrote.
+- ✅ v0.1 Sprint 2 implements `ContextManaged` as a pass-through (no
+  work; immediate transition to `PromptBuilt`). The architectural slot
+  is reserved without changing v0.1 prompt-build behavior.
+
+**Out of scope for this amendment** (covered by Context Management
+initiative + ADR-0008, pending):
+
+- The `ContextManager` trait signature.
+- Specific `EventPayload` variants for context lifecycle (`ContextCompacted`,
+  `ContextDecisionRecorded`, `SystemPromptInjected`, `ToolFilterOverridden`).
+- Trigger policy (token-threshold vs strategy-flag vs hook-gated).
+- Summarization model selection.
+- Whether `pre_context`/`post_context` hook lifecycle points exist.
+- Composition of multiple compactions (cascading summaries, max depth).
+
+These are the central design work of the Context Management initiative.
+ADR-0008 will ratify them; this amendment only locks the architectural
+slot to ensure the initiative's deliverables are additive (no schema
+version bumps, no FSM breakage).

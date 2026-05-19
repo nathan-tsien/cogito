@@ -11,7 +11,7 @@ agent-loop capability inside their product.
 
 cogito provides:
 
-- **Brain**: 10-component Harness (H01–H10)
+- **Brain**: 11-component Harness (H01–H11; H11 Context Manage slot reserved 2026-05-19, mechanism pending ADR-0008)
 - **Session**: event-sourced `ConversationStore` trait + reference backend
 - **Hands / Boundary**: trait surface for tools, model gateway, jobs, hooks, storage
 - **Subagent (v0.3+)**: recursive Brain via `BrainSpawner`
@@ -29,7 +29,7 @@ These cannot be violated. If you find yourself wanting to violate one, **stop an
 
 ### 1. H01 Turn Driver is the only coordinator inside Harness
 
-Components H02–H10 do not call each other. They are called by H01.
+Components H02–H11 do not call each other. They are called by H01.
 Calling H05 from H04 is a bug, not a shortcut.
 
 ### 2. H02 Step Recorder writes events immediately
@@ -47,8 +47,11 @@ ask: "can this be rebuilt from the event log?"
 
 ### 4. Turn Driver is a state machine, not a function chain
 
-States: `Init`, `PromptBuilt`, `ModelCalling`, `ModelCompleted`,
-`ToolDispatching`, `TurnCompleted`, `TurnPaused`, `TurnFailed`.
+States: `Init`, `ContextManaged`, `PromptBuilt`, `ModelCalling`,
+`ModelCompleted`, `ToolDispatching`, `TurnCompleted`, `TurnPaused`,
+`TurnFailed`. (`ContextManaged` added 2026-05-19 by PR #6 as ADR-0006
+amendment; v0.1 ships as pass-through, real H11 implementation pending
+ADR-0008.)
 
 Each transition writes an event *before* transitioning.
 

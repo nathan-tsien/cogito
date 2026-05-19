@@ -2473,6 +2473,22 @@ Each storage contract is governed by `ConversationEvent::schema_version`
 (ADR-0005 §4 #2). The same versioning and migration rules apply
 regardless of which storage backend a reader is using.
 
+### Additive variants for context-management lifecycle
+
+The ADR-0006 amendment of 2026-05-19 (this PR) reserves the H11 Context
+Manage component slot in a future-ADR-0008 initiative. ADR-0008 will
+introduce additional `EventPayload` variants — at minimum
+`ContextCompacted`, and likely `ContextDecisionRecorded`,
+`SystemPromptInjected`, `ToolFilterOverridden`. Per the forward-
+compatibility rules above and the `#[non_exhaustive]` attribute on
+`EventPayload`, these are **additive variants** and do NOT bump
+`schema_version`.
+
+External readers (Go / Python / Node services) MUST tolerate unknown
+`type` values: skip the line, log a warning, or fall back to the
+generic envelope, but never crash. This is the consumer's side of the
+forward-compatibility bargain.
+
 ### What this means for cogito's deliverables
 
 - `ConversationEvent` Rust types live in `cogito-protocol::event`.
@@ -2603,7 +2619,7 @@ user-history query method to this trait is a design error.
 Cross-session / catalog access for external (Go/Python/Node) services
 is served by reading the underlying storage directly (JSONL files in
 v0.1 dev/debug; Postgres tables in v0.4 production). See ADR-0007 for
-the principle and ADR-0012 (v0.4) for the `TenantContext` model.
+the principle and ADR-0014 (v0.4) for the `TenantContext` model.
 ```
 
 - [ ] **Step 3: Verify file still parses cleanly**
@@ -3055,7 +3071,7 @@ excluded; do not slip them in:
 - Async jobs — Sprint 4.
 - `cogito-store-postgres` — v0.4.
 - `ConversationCatalog` Rust trait — deferred per ADR-0007.
-- `TenantContext` enforcement — v0.4 (ADR-0012).
+- `TenantContext` enforcement — v0.4 (ADR-0014).
 
 ## Cross-references
 

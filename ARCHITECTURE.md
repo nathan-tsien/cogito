@@ -34,7 +34,7 @@ cogito must be:
 4. **Observable** — every step recorded as an event + structured `tracing` span
 5. **Recoverable** — single-session crashes are routine, never bring down the process
 
-## The 10-component Brain
+## The 11-component Brain
 
 ```
                   ┌─────────────────────────────┐
@@ -49,7 +49,8 @@ cogito must be:
                   │   H02 Step Recorder         │
                   │   H03 Resume Coordinator    │
                   │  ─────────────────────────  │
-        Input:    │   H04 Prompt Composer       │
+        Input:    │   H11 Context Manage        │ ← decides what context
+                  │   H04 Prompt Composer       │   the model sees
                   │   H05 Tool Surface Builder  │
                   │  ─────────────────────────  │
        Output:    │   H06 Stream Demultiplexer  │
@@ -69,22 +70,24 @@ Each component has a dedicated design doc in `docs/components/H0X-*.md`.
 | H01 | Turn Driver | Drive one Loop iteration as an explicit FSM; the only coordinator |
 | H02 | Step Recorder | Persist every step as an event, immediately |
 | H03 | Resume Coordinator | Pure function: event log → resume state |
-| H04 | Prompt Composer | Assemble the next `ModelInput` |
-| H05 | Tool Surface Builder | Decide which tools the LLM sees this turn |
+| H04 | Prompt Composer | Assemble the next `ModelInput` (passive, deterministic) |
+| H05 | Tool Surface Builder | Decide which tools the LLM sees this turn (strategy-static) |
 | H06 | Stream Demultiplexer | Split streaming response into typed events |
 | H07 | Tool Call Resolver | Parse and schema-validate model-emitted tool calls |
 | H08 | Tool Dispatcher | Invoke `ToolProvider::invoke`; route on the outcome |
 | H09 | Hook Pipeline | Brain-side policy gates (Allow / Modify / Reject) |
 | H10 | Strategy Selector | Produce the `HarnessStrategy` value for this turn |
+| H11 | Context Manage | Decide context shape: compaction, system-prompt injection, tool-filter overrides; **only Brain component allowed to do I/O for summarization** (slot reserved 2026-05-19; mechanism pending ADR-0008) |
 
 ## Critical dependency constraints
 
 ```
 H01 Turn Driver
  ├→ H03 Resume Coordinator  (on entry)
- ├→ H10 Strategy Selector   (on entry)
- ├→ H04 Prompt Composer     (Init → PromptBuilt)
- ├→ H05 Tool Surface Builder (Init → PromptBuilt)
+ ├→ H10 Strategy Selector   (on entry; produces value consumed by H11/H04/H05/H09)
+ ├→ H11 Context Manage      (Init → ContextManaged)
+ ├→ H04 Prompt Composer     (ContextManaged → PromptBuilt)
+ ├→ H05 Tool Surface Builder (ContextManaged → PromptBuilt)
  ├→ H06 Stream Demultiplexer (ModelCalling → ModelCompleted)
  ├→ H07 Tool Call Resolver  (ModelCompleted)
  ├→ H08 Tool Dispatcher     (ToolDispatching)
@@ -103,10 +106,16 @@ H02 Step Recorder
         ┌─────┐
         │ Init│
         └──┬──┘
-           │  H04 + H05 + H10
+           │  H10 (strategy lookup)
+   ┌───────▼──────────┐
+   │ ContextManaged   │
+   └───────┬──────────┘
+           │  H11 (context decisions; may do I/O for summarization)
    ┌───────▼────────┐
    │  PromptBuilt   │
    └───────┬────────┘
+           │  H04 + H05 + H09 (pre_prompt)
+           │
            │  ModelGateway (streaming)
    ┌───────▼────────┐
    │  ModelCalling  │
@@ -129,6 +138,13 @@ H02 Step Recorder
 
 Each transition writes an event to the event log **before** moving on
 (ADR-0003). H03 reconstructs state by replaying the log.
+
+**`ContextManaged` state** was added 2026-05-19 by PR #6 as an ADR-0006
+amendment. v0.1 Sprint 2 implements it as a pass-through (H11 not yet
+implemented; immediately transitions to `PromptBuilt`). The real H11
+implementation lands with the Context Management initiative (ADR-0008,
+pending). See `docs/components/H01-turn-driver.md` §"Init → ContextManaged
+→ PromptBuilt sequence" for the canonical H10/H11/H04/H05/H09 walkthrough.
 
 ## Brain / Hands / Session boundaries
 
@@ -474,7 +490,7 @@ for a strategy by name.
 | `cogito-core` | Brain + Runtime | v0.1 | `harness/` is Brain (H01–H10), may only `use cogito_protocol::*`. `runtime/` is the hosting platform (DI, panic catch, resource budget, `BrainSpawner` impl). |
 | `cogito-store-jsonl` | Session | v0.1 | First backend: per-session JSONL files, `fsync` per event. Layout: `<root>/sessions/<session_id>.jsonl`. |
 | `cogito-store-postgres` | Session | v0.4 | Production multi-replica backend. |
-| `cogito-store-http` | Session | v0.6 | Generic HTTP-backed adapter against the Storage HTTP wire protocol (ADR-0013). |
+| `cogito-store-http` | Session | v0.6 | Generic HTTP-backed adapter against the Storage HTTP wire protocol (ADR-0015). |
 | `cogito-model` | Boundary | v0.1 | `ModelGateway` impls (Anthropic + OpenAI). Handles ContentBlock ↔ provider format serialization. |
 | `cogito-tools` | Hands | v0.1 | `BuiltinToolProvider` + `CompositeToolProvider` utility. |
 | `cogito-tools-multimedia` | Hands | v0.2+ | Audio / video / image tools (transcribe, summarize, extract_frames, describe_image, ...). |
@@ -530,9 +546,9 @@ adds a specific capability without breaking prior protocol guarantees
 | **v0.1** | Foundation | 7 core crates + JSONL store + Anthropic gateway + minimal tools (`read_file`, etc.) + 10-component Brain skeleton + state machine + chaos test |
 | **v0.2** | Storage + Multimodal | `StorageSystem` trait + `cogito-storage-local` + full `Vec<ContentBlock>` upgrade + `ExecCtx.storage` field + `cogito-tools-multimedia` starter (one tool: `transcribe_audio`) + MCP adapter |
 | **v0.3** | Subagent | `BrainSpawner` trait + `cogito-subagent` crate + 4 subagent tools + session metadata (`parent_session_id`, `depth`) + new `ConversationEvent` variants |
-| **v0.4** | SaaS-ready | `cogito-store-postgres` + `cogito-storage-s3` + `TenantContext` (optional field on `ExecCtx`) + `MetricsRecorder` trait + `cogito-observability-otel` + resource budget enforcement + ADR-0010 / 0011 (sandbox lifecycle, credential isolation) |
+| **v0.4** | SaaS-ready | `cogito-store-postgres` + `cogito-storage-s3` + `TenantContext` (optional field on `ExecCtx`) + `MetricsRecorder` trait + `cogito-observability-otel` + resource budget enforcement + ADR-0012 / 0013 (sandbox lifecycle, credential isolation) |
 | **v0.5** | Multimedia breadth | Expand `cogito-tools-multimedia` (extract_frames, summarize_video, describe_image, analyze_frame, synthesize_speech) + opt-in `model_visible` ContentBlock wired through ModelGateway adapters |
-| **v0.6** | Hardening | Hook policy maturity + load tests + soak tests + migration tooling docs + `cogito-storage-http` + Storage HTTP wire protocol (ADR-0013) |
+| **v0.6** | Hardening | Hook policy maturity + load tests + soak tests + migration tooling docs + `cogito-storage-http` + Storage HTTP wire protocol (ADR-0015) |
 | **v1.0** | API freeze | Public API stability commitment + event log forward-compat strict mode + 1.0 GA release |
 | **v1.x+** | Advanced | Resource Registry (P4) + cross-brain hand sharing + real-time video + generative video + MCP resources/prompts/sampling |
 
@@ -545,14 +561,16 @@ adds a specific capability without breaking prior protocol guarantees
 | ADR-0003 | State-machine Turn Driver | Accepted (v0.1) |
 | ADR-0004 | Brain / Hands / Session crate boundaries | Accepted (v0.1) |
 | **ADR-0005** | **Production scope, quality gates, SLO posture, compatibility commitments** | **Accepted (v0.1)** |
-| **ADR-0006** | **Runtime + H01 Turn Driver execution model** | **Accepted (v0.1)** |
-| ADR-0007 | `StorageSystem` trait + URI scheme + `ContentBlock` upgrade | TBD (v0.2) |
-| ADR-0008 | Multimedia tool conventions (MIME, `model_visible` flag, etc.) | TBD (v0.2) |
-| ADR-0009 | Subagent execution model (BrainSpawner + 4 tools + session tree) | TBD (v0.3) |
-| ADR-0010 | Sandbox lifecycle (lazy provisioning, pets-vs-cattle) | TBD (v0.4) |
-| ADR-0011 | Credential isolation (sandbox proxy pattern, vault integration) | TBD (v0.4) |
-| ADR-0012 | TenantContext propagation + multi-tenant SaaS conventions | TBD (v0.4) |
-| ADR-0013 | Storage HTTP wire protocol (moved from ADR-0006 in 2026-05-18 to free 0006 for the runtime ADR) | TBD (v0.6) |
+| **ADR-0006** | **Runtime + H01 Turn Driver execution model** | **Accepted (v0.1); amended 2026-05-19 (PR #6) — `ContextManaged` FSM state added** |
+| **ADR-0007** | **Event log as cross-language storage contract** | **In flight (PR #6, v0.1 Sprint 1)** |
+| ADR-0008 | Context Management (`H11 Context Manage` mechanism: compaction, system-prompt injection, tool-filter overrides) | TBD — initiative post-Sprint 2; architectural slot locked by ADR-0006 amendment |
+| ADR-0009 | `StorageSystem` trait + URI scheme + `ContentBlock` upgrade | TBD (v0.2) — renumbered from ADR-0007 by PR #6 |
+| ADR-0010 | Multimedia tool conventions (MIME, `model_visible` flag, etc.) | TBD (v0.2) — renumbered from ADR-0008 |
+| ADR-0011 | Subagent execution model (BrainSpawner + 4 tools + session tree) | TBD (v0.3) — renumbered from ADR-0009 |
+| ADR-0012 | Sandbox lifecycle (lazy provisioning, pets-vs-cattle) | TBD (v0.4) — renumbered from ADR-0010 |
+| ADR-0013 | Credential isolation (sandbox proxy pattern, vault integration) | TBD (v0.4) — renumbered from ADR-0011 |
+| ADR-0014 | TenantContext propagation + multi-tenant SaaS conventions | TBD (v0.4) — renumbered from ADR-0012 |
+| ADR-0015 | Storage HTTP wire protocol (originally ADR-0006 → ADR-0013 → ADR-0015 across renumberings) | TBD (v0.6) |
 
 ## v0.1 scope (IN / OUT)
 
@@ -569,7 +587,7 @@ adds a specific capability without breaking prior protocol guarantees
 | Builtin tools + subprocess sandbox | ✅ | | | reference Hands impls |
 | Async `JobManager` (local) | ✅ | | | sprint 4 |
 | MCP client as `ToolProvider` | | ✅ | | v0.2 |
-| Subagent layer (`cogito-subagent`) | | ✅ | | v0.3 (ADR-0009) |
+| Subagent layer (`cogito-subagent`) | | ✅ | | v0.3 (ADR-0011) |
 | Hooks (H09) | ✅ | | | sprint 6 |
 | TUI surface | | ✅ | | may slide to v0.2 |
 | Observability (`tracing` + `MetricsRecorder` trait) | ✅ | | | day 1 |
@@ -596,7 +614,7 @@ See **ADR-0005** for the authoritative version of these commitments.
 - **Event log schema**: every `ConversationEvent` carries `schema_version: u32` from day 1. 0.x allows breaking changes if accompanied by a migration tool. At 1.0 we switch to strict forward-compat (any future version must read any past version).
 - **Content blocks**: new variants are additive (b-档 compatible). Removing variants is a major version event.
 - **StorageSystem URI resolvability**: not guaranteed across time; lifecycle is the backend's concern.
-- **Storage HTTP wire protocol**: defined at v0.6 (ADR-0013); independent versioning from event log schema.
+- **Storage HTTP wire protocol**: defined at v0.6 (ADR-0015); independent versioning from event log schema.
 
 ## Design references
 

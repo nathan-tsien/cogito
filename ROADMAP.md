@@ -78,14 +78,33 @@ Driver, panic isolation, and chaos-tested resume.
 - [ ] CHANGELOG.md initial entry
 - [ ] Tag `v0.1.0`
 
+### Spike · Context Management (post-Sprint 2; ADR-0008)
+
+**Goal**: design and ratify how `H11 Context Manage` actually works. The
+architectural slot is locked by PR #6 (ADR-0006 amendment 2026-05-19);
+the mechanism is still open. This spike is a dedicated initiative, not
+a numbered sprint, because the work cuts across compaction, system
+prompt lifecycle, tool injection, and TurnDriver integration.
+
+- [ ] Research: Codex (`run_inline_auto_compact_task`), Claude Code (`/compact` + auto), Manus, other SaaS agent platforms — trigger policies and persisted shape
+- [ ] Spec draft under `docs/superpowers/specs/`: H11 trigger policy, summarization model selection, replacement semantics, cascading compactions
+- [ ] **ADR-0008**: Context Management — locks `ContextManager` trait, event variants (`ContextCompacted`, `ContextDecisionRecorded`, `SystemPromptInjected`, `ToolFilterOverridden`), trigger policy, summarization model selection
+- [ ] `cogito-protocol`: additive `EventPayload` variants for context lifecycle (per `#[non_exhaustive]`, no schema_version bump)
+- [ ] `cogito-core::harness`: H11 implementation; H01 `Init → ContextManaged` transition stops being a pass-through
+- [ ] H04 history projection: honor `ContextCompacted` events
+- [ ] Optional: `pre_context` / `post_context` hook lifecycle points if needed
+- [ ] H03 Resume Coordinator: crash-mid-compaction recovery
+- [ ] Chaos test: inject crash during summarization model call
+- [ ] No version tag — feature lands into whichever v0.x is current when ready
+
 ### v0.2 · Storage + Multimodal
 
 **Goal**: introduce `StorageSystem` as the third protocol pillar; lay the
 foundation for multimodal content (`ContentBlock::Image`); ship one
 multimedia tool to validate the full path.
 
-- [ ] **ADR-0007**: `StorageSystem` trait + URI scheme + `ContentBlock::Image` variant
-- [ ] **ADR-0008**: multimedia tool conventions (mime types, `outputs_model_visible_multimodal` flag, etc.)
+- [ ] **ADR-0009**: `StorageSystem` trait + URI scheme + `ContentBlock::Image` variant _(renumbered from ADR-0007 by PR #6 — ADR-0007 now reserved for "Event log as cross-language contract", ADR-0008 for "Context Management")_
+- [ ] **ADR-0010**: multimedia tool conventions (mime types, `outputs_model_visible_multimodal` flag, etc.) _(renumbered from ADR-0008)_
 - [ ] `cogito-protocol`: add `StorageSystem` trait + `ContentBlock::Image`
 - [ ] `cogito-storage-local` crate: `file://` + `http(s)://` (with local cache) + `blob://` (mapped to local dir)
 - [ ] `ExecCtx.storage: Arc<dyn StorageSystem>` field
@@ -100,7 +119,7 @@ multimedia tool to validate the full path.
 **Goal**: support recursive Brain instances (subagent pattern) for
 complex multi-role tasks.
 
-- [ ] **ADR-0009**: Subagent execution model
+- [ ] **ADR-0011**: Subagent execution model _(renumbered from ADR-0009)_
 - [ ] `cogito-protocol`: add `BrainSpawner` trait + `SubagentSpawned` / `SubagentInputSent` / `SubagentCompleted` event variants
 - [ ] `cogito-protocol`: extend `HarnessStrategy` with `spawnable_as_subagent`, `max_subagent_depth`
 - [ ] `cogito-protocol`: extend session metadata with `parent_session_id`, `depth`, `role`
@@ -115,9 +134,9 @@ complex multi-role tasks.
 
 **Goal**: enable multi-replica deployment behind a consumer's gateway.
 
-- [ ] **ADR-0010**: Sandbox lifecycle (lazy provisioning, pets-vs-cattle)
-- [ ] **ADR-0011**: Credential isolation (sandbox proxy pattern)
-- [ ] **ADR-0012**: TenantContext propagation
+- [ ] **ADR-0012**: Sandbox lifecycle (lazy provisioning, pets-vs-cattle) _(renumbered from ADR-0010)_
+- [ ] **ADR-0013**: Credential isolation (sandbox proxy pattern) _(renumbered from ADR-0011)_
+- [ ] **ADR-0014**: TenantContext propagation _(renumbered from ADR-0012)_
 - [ ] `cogito-store-postgres` crate: production multi-replica backend
 - [ ] `cogito-storage-s3` crate: object storage backend
 - [ ] `cogito-protocol`: add `TenantContext` optional field on `ExecCtx`
@@ -151,7 +170,7 @@ storage HTTP backend.
 - [ ] Load test scaffolding: 1000 concurrent sessions per process target
 - [ ] Soak test: 24h continuous run with no leaks / no degradation
 - [ ] Event log migration tooling (v(N-1) → vN converter, with `replay_equivalence` test)
-- [ ] **ADR-0013**: Storage HTTP wire protocol
+- [ ] **ADR-0015**: Storage HTTP wire protocol _(renumbered from ADR-0013 by PR #6)_
 - [ ] `cogito-storage-http` crate: HTTP backend adapter
 - [ ] Tag `v0.6.0`
 

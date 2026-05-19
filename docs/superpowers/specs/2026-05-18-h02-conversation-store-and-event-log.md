@@ -28,12 +28,22 @@ Out of scope (recorded in §9 to lock the boundary):
 
 - Real `cogito-core::harness::turn_driver` FSM (Sprint 2).
 - Real `cogito-core::harness::stream_demux` (H06) (Sprint 2).
-- `ConversationCatalog` Rust trait — explicitly deferred to v0.4 ADR-0012
+- `ConversationCatalog` Rust trait — explicitly deferred to v0.4 ADR-0014
   (TenantContext) (§4.4 explains why).
 - Cross-session / cross-tenant query API (covered by external consumer
   services reading storage directly — §4).
 - `cogito-store-postgres` (v0.4).
 - Production-grade fsync semantics, rotation, multi-replica concerns.
+- **Context management mechanism** (compaction, system-prompt injection,
+  context-aware tool overrides). The architectural slot is locked by the
+  ADR-0006 amendment in PR #6 (new `ContextManaged` FSM state, new H11
+  component slot — see `docs/components/H11-context-manage.md`). The
+  mechanism — trigger policy, summarization model, exact `EventPayload`
+  variants for context lifecycle — is the central deliverable of the
+  Context Management initiative (ADR-0008, pending; ROADMAP "Spike ·
+  Context Management"). Until ADR-0008 lands, Sprint 2's `ContextManaged`
+  state is implemented as a pass-through (immediate transition to
+  `PromptBuilt`).
 
 ## 1. Background & motivation
 
@@ -568,7 +578,7 @@ async fn search(&self, q: SearchQuery) -> ...;
 Problems with shipping this in v0.1:
 
 1. `UserId`, `TenantContext`, `PageCursor`, `SearchQuery` are types
-   designed in ADR-0010/0011/0012 at v0.4. Defining them now means churning
+   designed in ADR-0012/0013/0014 at v0.4. Defining them now means churning
    them later.
 2. External consumers are typically Go/Python/Node — they cannot consume a
    Rust trait. The actual SaaS catalog will be implemented as direct SQL
@@ -594,7 +604,7 @@ Add to `AGENTS.md` §"Inviolable design principles":
 >
 > Cross-session / catalog access for external (Go/Python/Node) services is
 > served by reading the underlying storage directly (JSONL files in v0.1;
-> Postgres tables in v0.4). See ADR-0007 for the principle and ADR-0012
+> Postgres tables in v0.4). See ADR-0007 for the principle and ADR-0014
 > (v0.4) for the `TenantContext` model.
 
 ## 5. `cogito-store-jsonl` implementation (Q3 outcome — simplified)
@@ -1015,7 +1025,7 @@ contributors do not slip them in unprompted:
 - **Postgres backend** — v0.4.
 - **`ConversationCatalog` Rust trait** — Deferred indefinitely (per §4.4).
   External SaaS catalog services read storage directly.
-- **`TenantContext` propagation** — v0.4 (ADR-0012). Sprint 1's
+- **`TenantContext` propagation** — v0.4 (ADR-0014). Sprint 1's
   `SessionMeta.tenant_id` is an opaque pass-through field, not enforced.
 - **`Redactor` trait for secret redaction** — v0.2 default impl.
 - **Production-grade fsync, rotation, multi-replica** — JSONL is dev-only,
