@@ -98,6 +98,13 @@ deliberate places, both with rationale recorded:
 
 ## 2. `ConversationEvent` schema (Q1 outcome)
 
+> **NOTE (amended 2026-05-19)**: `Eq` is NOT derived on
+> `ConversationEvent`, `EventPayload`, `ContentBlock`, or `SessionMeta`
+> because they transitively contain `serde_json::Value` (no `Eq` impl).
+> The implementation derives `PartialEq` only. The spec snippets below
+> show `Eq` for completeness; the implementation rationale is recorded
+> in each type's doc-comment under `crates/cogito-protocol/src/`.
+
 ### 2.1 Envelope shape — adjacent-tag flatten pattern
 
 ```rust
@@ -384,10 +391,11 @@ pub trait ConversationStore: Send + Sync + 'static {
         -> Result<Option<u64>, StoreError>;
 
     /// Stream events for `session_id` where `event.seq > from_seq`, in
-    /// strict ascending `seq` order. `from_seq = 0` reads from the beginning
-    /// (the first event has `seq = 0`, so `from_seq = 0` excludes the first
-    /// — pass `from_seq = u64::MAX` to read nothing, or use offset semantics
-    /// `from_seq + 1` to read N+1 onward).
+    /// strict ascending `seq` order (strict greater-than, not greater-or-
+    /// equal). `from_seq = 0` reads from the second event onward (the
+    /// first event has `seq = 0` and is excluded); to read net-new events
+    /// after a resume, pass `from_seq = latest_seq` — i.e. the last
+    /// persisted seq, NOT `latest_seq + 1` (that would skip one event).
     ///
     /// The returned stream is single-pass; cloning is the caller's
     /// responsibility if needed.

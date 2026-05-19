@@ -148,7 +148,7 @@ pending). See `docs/components/H01-turn-driver.md` §"Init → ContextManaged
 
 ## Brain / Hands / Session boundaries
 
-The 10-component design describes Brain's internal structure. The **crate
+The 11-component design describes Brain's internal structure. The **crate
 graph** encodes the larger decoupling. **ADR-0004 is the authoritative spec;
 this section is a summary.**
 
@@ -504,8 +504,8 @@ for a strategy by name.
 | `cogito-cli` | Surface | v0.1 | CLI binary; wires runtime + store + gateway. |
 | `cogito-tui` | Surface | v0.2 | TUI. |
 | `cogito-observability-otel` | Surface (optional) | v0.4 | OpenTelemetry adapter that ships `MetricsRecorder` impl + trace exporter. |
-| `testing/cogito-test-fixtures` | Testing | v0.1 | Shared fixtures, tmp JSONL store helper. |
-| `testing/cogito-mock-model` | Testing | v0.1 | `ModelGateway` mock with scripted responses. |
+| `crates/testing/cogito-test-fixtures` | Testing | v0.1 | Shared fixtures, tmp JSONL store helper. |
+| `crates/testing/cogito-mock-model` | Testing | v0.1 | `ModelGateway` mock with scripted responses. |
 
 Notes:
 
@@ -543,7 +543,7 @@ adds a specific capability without breaking prior protocol guarantees
 
 | Version | Theme | What's added |
 |---|---|---|
-| **v0.1** | Foundation | 7 core crates + JSONL store + Anthropic gateway + minimal tools (`read_file`, etc.) + 10-component Brain skeleton + state machine + chaos test |
+| **v0.1** | Foundation | 7 core crates + JSONL store + Anthropic gateway + minimal tools (`read_file`, etc.) + 11-component Brain skeleton + state machine + chaos test |
 | **v0.2** | Storage + Multimodal | `StorageSystem` trait + `cogito-storage-local` + full `Vec<ContentBlock>` upgrade + `ExecCtx.storage` field + `cogito-tools-multimedia` starter (one tool: `transcribe_audio`) + MCP adapter |
 | **v0.3** | Subagent | `BrainSpawner` trait + `cogito-subagent` crate + 4 subagent tools + session metadata (`parent_session_id`, `depth`) + new `ConversationEvent` variants |
 | **v0.4** | SaaS-ready | `cogito-store-postgres` + `cogito-storage-s3` + `TenantContext` (optional field on `ExecCtx`) + `MetricsRecorder` trait + `cogito-observability-otel` + resource budget enforcement + ADR-0012 / 0013 (sandbox lifecycle, credential isolation) |

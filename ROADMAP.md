@@ -37,7 +37,8 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] Benchmark: `append_throughput` against JSONL; baseline at `docs/quality/v0.1-jsonl-baseline.md` (informational only, ADR-0005 §3 footnote)
 - [x] ADR-0007 ratified (event log as cross-language contract)
 - [x] JSON Schema artifact at `docs/schemas/conversation-event-v1.json` + CI drift gate
-- [x] Canonical fixture at `testing/cogito-test-fixtures/fixtures/sessions/sample-v1.jsonl`
+- [x] Canonical fixture at `crates/testing/cogito-test-fixtures/fixtures/sessions/sample-v1.jsonl`
+- [x] JSONL v1 human-readable spec at `docs/data-model/jsonl-v1.md`
 - [x] `AGENTS.md` §2 + §7 inviolable rules amended
 
 #### Sprint 2 · Minimal Loop (2 days)

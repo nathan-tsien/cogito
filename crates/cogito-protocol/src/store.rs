@@ -44,8 +44,9 @@ pub trait ConversationStore: Send + Sync + 'static {
 
     /// Stream events where `event.seq > from_seq`, in strict ascending
     /// `seq` order. Use `from_seq = 0` to read from the second event
-    /// onward; use the result of `latest_seq` + 1 to read net-new events
-    /// after a resume.
+    /// onward; use the result of `latest_seq` (i.e. the last persisted
+    /// seq) to read net-new events after a resume — passing `from_seq = N`
+    /// returns events with `seq > N`.
     fn replay(
         &self,
         session_id: SessionId,

@@ -35,8 +35,14 @@ impl std::fmt::Display for JobId {
 }
 
 /// Lifecycle state of a job.
+///
+/// Marked `#[non_exhaustive]` because this type is part of the cross-language
+/// wire contract (per ADR-0007). Future distributed backends (v0.4+) may add
+/// states like `Retrying` or `Suspended`; reserving the variant set lets
+/// those land without breaking downstream `match` arms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum JobStatus {
     /// Accepted by the manager but not yet scheduled.
     Pending,
@@ -59,8 +65,15 @@ pub enum JobStatus {
 ///
 /// Note: `PartialEq` is derived but not `Eq` because `ToolResult::Output`
 /// wraps `serde_json::Value`, which does not implement `Eq`.
+///
+/// Marked `#[non_exhaustive]` because this type is part of the cross-language
+/// wire contract (per ADR-0007) and reaches external readers via
+/// `EventPayload::JobCompletedRecorded`. Future variants (e.g.
+/// `TimedOut`, `Preempted`) can land without breaking downstream
+/// `match` arms.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum JobOutcome {
     /// Tool result produced by the job. The wire format matches
     /// `ToolResult::Output`; the actor wraps it back into `ToolResult`

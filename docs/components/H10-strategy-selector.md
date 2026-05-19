@@ -43,7 +43,7 @@ The function is **pure**: same `(model_id, task, registry)` → same strategy.
 **Calls (out)**: None.
 
 **Called by**: H01 Turn Driver, on entry (at the start of the `Init` state, before `Init → ContextManaged` transition). The returned value is **cached for
-the duration of the turn** and consumed (read-only) by H04, H05, H09.
+the duration of the turn** and consumed (read-only) by H11, H04, H05, H09.
 
 ## Critical invariants
 
@@ -91,5 +91,5 @@ parallel_dispatch: false
 
 ## References
 
-- ARCHITECTURE.md §"The 10-component Brain" (H10 row)
+- ARCHITECTURE.md §"The 11-component Brain" (H10 row)
 - (no dedicated ADR — strategy file format is implementation detail, not architectural)

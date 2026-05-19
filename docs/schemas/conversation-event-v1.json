@@ -449,7 +449,7 @@
       ]
     },
     "JobOutcome": {
-      "description": "Terminal outcome of a job, delivered through `on_complete` and `result`.\n\n**Serde representation note**: internally-tagged with `tag = \"kind\"`. All variants are unit or struct (no newtype-with-primitive), and no inner field collides with the tag name, so internal tagging is safe.\n\nNote: `PartialEq` is derived but not `Eq` because `ToolResult::Output` wraps `serde_json::Value`, which does not implement `Eq`.",
+      "description": "Terminal outcome of a job, delivered through `on_complete` and `result`.\n\n**Serde representation note**: internally-tagged with `tag = \"kind\"`. All variants are unit or struct (no newtype-with-primitive), and no inner field collides with the tag name, so internal tagging is safe.\n\nNote: `PartialEq` is derived but not `Eq` because `ToolResult::Output` wraps `serde_json::Value`, which does not implement `Eq`.\n\nMarked `#[non_exhaustive]` because this type is part of the cross-language wire contract (per ADR-0007) and reaches external readers via `EventPayload::JobCompletedRecorded`. Future variants (e.g. `TimedOut`, `Preempted`) can land without breaking downstream `match` arms.",
       "oneOf": [
         {
           "description": "Tool result produced by the job. The wire format matches `ToolResult::Output`; the actor wraps it back into `ToolResult` when resuming the turn.",
@@ -613,7 +613,7 @@
       ]
     },
     "ToolResult": {
-      "description": "Result body returned by a tool. `Vec<ContentBlock>` arrives in v0.2 when the multimodal upgrade lands; v0.1 uses plain text via the convenience constructor [`ToolResult::text`].\n\nNote: `PartialEq` is derived but not `Eq` because `serde_json::Value` (used in the `Output` variant) does not implement `Eq`.",
+      "description": "Result body returned by a tool. `Vec<ContentBlock>` arrives in v0.2 when the multimodal upgrade lands; v0.1 uses plain text via the convenience constructor [`ToolResult::text`].\n\nNote: `PartialEq` is derived but not `Eq` because `serde_json::Value` (used in the `Output` variant) does not implement `Eq`.\n\nMarked `#[non_exhaustive]` because this type is part of the cross-language wire contract (per ADR-0007) and reaches external readers via `EventPayload::ToolResultRecorded`. The v0.2 multimodal upgrade swaps `Output(Vec<serde_json::Value>)` for `Output(Vec<ContentBlock>)`; new classifications (e.g. an explicit `Streaming` variant) may follow.",
       "oneOf": [
         {
           "description": "Successful output. v0.1 represents content as a list of opaque JSON values; v0.2 replaces this with `Vec<ContentBlock>`.",

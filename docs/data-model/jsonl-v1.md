@@ -87,8 +87,14 @@ only on the live `StreamEvent` channel.
 ### `tool_result_recorded`
 
 ```json
-{"type": "tool_result_recorded", "data": {"call_id": "toolu_01", "result": {"Output": [{"type": "text", "data": {"text": "file contents"}}]}}}
+{"type": "tool_result_recorded", "data": {"call_id": "toolu_01", "result": {"output": ["file contents"]}}}
 ```
+
+`ToolResult` uses `#[serde(rename_all = "snake_case")]`, so the variant tag
+is lowercase `output` (not `Output`). The `Output` variant carries
+`Vec<serde_json::Value>` — opaque JSON values, not nested `ContentBlock`s.
+The v0.2 multimodal upgrade will swap this for `Vec<ContentBlock>`
+(`ToolResult` doc comment in `cogito-protocol::tool`).
 
 ### `turn_paused`
 
@@ -105,14 +111,24 @@ only on the live `StreamEvent` channel.
 ### `turn_completed`
 
 ```json
-{"type": "turn_completed", "data": {"outcome": "Completed"}}
+{"type": "turn_completed", "data": {"outcome": {"kind": "completed"}}}
 ```
+
+`TurnOutcome` is internally tagged with `tag = "kind"` and
+`rename_all = "snake_case"`, so even the unit `Completed` variant wears
+the discriminator object `{"kind": "completed"}`.
 
 ### `turn_failed`
 
 ```json
-{"type": "turn_failed", "data": {"reason": "Cancelled"}}
+{"type": "turn_failed", "data": {"reason": {"kind": "turn_timed_out"}}}
 ```
+
+`TurnFailureReason` is internally tagged with `tag = "kind"` and
+`rename_all = "snake_case"`. Variants in this enum are
+`store_unavailable`, `model_gateway_failed`, `turn_panicked`,
+`turn_timed_out`, `hook_rejected`. The canonical fixture uses
+`turn_timed_out`.
 
 ## Forward compatibility
 
@@ -135,4 +151,4 @@ deserialization.
 ## Canonical example
 
 A worked sample of all 9 variants in one session is at
-`testing/cogito-test-fixtures/fixtures/sessions/sample-v1.jsonl`.
+`crates/testing/cogito-test-fixtures/fixtures/sessions/sample-v1.jsonl`.

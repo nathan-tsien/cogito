@@ -72,7 +72,7 @@ forward-compatibility bargain.
   is generated from those types via `cogito-gen-schema` and committed
   to the repo. CI enforces no drift. External Go/Python/Node services
   can use this schema for typed deserialization or code generation.
-- A canonical fixture (`testing/cogito-test-fixtures/fixtures/sessions/sample-v1.jsonl`)
+- A canonical fixture (`crates/testing/cogito-test-fixtures/fixtures/sessions/sample-v1.jsonl`)
   covers all 9 `EventPayload` variants and serves as a worked example
   for both internal contract tests and external readers.
 - The JSONL line format spec at `docs/data-model/jsonl-v1.md` is a

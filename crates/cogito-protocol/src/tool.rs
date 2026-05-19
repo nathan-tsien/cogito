@@ -31,8 +31,15 @@ pub struct ToolDescriptor {
 
 /// Statically-declared execution class for a tool. H08 uses this to validate
 /// the `InvokeOutcome` variant returned by `invoke()`.
+///
+/// Marked `#[non_exhaustive]` because this type is part of the cross-language
+/// wire contract (per ADR-0007) and reaches external readers via
+/// `EventPayload`. Reserving the variant set lets future versions add
+/// classes (e.g. an `Either` variant for tools whose stream-or-async choice
+/// depends on the call site) without breaking downstream `match` arms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ExecutionClass {
     /// Always returns `InvokeOutcome::Sync`. Typical: `read_file`, `now`,
     /// `parse_json`.
@@ -46,7 +53,14 @@ pub enum ExecutionClass {
 }
 
 /// Outcome of a single `ToolProvider::invoke` call.
+///
+/// Marked `#[non_exhaustive]` because this type is part of the cross-language
+/// wire contract (per ADR-0007) and is reachable from `EventPayload` via
+/// `ToolResult`. Reserving the variant set lets future versions add new
+/// dispatch shapes (e.g. streaming outputs) without breaking downstream
+/// `match` arms.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[non_exhaustive]
 pub enum InvokeOutcome {
     /// Result is available immediately.
     Sync(ToolResult),
@@ -61,8 +75,15 @@ pub enum InvokeOutcome {
 ///
 /// Note: `PartialEq` is derived but not `Eq` because `serde_json::Value`
 /// (used in the `Output` variant) does not implement `Eq`.
+///
+/// Marked `#[non_exhaustive]` because this type is part of the cross-language
+/// wire contract (per ADR-0007) and reaches external readers via
+/// `EventPayload::ToolResultRecorded`. The v0.2 multimodal upgrade swaps
+/// `Output(Vec<serde_json::Value>)` for `Output(Vec<ContentBlock>)`; new
+/// classifications (e.g. an explicit `Streaming` variant) may follow.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ToolResult {
     /// Successful output. v0.1 represents content as a list of opaque
     /// JSON values; v0.2 replaces this with `Vec<ContentBlock>`.
