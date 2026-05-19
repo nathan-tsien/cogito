@@ -13,3 +13,5 @@ pub mod stream_demux;
 pub mod tool_resolver;
 pub mod tool_surface;
 pub mod turn_driver;
+
+pub use step_recorder::StepRecorder;
