@@ -20,3 +20,9 @@ Thumbs.db
 
 # Local debug / scratch artefacts (e.g. Claude Code session graphs)
 debug/
+
+# cogito chat session event logs (local only)
+sessions/
+
+# Local environment variables (secrets; use .env.example as template)
+.env

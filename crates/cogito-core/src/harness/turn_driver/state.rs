@@ -5,6 +5,7 @@
 
 use std::collections::VecDeque;
 
+use cogito_protocol::ExecCtx;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::gateway::{ModelError, ModelEvent, ModelOutput};
 use cogito_protocol::ids::{SessionId, TurnId};
@@ -12,11 +13,17 @@ use cogito_protocol::job::JobId;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::tool::{ToolDescriptor, ToolResult};
 use cogito_protocol::turn::{TurnFailureReason, TurnOutcome};
-use cogito_protocol::ExecCtx;
 use futures::stream::BoxStream;
 
 use crate::harness::resume::ResumeDecision;
 use crate::harness::tool_resolver::ToolInvocation;
+
+/// Maximum number of consecutive inner-loop iterations where every tool call
+/// returned a validation/dispatch error before the FSM gives up.
+///
+/// This prevents infinite loops when a model repeatedly calls tools with bad
+/// arguments (e.g. missing required fields) and never makes progress.
+pub const MAX_CONSECUTIVE_TOOL_ERRORS: u32 = 4;
 
 /// Immutable identifiers carried through every FSM state.
 #[derive(Clone)]
@@ -29,6 +36,12 @@ pub struct TurnCtx {
     pub exec_ctx: ExecCtx,
     /// Per-turn strategy (model, tools, hooks configuration).
     pub strategy: HarnessStrategy,
+    /// Number of consecutive inner-loop rounds where every resolved tool call
+    /// was an error (validation failure, dispatch error, hook rejection).
+    /// Resets to zero whenever at least one tool call succeeds in a round.
+    /// When it reaches [`MAX_CONSECUTIVE_TOOL_ERRORS`] the FSM transitions to
+    /// `Failed` rather than sending another request to the model.
+    pub consecutive_tool_errors: u32,
 }
 
 /// One state in the H01 FSM.

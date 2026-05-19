@@ -35,6 +35,56 @@ fn text_only_replay_yields_expected_sequence() -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
+/// Ghost tool-call fragments (empty id/name at index > 0) emitted by some
+/// providers (e.g. `SenseNova`) must be silently dropped; only the real call
+/// survives, and its `call_id`/`tool_name` must be non-empty.
+#[test]
+fn ghost_tool_calls_are_filtered() -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = std::fs::read(sse_fixture("openai-compat-ghost-tool-calls.txt"))?;
+    let events = replay_openai_compat_into_model_events(&bytes)?;
+
+    let completed: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            ModelEvent::ToolUseCompleted {
+                call_id, tool_name, ..
+            } => Some((call_id.as_str(), tool_name.as_str())),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        completed.len(),
+        1,
+        "exactly one real tool call expected, got: {completed:?}"
+    );
+    assert_eq!(completed[0].0, "call_abc123");
+    assert_eq!(completed[0].1, "read_file");
+
+    let started: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, ModelEvent::ToolUseStarted { .. }))
+        .collect();
+    assert_eq!(
+        started.len(),
+        1,
+        "ToolUseStarted must fire only once, got: {started:?}"
+    );
+
+    let last = events.last().expect("non-empty");
+    assert!(
+        matches!(
+            last,
+            ModelEvent::MessageCompleted {
+                stop_reason: StopReason::ToolUse,
+                ..
+            }
+        ),
+        "last event must be MessageCompleted(ToolUse), got {last:?}"
+    );
+    Ok(())
+}
+
 #[test]
 fn tool_use_replay_seals_call_at_finish() -> Result<(), Box<dyn std::error::Error>> {
     let bytes = std::fs::read(sse_fixture("openai-compat-with-tool-use.txt"))?;

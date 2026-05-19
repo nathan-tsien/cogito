@@ -74,8 +74,8 @@ impl OpenAiCompatGateway {
 }
 
 use async_stream::try_stream;
-use cogito_protocol::gateway::{ModelError, ModelEvent, ModelGateway, ModelInput};
 use cogito_protocol::ExecCtx;
+use cogito_protocol::gateway::{ModelError, ModelEvent, ModelGateway, ModelInput};
 use futures::stream::{BoxStream, StreamExt};
 
 use crate::error::from_reqwest;
@@ -103,6 +103,20 @@ impl ModelGateway for OpenAiCompatGateway {
             self.cfg.base_url.trim_end_matches('/')
         );
 
+        // In DEBUG builds / when RUST_LOG includes debug, emit the full wire-level
+        // request JSON so developers can verify the tool schema and conversation
+        // history reach the model exactly as intended.
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            match serde_json::to_string_pretty(&body) {
+                Ok(json) => {
+                    tracing::debug!(target: "cogito::prompt", url = %url, "\n── request body ──\n{json}\n──────────────────");
+                }
+                Err(e) => {
+                    tracing::debug!(target: "cogito::prompt", "request body serialization failed: {e}");
+                }
+            }
+        }
+
         let mut builder = self
             .client
             .post(&url)
@@ -125,7 +139,9 @@ impl ModelGateway for OpenAiCompatGateway {
             let message = response.text().await.unwrap_or_default();
             return Err(match status {
                 401 | 403 => ModelError::Auth,
-                429 => ModelError::RateLimited { retry_after_secs: None },
+                429 => ModelError::RateLimited {
+                    retry_after_secs: None,
+                },
                 _ => ModelError::Provider { status, message },
             });
         }

@@ -14,14 +14,14 @@ use cogito_core::harness::turn_driver::deps::TurnDeps;
 use cogito_core::harness::turn_driver::enter_turn;
 use cogito_core::harness::turn_driver::state::TurnCtx;
 use cogito_mock_model::MockModelGateway;
+use cogito_protocol::ExecCtx;
 use cogito_protocol::gateway::{ModelEvent, StopReason, Usage};
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::turn::TurnOutcome;
-use cogito_protocol::ExecCtx;
 use cogito_store_jsonl::JsonlStore;
-use cogito_tools::provider::BuiltinToolProvider;
 use cogito_tools::ReadFile;
+use cogito_tools::provider::BuiltinToolProvider;
 use tokio::sync::{Mutex, broadcast};
 
 #[tokio::test]
@@ -79,6 +79,7 @@ async fn text_only_turn_reaches_completed() -> Result<(), Box<dyn std::error::Er
         turn_id,
         exec_ctx: ExecCtx::open_ended(session_id, turn_id),
         strategy: HarnessStrategy::default_with_model("mock"),
+        consecutive_tool_errors: 0,
     };
 
     let outcome = enter_turn(ResumeDecision::FreshTurn, ctx, deps).await;

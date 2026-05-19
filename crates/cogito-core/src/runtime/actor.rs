@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use cogito_protocol::ExecCtx;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::{SessionId, TurnId};
@@ -25,13 +26,12 @@ use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
 use cogito_protocol::tool::ToolProvider;
 use cogito_protocol::turn::{TurnFailureReason, TurnOutcome};
-use cogito_protocol::ExecCtx;
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::types::{NewMessage, SessionCommand, ShutdownOutcome};
 use crate::harness::hooks::HookPipeline;
-use crate::harness::resume::{replay, ResumeDecision};
+use crate::harness::resume::{ResumeDecision, replay};
 use crate::harness::step_recorder::StepRecorder;
 use crate::harness::turn_driver::{TurnCtx, TurnDeps, enter_turn};
 
@@ -73,7 +73,8 @@ pub(super) struct ActorState {
     pub(super) turn_result_tx: mpsc::Sender<(TurnId, TurnOutcome)>,
     /// Broadcast channel for live `StreamEvent`s. Cloned into each `TurnDeps`.
     /// Retained here so the channel stays open while the session is alive.
-    #[allow(dead_code)] // kept alive for channel liveness; Sprint 4 uses it for sub-actor fan-out
+    #[allow(dead_code)]
+    // kept alive for channel liveness; Sprint 4 uses it for sub-actor fan-out
     pub(super) broadcast_tx: broadcast::Sender<StreamEvent>,
     /// Step recorder shared with `TurnDeps` so transitions can record events.
     pub(super) recorder: Arc<Mutex<StepRecorder>>,
@@ -210,6 +211,7 @@ async fn try_start_turn(state: &mut ActorState, msg: NewMessage, deps: &ActorDep
         turn_id,
         exec_ctx,
         strategy: state.strategy.clone(),
+        consecutive_tool_errors: 0,
     };
     let turn_deps = TurnDeps {
         step: Arc::clone(&state.recorder),
@@ -240,7 +242,10 @@ async fn on_turn_complete(state: &mut ActorState, turn_id: TurnId, outcome: Turn
     state.in_flight = None;
     let mut rec = state.recorder.lock().await;
     let result = match outcome {
-        TurnOutcome::Completed => rec.record_turn_completed(turn_id, TurnOutcome::Completed).await,
+        TurnOutcome::Completed => {
+            rec.record_turn_completed(turn_id, TurnOutcome::Completed)
+                .await
+        }
         TurnOutcome::Paused { job_id } => rec.record_turn_paused(turn_id, job_id).await,
         TurnOutcome::Cancelled => {
             rec.record_turn_failed(turn_id, TurnFailureReason::TurnTimedOut)

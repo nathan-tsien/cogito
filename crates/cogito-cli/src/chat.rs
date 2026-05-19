@@ -39,12 +39,9 @@ pub struct ChatArgs {
     pub system: Option<String>,
 }
 
-/// Entry point for the `chat` subcommand.
-// `print!` / `println!` are intentional here: the chat REPL must write model
-// output to stdout without tracing timestamps or log levels.
-#[allow(clippy::print_stdout)]
-pub async fn run(args: ChatArgs) -> Result<()> {
-    // Infer provider from model name when not explicitly given.
+/// Construct a [`ModelGateway`] from the CLI args. Pulls API keys / base URLs
+/// from env vars (`ANTHROPIC_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_API_KEY`).
+fn build_gateway(args: &ChatArgs) -> Result<Arc<dyn ModelGateway>> {
     let provider = args.provider.clone().unwrap_or_else(|| {
         if args.model.starts_with("claude-") {
             "anthropic".into()
@@ -52,15 +49,13 @@ pub async fn run(args: ChatArgs) -> Result<()> {
             "openai-compat".into()
         }
     });
-
-    let gateway: Arc<dyn ModelGateway> = match provider.as_str() {
+    match provider.as_str() {
         "anthropic" => {
-            let key =
-                std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY not set")?;
-            Arc::new(
+            let key = std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY not set")?;
+            Ok(Arc::new(
                 AnthropicGateway::new(AnthropicConfig::with_api_key(key))
                     .map_err(|e| anyhow!("anthropic gateway: {e}"))?,
-            )
+            ))
         }
         "openai-compat" => {
             let base_url = args
@@ -70,13 +65,20 @@ pub async fn run(args: ChatArgs) -> Result<()> {
                 .context("--base-url or OPENAI_BASE_URL required for openai-compat")?;
             let mut cfg = OpenAiCompatConfig::with_base_url(base_url);
             cfg.api_key = std::env::var("OPENAI_API_KEY").ok();
-            Arc::new(
-                OpenAiCompatGateway::new(cfg)
-                    .map_err(|e| anyhow!("openai-compat gateway: {e}"))?,
-            )
+            Ok(Arc::new(
+                OpenAiCompatGateway::new(cfg).map_err(|e| anyhow!("openai-compat gateway: {e}"))?,
+            ))
         }
         _ => anyhow::bail!("invalid provider: {provider}"),
-    };
+    }
+}
+
+/// Entry point for the `chat` subcommand.
+// `print!` / `println!` are intentional here: the chat REPL must write model
+// output to stdout without tracing timestamps or log levels.
+#[allow(clippy::print_stdout)]
+pub async fn run(args: ChatArgs) -> Result<()> {
+    let gateway = build_gateway(&args)?;
 
     // JsonlStore::new is synchronous and infallible.
     let store = Arc::new(JsonlStore::new(args.session_root.clone()));
@@ -101,7 +103,9 @@ pub async fn run(args: ChatArgs) -> Result<()> {
 
     // Parse or generate the session ID.
     let session_id = match args.session_id {
-        Some(s) => s.parse::<SessionId>().context("invalid session_id (need ULID)")?,
+        Some(s) => s
+            .parse::<SessionId>()
+            .context("invalid session_id (need ULID)")?,
         None => SessionId::new(),
     };
 
@@ -121,20 +125,34 @@ pub async fn run(args: ChatArgs) -> Result<()> {
         }
     });
 
-    let mut stdin = BufReader::new(io::stdin()).lines();
+    // `AsyncBufReadExt::lines()` rejects non-UTF-8 bytes and aborts the REPL with
+    // "stream did not contain valid UTF-8" (common with GBK terminals or pasted
+    // binary). Read raw bytes and decode lossily instead.
+    let mut stdin = BufReader::new(io::stdin());
+    let mut line_buf = Vec::new();
     let mut sub = handle.subscribe();
 
     loop {
         tokio::select! {
-            // Read the next line from stdin.
-            line = stdin.next_line() => match line? {
-                Some(l) if l.trim() == "/quit" => break,
-                Some(l) if l.trim().is_empty() => {}
+            // Read the next line from stdin (byte-oriented; UTF-8 lossy).
+            read = stdin.read_until(b'\n', &mut line_buf) => match read {
+                Ok(0) => break,
+                Ok(_) => {
+                    while matches!(line_buf.last(), Some(b'\n' | b'\r')) {
+                        line_buf.pop();
+                    }
+                    let l = String::from_utf8_lossy(&line_buf).into_owned();
+                    line_buf.clear();
 
-                Some(l) => {
+                    if l.trim() == "/quit" {
+                        break;
+                    }
+                    if l.trim().is_empty() {
+                        continue;
+                    }
                     handle.send_user(l).await.context("send_user")?;
                 }
-                None => break,
+                Err(e) => return Err(e).context("stdin read"),
             },
             // Forward real-time text deltas to stdout.
             evt = sub.recv() => match evt {

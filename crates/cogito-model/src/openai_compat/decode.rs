@@ -60,10 +60,7 @@ impl Decoder {
     /// Returns `Result` for API consistency with future fallible decode paths
     /// (e.g. strict argument validation in v0.2+).
     #[allow(clippy::unnecessary_wraps)]
-    pub(crate) fn translate(
-        &mut self,
-        chunk: StreamChunk,
-    ) -> Result<Vec<ModelEvent>, ModelError> {
+    pub(crate) fn translate(&mut self, chunk: StreamChunk) -> Result<Vec<ModelEvent>, ModelError> {
         let mut out = Vec::new();
         for choice in chunk.choices {
             self.translate_choice(choice, &mut out);
@@ -71,12 +68,11 @@ impl Decoder {
         Ok(out)
     }
 
-    fn translate_choice(
-        &mut self,
-        choice: Choice,
-        out: &mut Vec<ModelEvent>,
-    ) {
-        let Choice { delta, finish_reason } = choice;
+    fn translate_choice(&mut self, choice: Choice, out: &mut Vec<ModelEvent>) {
+        let Choice {
+            delta,
+            finish_reason,
+        } = choice;
 
         // --- Text delta ---
         if let Some(text) = delta.content {
@@ -107,18 +103,21 @@ impl Decoder {
                 }
             }
             // Emit `ToolUseStarted` as soon as we know both call_id and name.
+            // Guard against empty strings: some providers (e.g. SenseNova) emit
+            // extra `tool_calls` delta fragments with index > 0 that carry
+            // empty-string id/name — treat those as incomplete and ignore them.
             if buf.block_index.is_none() {
-                if let (Some(id), Some(name)) =
-                    (buf.call_id.as_ref(), buf.name.as_ref())
-                {
-                    let block_index = self.next_tool_block;
-                    self.next_tool_block += 1;
-                    buf.block_index = Some(block_index);
-                    out.push(ModelEvent::ToolUseStarted {
-                        block_index,
-                        call_id: id.clone(),
-                        tool_name: name.clone(),
-                    });
+                if let (Some(id), Some(name)) = (buf.call_id.as_ref(), buf.name.as_ref()) {
+                    if !id.is_empty() && !name.is_empty() {
+                        let block_index = self.next_tool_block;
+                        self.next_tool_block += 1;
+                        buf.block_index = Some(block_index);
+                        out.push(ModelEvent::ToolUseStarted {
+                            block_index,
+                            call_id: id.clone(),
+                            tool_name: name.clone(),
+                        });
+                    }
                 }
             }
         }
@@ -144,8 +143,7 @@ impl Decoder {
                     let args = if buf.arguments.is_empty() {
                         serde_json::json!({})
                     } else {
-                        serde_json::from_str(&buf.arguments)
-                            .unwrap_or(serde_json::Value::Null)
+                        serde_json::from_str(&buf.arguments).unwrap_or(serde_json::Value::Null)
                     };
                     out.push(ModelEvent::ToolUseCompleted {
                         block_index,
@@ -219,7 +217,9 @@ mod tests {
             .expect("chunk 0 ok");
         assert!(e0.is_empty(), "empty content should not emit TextDelta");
 
-        let e1 = dec.translate(make_chunk(Some("Hello"), None)).expect("chunk 1 ok");
+        let e1 = dec
+            .translate(make_chunk(Some("Hello"), None))
+            .expect("chunk 1 ok");
         assert_eq!(e1.len(), 1);
         assert!(matches!(&e1[0], ModelEvent::TextDelta { chunk, .. } if chunk == "Hello"));
 
@@ -333,9 +333,12 @@ mod tests {
         let completed = finish_events
             .iter()
             .find_map(|e| match e {
-                ModelEvent::ToolUseCompleted { call_id, tool_name, args, .. } => {
-                    Some((call_id.clone(), tool_name.clone(), args.clone()))
-                }
+                ModelEvent::ToolUseCompleted {
+                    call_id,
+                    tool_name,
+                    args,
+                    ..
+                } => Some((call_id.clone(), tool_name.clone(), args.clone())),
                 _ => None,
             })
             .expect("ToolUseCompleted present");
