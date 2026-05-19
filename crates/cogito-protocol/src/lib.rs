@@ -23,6 +23,7 @@
 pub mod content;
 pub mod error;
 pub mod event;
+pub mod gateway;
 pub mod ids;
 pub mod job;
 pub mod session;
