@@ -1,6 +1,6 @@
-//! Stream chunk → `ModelEvent` for OpenAI Chat Completions.
+//! Stream chunk → `ModelEvent` for `OpenAI` Chat Completions.
 //!
-//! Key challenge: OpenAI does not emit per-tool-call boundary events.
+//! Key challenge: `OpenAI` does not emit per-tool-call boundary events.
 //! All `tool_calls` accumulate via `delta.tool_calls[i]` until
 //! `finish_reason: "tool_calls"` fires; the decoder emits one
 //! `ToolUseStarted` per new call id+name pair, accumulates partial
@@ -29,13 +29,13 @@ pub(crate) struct Decoder {
     /// `block_index` is synthesised: text is always 0; tools are 1..N in
     /// stream-index order.
     tool_calls: BTreeMap<u32, ToolCallBuf>,
-    /// Next `block_index` to assign for tool_use blocks (starts at 1).
+    /// Next `block_index` to assign for `tool_use` blocks (starts at 1).
     next_tool_block: u32,
 }
 
 #[derive(Debug, Default)]
 struct ToolCallBuf {
-    /// Synthesised block_index; `None` until both `call_id` and `name` are
+    /// Synthesised `block_index`; `None` until both `call_id` and `name` are
     /// known and `ToolUseStarted` has been emitted.
     block_index: Option<u32>,
     /// Opaque id assigned by the model (present in first fragment).
@@ -56,13 +56,17 @@ impl Decoder {
     }
 
     /// Translate one streaming JSON chunk into zero or more `ModelEvent`s.
+    ///
+    /// Returns `Result` for API consistency with future fallible decode paths
+    /// (e.g. strict argument validation in v0.2+).
+    #[allow(clippy::unnecessary_wraps)]
     pub(crate) fn translate(
         &mut self,
         chunk: StreamChunk,
     ) -> Result<Vec<ModelEvent>, ModelError> {
         let mut out = Vec::new();
         for choice in chunk.choices {
-            self.translate_choice(choice, &mut out)?;
+            self.translate_choice(choice, &mut out);
         }
         Ok(out)
     }
@@ -71,7 +75,7 @@ impl Decoder {
         &mut self,
         choice: Choice,
         out: &mut Vec<ModelEvent>,
-    ) -> Result<(), ModelError> {
+    ) {
         let Choice { delta, finish_reason } = choice;
 
         // --- Text delta ---
@@ -152,26 +156,25 @@ impl Decoder {
                 }
             }
 
-            // Token usage: OpenAI-compat may include it in a non-delta final
+            // Token usage: `OpenAI`-compat may include it in a non-delta final
             // chunk; v0.1 accepts zeroes here.
             let usage = Usage::default();
             let stop_reason = parse_finish_reason(&reason);
             out.push(ModelEvent::MessageCompleted { stop_reason, usage });
         }
-
-        Ok(())
     }
 }
 
-/// Map an OpenAI `finish_reason` string to a cogito `StopReason`.
+/// Map an `OpenAI` `finish_reason` string to a cogito `StopReason`.
 ///
-/// Case-insensitive; unknown values fall back to `EndTurn`.
+/// Case-insensitive; `"stop"`, `"end_turn"`, and unknown values fall back
+/// to `EndTurn`.
 fn parse_finish_reason(s: &str) -> StopReason {
     match s.to_ascii_lowercase().as_str() {
-        "stop" | "end_turn" => StopReason::EndTurn,
         "tool_calls" | "tool_use" => StopReason::ToolUse,
         "length" | "max_tokens" => StopReason::MaxTokens,
         "stop_sequence" => StopReason::StopSequence,
+        // "stop", "end_turn", and any unrecognised values map to EndTurn.
         _ => StopReason::EndTurn,
     }
 }

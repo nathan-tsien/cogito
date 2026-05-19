@@ -1,4 +1,4 @@
-//! Wire-level DTOs for the OpenAI Chat Completions API (streaming path).
+//! Wire-level DTOs for the `OpenAI` Chat Completions API (streaming path).
 //!
 //! These types are `pub(crate)` only — callers interact with the gateway
 //! through the `ModelGateway` trait, never directly with wire types.
@@ -38,7 +38,7 @@ pub(crate) struct Request {
 pub(crate) struct RequestMessage {
     /// Dialogue participant role.
     pub role: String,
-    /// Text content; omitted for assistant messages that carry tool_calls only.
+    /// Text content; omitted for assistant messages that carry `tool_calls` only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     /// For `role: "tool"` messages — the call id this result belongs to.
@@ -115,8 +115,9 @@ pub(crate) struct Choice {
 /// Incremental content carried by a streaming choice.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct ChoiceDelta {
-    /// Role hint — only present in the first chunk.
+    /// Role hint — only present in the first chunk; consumed during deserialization only.
     #[serde(default)]
+    #[allow(dead_code)]
     pub role: Option<String>,
     /// Partial text content from the assistant.
     #[serde(default)]
@@ -129,7 +130,7 @@ pub(crate) struct ChoiceDelta {
 /// Streaming fragment of a single tool call.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ToolCallDelta {
-    /// Stream-level index (NOT the block_index we synthesize).
+    /// Stream-level index (NOT the `block_index` we synthesize).
     pub index: u32,
     /// Call id — present only in the first fragment for this index.
     #[serde(default)]

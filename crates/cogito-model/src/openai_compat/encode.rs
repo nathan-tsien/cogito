@@ -1,4 +1,4 @@
-//! `ModelInput` → OpenAI Chat Completions request body.
+//! `ModelInput` → `OpenAI` Chat Completions request body.
 //!
 //! Key transform: cogito's `Message::User { content: [ToolResult …] }` blocks
 //! must be split into independent `{role: "tool", tool_call_id, content}` wire
@@ -13,7 +13,7 @@ use super::wire::{
     Request, RequestMessage, RequestTool, ToolCall, ToolCallFunction, ToolDef,
 };
 
-/// Encode a `ModelInput` into an OpenAI Chat Completions request body.
+/// Encode a `ModelInput` into an `OpenAI` Chat Completions request body.
 pub(crate) fn encode(input: ModelInput) -> Request {
     let mut messages = Vec::new();
     for m in input.messages {
