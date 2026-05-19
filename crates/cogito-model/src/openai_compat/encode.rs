@@ -9,9 +9,7 @@ use cogito_protocol::content::ContentBlock;
 use cogito_protocol::gateway::{Message, ModelInput};
 use cogito_protocol::tool::ToolResult;
 
-use super::wire::{
-    Request, RequestMessage, RequestTool, ToolCall, ToolCallFunction, ToolDef,
-};
+use super::wire::{Request, RequestMessage, RequestTool, ToolCall, ToolCallFunction, ToolDef};
 
 /// Encode a `ModelInput` into an `OpenAI` Chat Completions request body.
 pub(crate) fn encode(input: ModelInput) -> Request {
@@ -98,11 +96,14 @@ fn encode_assistant(content: Vec<ContentBlock>, out: &mut Vec<RequestMessage>) {
     for b in content {
         match b {
             ContentBlock::Text { text } => text_parts.push(text),
-            ContentBlock::ToolUse { call_id, tool_name, args } => {
+            ContentBlock::ToolUse {
+                call_id,
+                tool_name,
+                args,
+            } => {
                 // `serde_json::to_string` on a `Value` is infallible in
                 // practice; the closure default guards the rare edge case.
-                let arguments =
-                    serde_json::to_string(&args).unwrap_or_else(|_| "{}".into());
+                let arguments = serde_json::to_string(&args).unwrap_or_else(|_| "{}".into());
                 tool_calls.push(ToolCall {
                     id: call_id,
                     kind: "function".into(),

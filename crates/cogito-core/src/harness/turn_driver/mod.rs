@@ -14,11 +14,7 @@ use crate::harness::resume::ResumeDecision;
 
 /// Translate a `ResumeDecision` into the starting `TurnState` and run the
 /// FSM to completion.
-pub async fn enter_turn(
-    decision: ResumeDecision,
-    ctx: TurnCtx,
-    deps: TurnDeps,
-) -> TurnOutcome {
+pub async fn enter_turn(decision: ResumeDecision, ctx: TurnCtx, deps: TurnDeps) -> TurnOutcome {
     let initial = match decision {
         ResumeDecision::FreshTurn => TurnState::Init {
             ctx,
@@ -51,29 +47,32 @@ pub async fn run(initial: TurnState, deps: &TurnDeps) -> TurnOutcome {
     let mut state = initial;
     loop {
         state = match state {
-            TurnState::Init { ctx, resume } => {
-                transitions::init::transit(ctx, resume, deps).await
-            }
+            TurnState::Init { ctx, resume } => transitions::init::transit(ctx, resume, deps).await,
             TurnState::ContextManaged { ctx } => {
                 transitions::context_managed::transit(ctx, deps).await
             }
-            TurnState::PromptBuilt { ctx, input, surface } => {
-                transitions::prompt_built::transit(ctx, input, surface, deps).await
-            }
-            TurnState::ModelCalling { ctx, stream, surface } => {
-                transitions::model_calling::transit(ctx, stream, surface, deps).await
-            }
-            TurnState::ModelCompleted { ctx, output, surface } => {
-                transitions::model_completed::transit(ctx, output, surface, deps).await
-            }
+            TurnState::PromptBuilt {
+                ctx,
+                input,
+                surface,
+            } => transitions::prompt_built::transit(ctx, input, surface, deps).await,
+            TurnState::ModelCalling {
+                ctx,
+                stream,
+                surface,
+            } => transitions::model_calling::transit(ctx, stream, surface, deps).await,
+            TurnState::ModelCompleted {
+                ctx,
+                output,
+                surface,
+            } => transitions::model_completed::transit(ctx, output, surface, deps).await,
             TurnState::ToolDispatching {
                 ctx,
                 pending,
                 completed,
                 surface,
             } => {
-                transitions::tool_dispatching::transit(ctx, pending, completed, surface, deps)
-                    .await
+                transitions::tool_dispatching::transit(ctx, pending, completed, surface, deps).await
             }
             terminal @ (TurnState::Completed { .. }
             | TurnState::Paused { .. }

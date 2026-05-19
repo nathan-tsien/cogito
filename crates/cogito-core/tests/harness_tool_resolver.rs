@@ -1,6 +1,6 @@
 //! Integration tests for H07 Tool Call Resolver.
 
-use cogito_core::harness::tool_resolver::{resolve, ResolvedCall};
+use cogito_core::harness::tool_resolver::{ResolvedCall, resolve};
 use cogito_protocol::tool::{ExecutionClass, ToolDescriptor, ToolErrorKind, ToolResult};
 
 fn read_file_desc() -> ToolDescriptor {

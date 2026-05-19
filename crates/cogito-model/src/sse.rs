@@ -23,11 +23,20 @@ pub struct SseLine {
 /// Wrap a `reqwest::Response` body into an `SseLine` stream.
 ///
 /// Errors map any `reqwest` decode failure into `ModelError::Decode`.
-pub fn lines(response: Response) -> impl Stream<Item = Result<SseLine, ModelError>> + Send + 'static {
+pub fn lines(
+    response: Response,
+) -> impl Stream<Item = Result<SseLine, ModelError>> + Send + 'static {
     response.bytes_stream().eventsource().map(|res| match res {
         Ok(evt) => {
-            let event_name = if evt.event.is_empty() { None } else { Some(evt.event) };
-            Ok(SseLine { event: event_name, data: evt.data })
+            let event_name = if evt.event.is_empty() {
+                None
+            } else {
+                Some(evt.event)
+            };
+            Ok(SseLine {
+                event: event_name,
+                data: evt.data,
+            })
         }
         Err(e) => Err(wire::decode(format!("sse parse: {e}"))),
     })
@@ -57,8 +66,7 @@ pub fn replay_openai_compat_into_model_events(
                 continue;
             }
             let chunk: crate::openai_compat::wire::StreamChunk =
-                serde_json::from_str(&evt.data)
-                    .map_err(|e| ModelError::Decode(e.to_string()))?;
+                serde_json::from_str(&evt.data).map_err(|e| ModelError::Decode(e.to_string()))?;
             for m in decoder.translate(chunk)? {
                 out.push(m);
             }

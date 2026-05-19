@@ -5,9 +5,11 @@
 
 use std::panic::AssertUnwindSafe;
 
-use cogito_protocol::job::JobId;
-use cogito_protocol::tool::{ExecutionClass, InvokeOutcome, ToolErrorKind, ToolProvider, ToolResult};
 use cogito_protocol::ExecCtx;
+use cogito_protocol::job::JobId;
+use cogito_protocol::tool::{
+    ExecutionClass, InvokeOutcome, ToolErrorKind, ToolProvider, ToolResult,
+};
 use futures::FutureExt;
 
 use crate::harness::tool_resolver::ToolInvocation;
@@ -73,9 +75,7 @@ pub async fn dispatch(
 fn async_not_supported(name: &str) -> ToolResult {
     ToolResult::Error {
         kind: ToolErrorKind::InvocationFailed,
-        message: format!(
-            "tool `{name}` returned Async, but JobManager is not wired in Sprint 2"
-        ),
+        message: format!("tool `{name}` returned Async, but JobManager is not wired in Sprint 2"),
         retryable: false,
     }
 }

@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 
 use cogito_protocol::tool::{ToolDescriptor, ToolErrorKind, ToolResult};
 
-use crate::harness::dispatcher::{dispatch, DispatchOutcome};
+use crate::harness::dispatcher::{DispatchOutcome, dispatch};
 use crate::harness::hooks::HookDecision;
 use crate::harness::resume::ResumeDecision;
 use crate::harness::tool_resolver::ToolInvocation;

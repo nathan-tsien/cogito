@@ -1,14 +1,14 @@
 //! Integration tests for H04 Prompt Composer.
 
+use chrono::Utc;
 use cogito_core::harness::prompt::compose;
+use cogito_protocol::SCHEMA_VERSION;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::event::{ConversationEvent, EventPayload};
 use cogito_protocol::gateway::Message;
 use cogito_protocol::ids::{EventId, SessionId};
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::tool::ToolResult;
-use cogito_protocol::SCHEMA_VERSION;
-use chrono::Utc;
 
 fn evt(payload: EventPayload, seq: u64) -> ConversationEvent {
     ConversationEvent {
@@ -42,9 +42,7 @@ fn single_user_turn_projects_to_user_message() {
     let strategy = HarnessStrategy::default_with_model("test");
     let input = compose(&events, &strategy, &[]);
     assert_eq!(input.messages.len(), 1);
-    assert!(
-        matches!(&input.messages[0], Message::User { content } if content.len() == 1)
-    );
+    assert!(matches!(&input.messages[0], Message::User { content } if content.len() == 1));
 }
 
 #[test]
@@ -59,9 +57,7 @@ fn assistant_with_tool_use_and_result_round_trip() {
             1,
         ),
         evt(
-            EventPayload::AssistantMessageAppended {
-                text: "ok".into(),
-            },
+            EventPayload::AssistantMessageAppended { text: "ok".into() },
             2,
         ),
         evt(

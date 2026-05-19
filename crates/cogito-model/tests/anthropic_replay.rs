@@ -33,7 +33,13 @@ fn text_only_replay_yields_expected_sequence() -> Result<(), Box<dyn std::error:
     );
     let last = events.last().expect("non-empty");
     assert!(
-        matches!(last, ModelEvent::MessageCompleted { stop_reason: StopReason::EndTurn, .. }),
+        matches!(
+            last,
+            ModelEvent::MessageCompleted {
+                stop_reason: StopReason::EndTurn,
+                ..
+            }
+        ),
         "expected MessageCompleted(EndTurn) at end, got {last:?}"
     );
     Ok(())
@@ -46,9 +52,12 @@ fn tool_use_replay_yields_completed_event() -> Result<(), Box<dyn std::error::Er
     let (call_id, tool_name, args) = events
         .iter()
         .find_map(|e| match e {
-            ModelEvent::ToolUseCompleted { call_id, tool_name, args, .. } => {
-                Some((call_id.clone(), tool_name.clone(), args.clone()))
-            }
+            ModelEvent::ToolUseCompleted {
+                call_id,
+                tool_name,
+                args,
+                ..
+            } => Some((call_id.clone(), tool_name.clone(), args.clone())),
             _ => None,
         })
         .expect("ToolUseCompleted present");
@@ -57,7 +66,13 @@ fn tool_use_replay_yields_completed_event() -> Result<(), Box<dyn std::error::Er
     assert_eq!(args, serde_json::json!({ "path": "/tmp/x" }));
     let last = events.last().expect("non-empty");
     assert!(
-        matches!(last, ModelEvent::MessageCompleted { stop_reason: StopReason::ToolUse, .. }),
+        matches!(
+            last,
+            ModelEvent::MessageCompleted {
+                stop_reason: StopReason::ToolUse,
+                ..
+            }
+        ),
         "expected MessageCompleted(ToolUse) at end, got {last:?}"
     );
     Ok(())

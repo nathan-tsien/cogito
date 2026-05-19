@@ -44,7 +44,9 @@ impl MockModelGateway {
 
     /// Queue an error at `stream()` time.
     pub fn push_error(&self, message: impl Into<String>) {
-        self.scripts.lock().push_back(MockScript::Error(message.into()));
+        self.scripts
+            .lock()
+            .push_back(MockScript::Error(message.into()));
     }
 
     /// Inspect how many scripts remain (for test assertions).

@@ -10,7 +10,7 @@ use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::tool::ToolProvider;
 use dashmap::DashMap;
 use tokio::runtime::Handle as TokioHandle;
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::actor::{ActorDeps, ActorState, record_session_started};
@@ -62,8 +62,10 @@ impl Runtime {
         let (mailbox_tx, mailbox_rx) = mpsc::channel::<super::types::SessionCommand>(64);
         let (job_tx, job_rx) = mpsc::channel(32);
         let (broadcast_tx, _) = broadcast::channel::<cogito_protocol::stream::StreamEvent>(256);
-        let (turn_result_tx, turn_result_rx) =
-            mpsc::channel::<(cogito_protocol::ids::TurnId, cogito_protocol::turn::TurnOutcome)>(4);
+        let (turn_result_tx, turn_result_rx) = mpsc::channel::<(
+            cogito_protocol::ids::TurnId,
+            cogito_protocol::turn::TurnOutcome,
+        )>(4);
 
         // Per-session cancel token; starts as a fresh token.
         let cancel = Arc::new(parking_lot::Mutex::new(CancellationToken::new()));
@@ -191,15 +193,9 @@ impl RuntimeBuilder {
             None => TokioHandle::try_current()
                 .map_err(|e| RuntimeError::NoTokioRuntime(e.to_string()))?,
         };
-        let store = self
-            .store
-            .ok_or(RuntimeError::MissingDependency("store"))?;
-        let model = self
-            .model
-            .ok_or(RuntimeError::MissingDependency("model"))?;
-        let tools = self
-            .tools
-            .ok_or(RuntimeError::MissingDependency("tools"))?;
+        let store = self.store.ok_or(RuntimeError::MissingDependency("store"))?;
+        let model = self.model.ok_or(RuntimeError::MissingDependency("model"))?;
+        let tools = self.tools.ok_or(RuntimeError::MissingDependency("tools"))?;
         let strategy = self
             .strategy
             .ok_or(RuntimeError::MissingDependency("strategy"))?;

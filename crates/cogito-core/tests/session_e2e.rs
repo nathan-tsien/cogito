@@ -11,8 +11,8 @@ use cogito_core::runtime::{OpenMode, Runtime};
 use cogito_mock_model::MockModelGateway;
 use cogito_protocol::gateway::{ModelEvent, StopReason, Usage};
 use cogito_protocol::ids::SessionId;
-use cogito_protocol::stream::StreamEvent;
 use cogito_protocol::strategy::HarnessStrategy;
+use cogito_protocol::stream::StreamEvent;
 use cogito_store_jsonl::JsonlStore;
 use cogito_tools::{BuiltinToolProvider, ReadFile};
 

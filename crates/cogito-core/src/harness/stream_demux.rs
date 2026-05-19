@@ -35,7 +35,10 @@ where
 
     while let Some(evt) = stream.next().await {
         match evt? {
-            ModelEvent::TextDelta { block_index: _, chunk } => {
+            ModelEvent::TextDelta {
+                block_index: _,
+                chunk,
+            } => {
                 // StepRecorder buffers + broadcasts TextDelta internally.
                 recorder.on_text_delta(turn_id, chunk);
             }

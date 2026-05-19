@@ -178,11 +178,7 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
             },
         ),
         // Sprint 2: exercise the new context-management transition events.
-        envelope(
-            9,
-            Some(turn),
-            EventPayload::ContextManageEntered {},
-        ),
+        envelope(9, Some(turn), EventPayload::ContextManageEntered {}),
     ]
 }
 

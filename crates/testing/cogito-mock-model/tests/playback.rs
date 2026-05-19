@@ -4,7 +4,9 @@
 
 use cogito_mock_model::MockModelGateway;
 use cogito_protocol::ExecCtx;
-use cogito_protocol::gateway::{ModelEvent, ModelGateway, ModelInput, ModelParams, StopReason, Usage};
+use cogito_protocol::gateway::{
+    ModelEvent, ModelGateway, ModelInput, ModelParams, StopReason, Usage,
+};
 use cogito_protocol::ids::{SessionId, TurnId};
 use futures::StreamExt;
 

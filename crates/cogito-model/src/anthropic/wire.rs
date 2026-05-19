@@ -29,7 +29,9 @@ pub(crate) struct RequestMessage {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum RequestContentBlock {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -57,13 +59,22 @@ pub(crate) enum SseEvent {
     #[serde(rename = "message_start")]
     MessageStart { message: SseMessageStart },
     #[serde(rename = "content_block_start")]
-    ContentBlockStart { index: u32, content_block: SseContentBlockStart },
+    ContentBlockStart {
+        index: u32,
+        content_block: SseContentBlockStart,
+    },
     #[serde(rename = "content_block_delta")]
-    ContentBlockDelta { index: u32, delta: SseContentBlockDelta },
+    ContentBlockDelta {
+        index: u32,
+        delta: SseContentBlockDelta,
+    },
     #[serde(rename = "content_block_stop")]
     ContentBlockStop { index: u32 },
     #[serde(rename = "message_delta")]
-    MessageDelta { delta: SseMessageDelta, usage: SseUsage },
+    MessageDelta {
+        delta: SseMessageDelta,
+        usage: SseUsage,
+    },
     #[serde(rename = "message_stop")]
     MessageStop,
     #[serde(rename = "ping")]
@@ -80,8 +91,14 @@ pub(crate) struct SseMessageStart {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum SseContentBlockStart {
-    Text { text: String },
-    ToolUse { id: String, name: String, input: serde_json::Value },
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]

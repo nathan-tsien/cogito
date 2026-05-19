@@ -5,6 +5,7 @@ use std::sync::Arc;
 use cogito_core::harness::step_recorder::StepRecorder;
 use cogito_core::harness::stream_demux::demux;
 use cogito_mock_model::MockModelGateway;
+use cogito_protocol::ExecCtx;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::gateway::{
     ModelEvent, ModelGateway, ModelInput, ModelParams, StopReason, Usage,
@@ -12,7 +13,6 @@ use cogito_protocol::gateway::{
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::session::SessionMeta;
 use cogito_protocol::store::ConversationStore;
-use cogito_protocol::ExecCtx;
 use cogito_store_jsonl::JsonlStore;
 use tokio::sync::broadcast;
 
@@ -40,8 +40,7 @@ async fn make_recorder(
     ),
     Box<dyn std::error::Error>,
 > {
-    let store: Arc<dyn ConversationStore> =
-        Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
     let (tx, rx) = broadcast::channel(64);
     let sid = SessionId::new();
     let mut recorder = StepRecorder::new(Arc::clone(&store), tx, sid, 0);

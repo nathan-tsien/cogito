@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cogito_protocol::ExecCtx;
-use cogito_protocol::tool::{InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult};
+use cogito_protocol::tool::{
+    InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
+};
 
 /// One builtin tool exposed via `BuiltinToolProvider`. Concrete tools live
 /// in `crate::builtins::*`.

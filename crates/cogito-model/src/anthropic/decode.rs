@@ -39,17 +39,17 @@ impl Decoder {
     /// Translate one SSE event into zero or more `ModelEvent`s.
     ///
     /// `Ping` and unknown event types yield an empty vector.
-    pub(crate) fn translate(
-        &mut self,
-        sse: SseEvent,
-    ) -> Result<Vec<ModelEvent>, ModelError> {
+    pub(crate) fn translate(&mut self, sse: SseEvent) -> Result<Vec<ModelEvent>, ModelError> {
         match sse {
             SseEvent::MessageStart { message } => {
                 self.usage = into_usage(message.usage);
                 Ok(vec![])
             }
             SseEvent::Ping => Ok(vec![]),
-            SseEvent::ContentBlockStart { index, content_block } => {
+            SseEvent::ContentBlockStart {
+                index,
+                content_block,
+            } => {
                 match content_block {
                     SseContentBlockStart::Text { text } => {
                         self.text_buf.insert(index, text);
@@ -57,12 +57,11 @@ impl Decoder {
                     }
                     SseContentBlockStart::ToolUse { id, name, input } => {
                         // `input` is typically `{}`; partial_json deltas follow.
-                        let starting_json =
-                            if input.is_null() || input == serde_json::json!({}) {
-                                String::new()
-                            } else {
-                                input.to_string()
-                            };
+                        let starting_json = if input.is_null() || input == serde_json::json!({}) {
+                            String::new()
+                        } else {
+                            input.to_string()
+                        };
                         self.tool_args_buf.insert(
                             index,
                             ToolUseAccum {
@@ -105,8 +104,7 @@ impl Decoder {
                     let parsed: serde_json::Value = if acc.partial_json.is_empty() {
                         serde_json::json!({})
                     } else {
-                        serde_json::from_str(&acc.partial_json)
-                            .unwrap_or(serde_json::Value::Null)
+                        serde_json::from_str(&acc.partial_json).unwrap_or(serde_json::Value::Null)
                     };
                     return Ok(vec![ModelEvent::ToolUseCompleted {
                         block_index: index,

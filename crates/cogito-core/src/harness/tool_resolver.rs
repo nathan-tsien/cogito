@@ -47,9 +47,7 @@ pub fn resolve(
         let names: Vec<&str> = surface.iter().map(|d| d.name.as_str()).collect();
         return ResolvedCall::Error(ToolResult::Error {
             kind: ToolErrorKind::InvocationFailed,
-            message: format!(
-                "tool `{name}` is not available this turn. available: {names:?}"
-            ),
+            message: format!("tool `{name}` is not available this turn. available: {names:?}"),
             retryable: false,
         });
     };

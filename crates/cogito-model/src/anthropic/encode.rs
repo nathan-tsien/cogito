@@ -37,7 +37,11 @@ pub(crate) fn encode(input: ModelInput) -> Request {
 fn encode_block(b: ContentBlock) -> RequestContentBlock {
     match b {
         ContentBlock::Text { text } => RequestContentBlock::Text { text },
-        ContentBlock::ToolUse { call_id, tool_name, args } => RequestContentBlock::ToolUse {
+        ContentBlock::ToolUse {
+            call_id,
+            tool_name,
+            args,
+        } => RequestContentBlock::ToolUse {
             id: call_id,
             name: tool_name,
             input: args,
@@ -75,7 +79,9 @@ fn encode_block(b: ContentBlock) -> RequestContentBlock {
         },
         // `ContentBlock` is `#[non_exhaustive]`; future variants (e.g. Image)
         // are silently dropped until the encoder is extended in v0.2+.
-        _ => RequestContentBlock::Text { text: String::new() },
+        _ => RequestContentBlock::Text {
+            text: String::new(),
+        },
     }
 }
 

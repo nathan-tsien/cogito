@@ -7,8 +7,8 @@ pub mod wire;
 
 use std::time::Duration;
 
-use cogito_protocol::gateway::{ModelError, ModelEvent, ModelGateway, ModelInput};
 use cogito_protocol::ExecCtx;
+use cogito_protocol::gateway::{ModelError, ModelEvent, ModelGateway, ModelInput};
 use futures::stream::BoxStream;
 use reqwest::Client;
 
@@ -90,7 +90,9 @@ impl ModelGateway for AnthropicGateway {
             let message = response.text().await.unwrap_or_default();
             return Err(match status {
                 401 | 403 => ModelError::Auth,
-                429 => ModelError::RateLimited { retry_after_secs: None },
+                429 => ModelError::RateLimited {
+                    retry_after_secs: None,
+                },
                 _ => ModelError::Provider { status, message },
             });
         }

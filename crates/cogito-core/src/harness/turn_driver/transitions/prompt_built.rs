@@ -27,7 +27,11 @@ pub async fn transit(
         .await;
 
     match deps.model.stream(input, ctx.exec_ctx.clone()).await {
-        Ok(stream) => TurnState::ModelCalling { ctx, stream, surface },
+        Ok(stream) => TurnState::ModelCalling {
+            ctx,
+            stream,
+            surface,
+        },
         Err(e) => TurnState::Failed {
             reason: cogito_protocol::turn::TurnFailureReason::ModelGatewayFailed {
                 message: e.to_string(),

@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cogito_protocol::ExecCtx;
-use cogito_protocol::tool::{InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult};
+use cogito_protocol::tool::{
+    InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
+};
 
 /// How a composite provider handles name conflicts between children.
 #[derive(Debug, Clone)]
@@ -31,10 +33,7 @@ impl CompositeToolProvider {
     ///
     /// Returns `Err(String)` if `Strict` mode has duplicate names, or if
     /// `Prefixed` has a different number of prefixes than children.
-    pub fn new(
-        children: Vec<Arc<dyn ToolProvider>>,
-        naming: NamingPolicy,
-    ) -> Result<Self, String> {
+    pub fn new(children: Vec<Arc<dyn ToolProvider>>, naming: NamingPolicy) -> Result<Self, String> {
         if let NamingPolicy::Prefixed(ref prefixes) = naming {
             if prefixes.len() != children.len() {
                 return Err(format!(

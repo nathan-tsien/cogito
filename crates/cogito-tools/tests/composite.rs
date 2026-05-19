@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 
+use cogito_protocol::ExecCtx;
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::tool::{InvokeOutcome, ToolProvider, ToolResult};
-use cogito_protocol::ExecCtx;
 use cogito_tools::{BuiltinToolProvider, CompositeToolProvider, NamingPolicy, ReadFile};
 
 fn ctx() -> ExecCtx {
@@ -40,11 +40,9 @@ fn prefixed_namespaces_tools() {
             .with_tool(Arc::new(ReadFile))
             .build(),
     ) as Arc<dyn ToolProvider>;
-    let composite = CompositeToolProvider::new(
-        vec![a],
-        NamingPolicy::Prefixed(vec!["builtin".into()]),
-    )
-    .expect("build ok");
+    let composite =
+        CompositeToolProvider::new(vec![a], NamingPolicy::Prefixed(vec!["builtin".into()]))
+            .expect("build ok");
     let names: Vec<_> = composite.list().into_iter().map(|d| d.name).collect();
     assert_eq!(names, vec!["builtin/read_file"]);
 }
@@ -58,9 +56,8 @@ async fn prefixed_invokes_through_namespace() -> Result<(), Box<dyn std::error::
             .with_tool(Arc::new(ReadFile))
             .build(),
     ) as Arc<dyn ToolProvider>;
-    let composite =
-        CompositeToolProvider::new(vec![a], NamingPolicy::Prefixed(vec!["b".into()]))
-            .expect("build ok");
+    let composite = CompositeToolProvider::new(vec![a], NamingPolicy::Prefixed(vec!["b".into()]))
+        .expect("build ok");
     let outcome = composite
         .invoke(
             "b/read_file",
@@ -68,6 +65,9 @@ async fn prefixed_invokes_through_namespace() -> Result<(), Box<dyn std::error::
             ctx(),
         )
         .await;
-    assert!(matches!(outcome, InvokeOutcome::Sync(ToolResult::Output(_))));
+    assert!(matches!(
+        outcome,
+        InvokeOutcome::Sync(ToolResult::Output(_))
+    ));
     Ok(())
 }

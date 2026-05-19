@@ -29,7 +29,11 @@ pub async fn transit(
     };
 
     match output {
-        Ok(output) => TurnState::ModelCompleted { ctx, output, surface },
+        Ok(output) => TurnState::ModelCompleted {
+            ctx,
+            output,
+            surface,
+        },
         Err(e) => TurnState::Failed {
             reason: cogito_protocol::turn::TurnFailureReason::ModelGatewayFailed {
                 message: e.to_string(),

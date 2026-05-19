@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 
+use cogito_protocol::ExecCtx;
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::tool::{InvokeOutcome, ToolErrorKind, ToolProvider, ToolResult};
-use cogito_protocol::ExecCtx;
 use cogito_tools::{BuiltinToolProvider, ReadFile};
 
 fn ctx() -> ExecCtx {
@@ -64,7 +64,9 @@ async fn read_file_bad_args_returns_invalid_args() {
     let provider = BuiltinToolProvider::builder()
         .with_tool(Arc::new(ReadFile))
         .build();
-    let outcome = provider.invoke("read_file", serde_json::json!({}), ctx()).await;
+    let outcome = provider
+        .invoke("read_file", serde_json::json!({}), ctx())
+        .await;
     let InvokeOutcome::Sync(ToolResult::Error { kind, .. }) = outcome else {
         panic!("expected Error variant");
     };
