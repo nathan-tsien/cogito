@@ -155,3 +155,76 @@ fn parse_stop_reason(s: &str) -> StopReason {
         _ => StopReason::EndTurn,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[allow(clippy::wildcard_imports)]
+    use super::*;
+    use crate::anthropic::wire::{SseContentBlockStart, SseMessageStart, SseUsage};
+
+    #[test]
+    fn translate_message_start_yields_no_events() {
+        let mut dec = Decoder::new();
+        let events = dec
+            .translate(SseEvent::MessageStart {
+                message: SseMessageStart {
+                    usage: SseUsage {
+                        input_tokens: 10,
+                        output_tokens: 0,
+                    },
+                },
+            })
+            .expect("translate succeeds");
+        assert!(events.is_empty());
+        assert_eq!(dec.usage.input_tokens, 10);
+    }
+
+    #[test]
+    fn translate_text_block_accumulates_and_completes() {
+        let mut dec = Decoder::new();
+
+        // Start a text block at index 0.
+        let started = dec
+            .translate(SseEvent::ContentBlockStart {
+                index: 0,
+                content_block: SseContentBlockStart::Text {
+                    text: String::new(),
+                },
+            })
+            .expect("start ok");
+        assert!(started.is_empty());
+
+        // Two deltas.
+        let d1 = dec
+            .translate(SseEvent::ContentBlockDelta {
+                index: 0,
+                delta: crate::anthropic::wire::SseContentBlockDelta::TextDelta {
+                    text: "Hello".into(),
+                },
+            })
+            .expect("delta 1 ok");
+        assert_eq!(d1.len(), 1);
+        assert!(matches!(
+            &d1[0],
+            ModelEvent::TextDelta { chunk, .. } if chunk == "Hello"
+        ));
+
+        dec.translate(SseEvent::ContentBlockDelta {
+            index: 0,
+            delta: crate::anthropic::wire::SseContentBlockDelta::TextDelta {
+                text: ", world!".into(),
+            },
+        })
+        .expect("delta 2 ok");
+
+        // Stop seals the block.
+        let stopped = dec
+            .translate(SseEvent::ContentBlockStop { index: 0 })
+            .expect("stop ok");
+        assert_eq!(stopped.len(), 1);
+        assert!(matches!(
+            &stopped[0],
+            ModelEvent::TextBlockCompleted { text, .. } if text == "Hello, world!"
+        ));
+    }
+}
