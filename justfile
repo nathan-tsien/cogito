@@ -28,6 +28,10 @@ test crate="":
 bench:
     cargo bench --workspace
 
+# Run JSONL append baseline benchmark. Output lands in target/criterion.
+bench-baseline:
+    cargo bench -p cogito-store-jsonl --bench append_throughput
+
 # Run chaos tests (slow)
 chaos:
     cargo test --test resume_chaos -p cogito-core --release -- --nocapture
