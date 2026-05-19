@@ -19,9 +19,10 @@ tracing.workspace = true
 
 [dev-dependencies]
 cogito-test-fixtures.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tokio-test.workspace = true
 rstest.workspace = true
-tempfile = "3.10"
+tempfile.workspace = true
 
 [lints]
 workspace = true

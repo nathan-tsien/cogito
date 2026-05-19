@@ -93,6 +93,7 @@ insta = "1.40"
 proptest = "1.5"
 criterion = { version = "0.5", features = ["html_reports"] }
 rstest = "0.22"
+tempfile = "3.10"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
