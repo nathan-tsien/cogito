@@ -128,6 +128,44 @@ pub enum EventPayload {
         /// Structured failure reason.
         reason: TurnFailureReason,
     },
+
+    /// Recorded at the start of the `Init -> ContextManaged` transition.
+    /// v0.1 ships an immediate companion `ContextManageCompleted` because
+    /// H11 is a pass-through; ADR-0008 will replace the body with real
+    /// context decisions.
+    ContextManageEntered {
+        /// Turn this event belongs to.
+        turn_id: TurnId,
+    },
+
+    /// Recorded at the end of the `ContextManaged -> PromptBuilt`
+    /// transition. v0.1 pass-through carries no decision body.
+    ContextManageCompleted {
+        /// Turn this event belongs to.
+        turn_id: TurnId,
+    },
+
+    /// Recorded after H04 composes the prompt and H05 builds the tool
+    /// surface. Carries metadata only — the full prompt is NOT persisted
+    /// (event log is a state-recovery source, not a prompt cache; see
+    /// ADR-0007).
+    PromptComposed {
+        /// Turn this event belongs to.
+        turn_id: TurnId,
+        /// Provider model identifier used for this call.
+        model: String,
+        /// Number of tool descriptors in the surface.
+        surface_size: u32,
+    },
+
+    /// Recorded at the start of the `PromptBuilt -> ModelCalling`
+    /// transition (right before the gateway stream opens).
+    ModelCallStarted {
+        /// Turn this event belongs to.
+        turn_id: TurnId,
+        /// Provider model identifier.
+        model: String,
+    },
 }
 
 #[cfg(test)]
