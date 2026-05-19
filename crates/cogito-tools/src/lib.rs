@@ -1,4 +1,14 @@
-//! cogito-tools
+//! cogito-tools — builtin `ToolProvider` implementations + composition utility.
 //!
-//! Tool catalog and builtin tools. Defines the `Tool` trait and provides
-//! implementations for file I/O, shell execution, and `emit_note`.
+//! Brain never imports this crate directly (per ADR-0004 layer rule); the
+//! consumer wires concrete providers into Runtime as `Arc<dyn ToolProvider>`.
+
+#![warn(clippy::pedantic)]
+
+pub mod builtins;
+pub mod composite;
+pub mod provider;
+
+pub use builtins::ReadFile;
+pub use composite::{CompositeToolProvider, NamingPolicy};
+pub use provider::{BuiltinTool, BuiltinToolProvider, BuiltinToolProviderBuilder};
