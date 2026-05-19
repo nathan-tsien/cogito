@@ -11,12 +11,16 @@
 //! - [`job`]: `JobManager` trait, `JobId`, `JobStatus`, `JobCompletionEvent`
 //! - [`turn`]: `TurnOutcome`, `TurnFailureReason`
 //! - [`error`]: shared error kinds and helpers
+//! - [`ids`]: strongly-typed ULID newtypes (`EventId`, `SessionId`, `TurnId`)
 //!
 //! All v0.1 contract modules ship as part of Sprint 0 (Tasks 7-10 of
 //! the Sprint 0 closure plan).
 
 pub mod error;
+pub mod ids;
 pub mod job;
 pub mod stream;
 pub mod tool;
 pub mod turn;
+
+pub use ids::{EventId, SessionId, TurnId};
