@@ -1,71 +1,77 @@
-//! `OpenAiCompatGateway` — stub placeholder for Sprint 3+.
+//! `OpenAiCompatGateway` — implements `ModelGateway` against any
+//! OpenAI-compatible Chat Completions endpoint (vLLM / SGLang / Azure
+//! OpenAI / internal LLM gateway).
 //!
-//! Only `OpenAiCompatConfig` and `OpenAiCompatGateway` types are re-exported
-//! from the crate root; no `ModelGateway` impl is wired here yet.
+//! NOT the OpenAI Responses API — that arrives in Sprint 5.
+
+pub mod decode;
+pub mod encode;
+pub mod wire;
 
 use std::time::Duration;
 
-use cogito_protocol::gateway::{ModelError, ModelEvent, ModelGateway, ModelInput};
-use cogito_protocol::ExecCtx;
-use futures::stream::BoxStream;
+use cogito_protocol::gateway::ModelError;
 use reqwest::Client;
 
-/// Static configuration for `OpenAiCompatGateway`.
+/// Configuration for an OpenAI-Compatible endpoint.
+///
+/// `base_url` is required; auth header naming and scheme are configurable for
+/// private deployments that diverge from the OpenAI defaults.
 #[derive(Debug, Clone)]
 pub struct OpenAiCompatConfig {
-    /// Bearer token for the `Authorization` header.
-    pub api_key: String,
-    /// Base URL, e.g. `https://api.openai.com` or a custom endpoint.
+    /// Bearer token (or equivalent). `None` means no auth header is sent —
+    /// for unauthenticated private gateways.
+    pub api_key: Option<String>,
+    /// Required base URL, e.g. `http://vllm:8000/v1`.
     pub base_url: String,
+    /// HTTP header carrying the credential. Default: `Authorization`.
+    pub auth_header: String,
+    /// Scheme prefix prepended to `api_key`. Default: `Bearer`.
+    pub auth_scheme: String,
     /// Per-request timeout. Default: 5 minutes.
     pub timeout: Duration,
 }
 
 impl OpenAiCompatConfig {
-    /// Sensible defaults; caller provides only `api_key`.
+    /// Build with sensible defaults for OpenAI-style auth.
+    ///
+    /// The returned config sends no API key; set `cfg.api_key = Some(...)` for
+    /// authenticated deployments.
     #[must_use]
-    pub fn with_api_key(api_key: impl Into<String>) -> Self {
+    pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
-            api_key: api_key.into(),
-            base_url: "https://api.openai.com".into(),
+            api_key: None,
+            base_url: base_url.into(),
+            auth_header: "Authorization".into(),
+            auth_scheme: "Bearer".into(),
             timeout: Duration::from_secs(5 * 60),
         }
     }
 }
 
-/// `ModelGateway` impl for OpenAI-compatible endpoints (stub; Sprint 3+).
+/// `ModelGateway` implementation for OpenAI-compatible Chat Completions.
+///
+/// Construct via [`OpenAiCompatGateway::new`]; inject into the runtime as
+/// `Arc<dyn ModelGateway>`.
 pub struct OpenAiCompatGateway {
-    _cfg: OpenAiCompatConfig,
-    _client: Client,
+    cfg: OpenAiCompatConfig,
+    client: Client,
 }
 
 impl OpenAiCompatGateway {
-    /// Build a gateway.
+    /// Build a gateway from `cfg`.
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::Network` if the underlying reqwest client
-    /// cannot be constructed.
+    /// Returns `ModelError::Network` if the underlying reqwest client cannot be
+    /// constructed (rare — typically TLS configuration failures).
     pub fn new(cfg: OpenAiCompatConfig) -> Result<Self, ModelError> {
         let client = Client::builder()
             .timeout(cfg.timeout)
             .build()
             .map_err(|e| crate::error::from_reqwest(&e))?;
-        Ok(Self { _cfg: cfg, _client: client })
+        Ok(Self { cfg, client })
     }
 }
 
-#[async_trait::async_trait]
-impl ModelGateway for OpenAiCompatGateway {
-    async fn stream(
-        &self,
-        _input: ModelInput,
-        _ctx: ExecCtx,
-    ) -> Result<BoxStream<'static, Result<ModelEvent, ModelError>>, ModelError> {
-        Err(ModelError::Network("OpenAI-compat gateway not yet implemented".into()))
-    }
-
-    fn provider_id(&self) -> &'static str {
-        "openai_compat"
-    }
-}
+// `impl ModelGateway` added in Task 4.3 (see below).
