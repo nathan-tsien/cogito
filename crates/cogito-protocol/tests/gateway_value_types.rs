@@ -105,3 +105,64 @@ fn model_input_round_trip() -> serde_json::Result<()> {
     assert_eq!(json, json_back);
     Ok(())
 }
+
+use cogito_protocol::gateway::{ModelEvent, ModelOutput};
+
+#[test]
+fn model_event_text_delta_wire() -> serde_json::Result<()> {
+    let evt = ModelEvent::TextDelta {
+        block_index: 0,
+        chunk: "hello".into(),
+    };
+    let json = serde_json::to_value(&evt)?;
+    assert_eq!(json["kind"], "text_delta");
+    assert_eq!(json["block_index"], 0);
+    assert_eq!(json["chunk"], "hello");
+    let back: ModelEvent = serde_json::from_value(json)?;
+    assert_eq!(evt, back);
+    Ok(())
+}
+
+#[test]
+fn model_event_tool_use_completed_wire() -> serde_json::Result<()> {
+    let evt = ModelEvent::ToolUseCompleted {
+        block_index: 1,
+        call_id: "call_abc".into(),
+        name: "read_file".into(),
+        args: serde_json::json!({ "path": "/tmp/x" }),
+    };
+    let back: ModelEvent = serde_json::from_str(&serde_json::to_string(&evt)?)?;
+    assert_eq!(evt, back);
+    Ok(())
+}
+
+#[test]
+fn model_event_message_completed_carries_usage() -> serde_json::Result<()> {
+    let evt = ModelEvent::MessageCompleted {
+        stop_reason: StopReason::EndTurn,
+        usage: Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+        },
+    };
+    let back: ModelEvent = serde_json::from_str(&serde_json::to_string(&evt)?)?;
+    assert_eq!(evt, back);
+    Ok(())
+}
+
+#[test]
+fn model_output_round_trip() -> serde_json::Result<()> {
+    let mo = ModelOutput {
+        content: vec![ContentBlock::Text {
+            text: "hello".into(),
+        }],
+        stop_reason: StopReason::EndTurn,
+        usage: Usage {
+            input_tokens: 3,
+            output_tokens: 1,
+        },
+    };
+    let back: ModelOutput = serde_json::from_str(&serde_json::to_string(&mo)?)?;
+    assert_eq!(mo, back);
+    Ok(())
+}

@@ -94,3 +94,74 @@ pub struct ModelInput {
     /// Sampling parameters and model selection.
     pub params: ModelParams,
 }
+
+/// Provider-agnostic event emitted by `ModelGateway::stream`.
+///
+/// Adapters **pre-aggregate** provider quirks: text deltas pass through;
+/// each content block emits a sealed `*Completed` event when the wire-level
+/// `content_block_stop` (Anthropic) or `finish_reason` (`OpenAI` Chat
+/// Completions) arrives. H06 stays stateless w.r.t. block accumulation —
+/// see spec §Q1 mode X.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ModelEvent {
+    /// One streaming text chunk inside an in-flight text block. Forwarded
+    /// to the broadcast channel for live UI; persistence waits for
+    /// `TextBlockCompleted`.
+    TextDelta {
+        /// Zero-based index of the block within the response.
+        block_index: u32,
+        /// Partial text for this delta.
+        chunk: String,
+    },
+    /// A text block has been sealed by the provider; carries the full
+    /// accumulated text. H06 calls `recorder.on_text_block_complete(...)`.
+    TextBlockCompleted {
+        /// Zero-based index of the block within the response.
+        block_index: u32,
+        /// Full accumulated text for the completed block.
+        text: String,
+    },
+    /// A `tool_use` block has started; `call_id` and name are known. The model
+    /// has not yet finished emitting the arguments.
+    ToolUseStarted {
+        /// Zero-based index of the block within the response.
+        block_index: u32,
+        /// Opaque call identifier assigned by the model.
+        call_id: String,
+        /// Name of the tool being called.
+        name: String,
+    },
+    /// A `tool_use` block has been sealed by the provider; carries the full
+    /// parsed argument value. (Adapter buffered partial JSON internally.)
+    ToolUseCompleted {
+        /// Index of the block in the response.
+        block_index: u32,
+        /// Opaque call identifier.
+        call_id: String,
+        /// Tool name.
+        name: String,
+        /// Fully-parsed arguments.
+        args: serde_json::Value,
+    },
+    /// Last event on the stream. Carries terminal reason + usage.
+    MessageCompleted {
+        /// Reason the model stopped generating.
+        stop_reason: StopReason,
+        /// Token usage for the completed message.
+        usage: Usage,
+    },
+}
+
+/// Sealed assistant message output. Constructed by H06 by walking the
+/// `ModelEvent` stream from `stream()` to completion.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ModelOutput {
+    /// All content blocks the model emitted, in `block_index` order.
+    pub content: Vec<ContentBlock>,
+    /// Stop reason from the final `MessageCompleted` event.
+    pub stop_reason: StopReason,
+    /// Token usage from the final `MessageCompleted` event.
+    pub usage: Usage,
+}
