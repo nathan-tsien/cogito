@@ -193,16 +193,16 @@ impl RuntimeBuilder {
         };
         let store = self
             .store
-            .ok_or_else(|| RuntimeError::MissingDependency("store"))?;
+            .ok_or(RuntimeError::MissingDependency("store"))?;
         let model = self
             .model
-            .ok_or_else(|| RuntimeError::MissingDependency("model"))?;
+            .ok_or(RuntimeError::MissingDependency("model"))?;
         let tools = self
             .tools
-            .ok_or_else(|| RuntimeError::MissingDependency("tools"))?;
+            .ok_or(RuntimeError::MissingDependency("tools"))?;
         let strategy = self
             .strategy
-            .ok_or_else(|| RuntimeError::MissingDependency("strategy"))?;
+            .ok_or(RuntimeError::MissingDependency("strategy"))?;
 
         Ok(Arc::new(Runtime {
             handle,
