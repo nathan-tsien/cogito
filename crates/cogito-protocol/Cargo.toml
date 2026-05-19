@@ -16,6 +16,7 @@ uuid.workspace = true
 chrono.workspace = true
 ulid.workspace = true
 schemars.workspace = true
+futures.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

@@ -434,6 +434,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "futures",
  "insta",
  "proptest",
  "schemars",

@@ -12,6 +12,7 @@
 //! - [`ids`]: strongly-typed ULID newtypes (`EventId`, `SessionId`, `TurnId`)
 //! - [`job`]: `JobManager` trait, `JobId`, `JobStatus`, `JobCompletionEvent`
 //! - [`session`]: `SessionMeta` — per-session pass-through metadata
+//! - [`store`]: `ConversationStore` trait + `StoreError` (persisted event log backend contract)
 //! - [`stream`]: `StreamEvent` enum (real-time fanout to subscribers)
 //! - [`tool`]: `ToolProvider` trait, `ToolDescriptor`, `InvokeOutcome`, `ExecutionClass`
 //! - [`turn`]: `TurnOutcome`, `TurnFailureReason`
@@ -25,6 +26,7 @@ pub mod event;
 pub mod ids;
 pub mod job;
 pub mod session;
+pub mod store;
 pub mod stream;
 pub mod tool;
 pub mod turn;
@@ -33,3 +35,4 @@ pub use content::ContentBlock;
 pub use event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
 pub use ids::{EventId, SessionId, TurnId};
 pub use session::SessionMeta;
+pub use store::{ConversationStore, StoreError};
