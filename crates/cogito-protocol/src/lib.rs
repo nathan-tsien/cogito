@@ -47,3 +47,6 @@ pub use ids::{EventId, SessionId, TurnId};
 pub use session::SessionMeta;
 pub use store::{ConversationStore, StoreError};
 pub use strategy::{HarnessStrategy, ToolFilter};
+pub use tool::{
+    ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
+};
