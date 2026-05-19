@@ -4,22 +4,9 @@
 use cogito_protocol::job::{JobCompletionEvent, JobId, JobOutcome};
 use tokio::sync::oneshot;
 
-/// Opaque session identifier. Caller picks the string; cogito does not
-/// interpret it (typical: ulid or user-domain id).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SessionId(pub String);
-
-impl<S: Into<String>> From<S> for SessionId {
-    fn from(s: S) -> Self {
-        Self(s.into())
-    }
-}
-
-impl std::fmt::Display for SessionId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
+// Re-export the canonical session identifier from the protocol layer so all
+// runtime code uses the same type without an extra import path.
+pub use cogito_protocol::ids::SessionId;
 
 /// How `Runtime::open_session` should treat an existing session id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
