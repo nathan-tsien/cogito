@@ -1,6 +1,10 @@
 //! Serde round-trip + JSON shape tests for the small `gateway` value types.
 
-use cogito_protocol::gateway::{ModelParams, StopReason, Usage};
+use cogito_protocol::content::ContentBlock;
+use cogito_protocol::gateway::{
+    Message, ModelError, ModelEvent, ModelInput, ModelOutput, ModelParams, StopReason, Usage,
+};
+use cogito_protocol::tool::{ExecutionClass, ToolDescriptor};
 
 #[test]
 fn model_params_round_trip() -> serde_json::Result<()> {
@@ -38,10 +42,6 @@ fn usage_default_is_zero() {
     assert_eq!(u.input_tokens, 0);
     assert_eq!(u.output_tokens, 0);
 }
-
-use cogito_protocol::content::ContentBlock;
-use cogito_protocol::gateway::{Message, ModelInput};
-use cogito_protocol::tool::{ExecutionClass, ToolDescriptor};
 
 #[test]
 fn message_user_wire() -> serde_json::Result<()> {
@@ -106,8 +106,6 @@ fn model_input_round_trip() -> serde_json::Result<()> {
     Ok(())
 }
 
-use cogito_protocol::gateway::{ModelEvent, ModelOutput};
-
 #[test]
 fn model_event_text_delta_wire() -> serde_json::Result<()> {
     let evt = ModelEvent::TextDelta {
@@ -128,7 +126,7 @@ fn model_event_tool_use_completed_wire() -> serde_json::Result<()> {
     let evt = ModelEvent::ToolUseCompleted {
         block_index: 1,
         call_id: "call_abc".into(),
-        name: "read_file".into(),
+        tool_name: "read_file".into(),
         args: serde_json::json!({ "path": "/tmp/x" }),
     };
     let back: ModelEvent = serde_json::from_str(&serde_json::to_string(&evt)?)?;
@@ -166,8 +164,6 @@ fn model_output_round_trip() -> serde_json::Result<()> {
     assert_eq!(mo, back);
     Ok(())
 }
-
-use cogito_protocol::gateway::ModelError;
 
 #[test]
 fn model_error_display() {

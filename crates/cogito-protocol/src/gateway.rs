@@ -8,6 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::content::ContentBlock;
+use crate::tool::ToolDescriptor;
+
 /// Model invocation parameters carried in `ModelInput.params`.
 ///
 /// Field set is intentionally minimal in v0.1; provider adapters map only
@@ -55,9 +58,6 @@ pub struct Usage {
     /// Tokens produced as output.
     pub output_tokens: u32,
 }
-
-use crate::content::ContentBlock;
-use crate::tool::ToolDescriptor;
 
 /// A single message in the dialogue history passed to a model.
 ///
@@ -123,15 +123,15 @@ pub enum ModelEvent {
         /// Full accumulated text for the completed block.
         text: String,
     },
-    /// A `tool_use` block has started; `call_id` and name are known. The model
-    /// has not yet finished emitting the arguments.
+    /// A `tool_use` block has started; `call_id` and `tool_name` are known.
+    /// The model has not yet finished emitting the arguments.
     ToolUseStarted {
         /// Zero-based index of the block within the response.
         block_index: u32,
         /// Opaque call identifier assigned by the model.
         call_id: String,
-        /// Name of the tool being called.
-        name: String,
+        /// Name of the tool being called. Matches `ContentBlock::ToolUse.tool_name`.
+        tool_name: String,
     },
     /// A `tool_use` block has been sealed by the provider; carries the full
     /// parsed argument value. (Adapter buffered partial JSON internally.)
@@ -140,8 +140,8 @@ pub enum ModelEvent {
         block_index: u32,
         /// Opaque call identifier.
         call_id: String,
-        /// Tool name.
-        name: String,
+        /// Name of the tool that was called. Matches `ContentBlock::ToolUse.tool_name`.
+        tool_name: String,
         /// Fully-parsed arguments.
         args: serde_json::Value,
     },
