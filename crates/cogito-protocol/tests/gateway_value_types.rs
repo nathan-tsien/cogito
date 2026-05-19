@@ -166,3 +166,30 @@ fn model_output_round_trip() -> serde_json::Result<()> {
     assert_eq!(mo, back);
     Ok(())
 }
+
+use cogito_protocol::gateway::ModelError;
+
+#[test]
+fn model_error_display() {
+    assert_eq!(
+        ModelError::Network("connect refused".into()).to_string(),
+        "network error: connect refused"
+    );
+    assert_eq!(
+        ModelError::Provider {
+            status: 500,
+            message: "boom".into()
+        }
+        .to_string(),
+        "provider error 500: boom"
+    );
+    assert_eq!(ModelError::Auth.to_string(), "auth failed");
+    assert_eq!(
+        ModelError::RateLimited {
+            retry_after_secs: Some(30)
+        }
+        .to_string(),
+        "rate limited (retry-after: Some(30))"
+    );
+    assert_eq!(ModelError::Cancelled.to_string(), "cancelled");
+}

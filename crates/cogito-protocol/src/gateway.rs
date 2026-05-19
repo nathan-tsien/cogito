@@ -165,3 +165,39 @@ pub struct ModelOutput {
     /// Token usage from the final `MessageCompleted` event.
     pub usage: Usage,
 }
+
+/// Failures the gateway can report from `stream()` or during the streamed
+/// `Result<ModelEvent, ModelError>` items.
+///
+/// Marked `#[non_exhaustive]` so adapters can introduce provider-specific
+/// classifications later without a breaking change.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ModelError {
+    /// Network-layer failure (DNS, TCP, TLS, timeout).
+    #[error("network error: {0}")]
+    Network(String),
+    /// Provider returned a non-2xx HTTP response.
+    #[error("provider error {status}: {message}")]
+    Provider {
+        /// HTTP status code, e.g. 400, 500.
+        status: u16,
+        /// Best-effort extracted message from the provider's error body.
+        message: String,
+    },
+    /// Authentication failed (401 / 403, or missing credentials).
+    #[error("auth failed")]
+    Auth,
+    /// Rate limited by the provider; honor `retry_after_secs` if set.
+    #[error("rate limited (retry-after: {retry_after_secs:?})")]
+    RateLimited {
+        /// Seconds the provider asked us to back off (`Retry-After` header).
+        retry_after_secs: Option<u64>,
+    },
+    /// Response body decode failed (e.g. malformed JSON in SSE event).
+    #[error("decode error: {0}")]
+    Decode(String),
+    /// `ExecCtx.cancel` fired while the stream was in flight.
+    #[error("cancelled")]
+    Cancelled,
+}
