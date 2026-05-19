@@ -65,6 +65,32 @@ small per-session text-delta buffer.
 - ADR-0002 (event-sourced conversation log)
 - AGENTS.md §"Inviolable design principles" #2
 
+## Text block lifecycle
+
+Per ADR-0007 + spec §6.1, H02 batches text content by **wire-protocol
+content_block boundary**, not by timer or character threshold. The
+lifecycle is:
+
+1. H06 emits `text_delta` chunks for the current content_block.
+   `StepRecorder::on_text_delta` accumulates them into
+   `current_text_block.text` AND broadcasts each chunk as
+   `StreamEvent::TextDelta` for live subscribers. **Nothing is
+   persisted yet.**
+2. H06 emits `text_block_complete` when the model signals
+   `content_block_stop` for a text block.
+   `StepRecorder::on_text_block_complete` writes one
+   `AssistantMessageAppended` carrying the full accumulated text and
+   clears the buffer.
+
+On crash mid-block: the recorder dies with the SessionActor (no
+cross-turn state per ADR-0006 §3). The accumulated text is lost.
+Resume restarts the turn from `ModelCalling`, the model re-streams,
+and no partial assistant message ends up in the persisted log.
+
+This matches Codex's `should_persist_event_msg` (filters out
+`AgentMessageDelta`, persists only `AgentMessage`) and Claude Code's
+behavior.
+
 ## Implementation note (v0.1)
 
 H02 has no standalone object in v0.1. Logically it splits into:
