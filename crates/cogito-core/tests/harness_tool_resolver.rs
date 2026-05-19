@@ -36,20 +36,23 @@ fn valid_call_resolves_ok() {
 fn unknown_tool_returns_error() {
     let surface = vec![read_file_desc()];
     let r = resolve("c1", "nope", serde_json::json!({}), &surface);
-    let ResolvedCall::Error(ToolResult::Error { message, .. }) = r else {
-        panic!("expected ResolvedCall::Error, got Ok");
-    };
-    assert!(message.contains("not available"));
+    assert!(matches!(
+        r,
+        ResolvedCall::Error(ToolResult::Error { ref message, .. }) if message.contains("not available")
+    ));
 }
 
 #[test]
 fn missing_required_field_returns_invalid_args() {
     let surface = vec![read_file_desc()];
     let r = resolve("c1", "read_file", serde_json::json!({}), &surface);
-    let ResolvedCall::Error(ToolResult::Error { kind, .. }) = r else {
-        panic!("expected ResolvedCall::Error, got Ok");
-    };
-    assert_eq!(kind, ToolErrorKind::InvalidArgs);
+    assert!(matches!(
+        r,
+        ResolvedCall::Error(ToolResult::Error {
+            kind: ToolErrorKind::InvalidArgs,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -61,8 +64,11 @@ fn extra_field_rejected_by_strict_schema() {
         serde_json::json!({ "path": "/", "extra": 1 }),
         &surface,
     );
-    let ResolvedCall::Error(ToolResult::Error { kind, .. }) = r else {
-        panic!("expected ResolvedCall::Error, got Ok");
-    };
-    assert_eq!(kind, ToolErrorKind::InvalidArgs);
+    assert!(matches!(
+        r,
+        ResolvedCall::Error(ToolResult::Error {
+            kind: ToolErrorKind::InvalidArgs,
+            ..
+        })
+    ));
 }
