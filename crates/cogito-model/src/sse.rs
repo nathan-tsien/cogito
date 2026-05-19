@@ -33,6 +33,41 @@ pub fn lines(response: Response) -> impl Stream<Item = Result<SseLine, ModelErro
     })
 }
 
+/// Test helper: feed raw SSE bytes through the `OpenAI`-compat decoder
+/// synchronously and collect resulting `ModelEvent`s.
+///
+/// Not part of the public API surface — only used by replay integration tests.
+#[doc(hidden)]
+pub fn replay_openai_compat_into_model_events(
+    bytes: &[u8],
+) -> Result<Vec<cogito_protocol::gateway::ModelEvent>, ModelError> {
+    use eventsource_stream::EventStream;
+    use futures::StreamExt;
+
+    let body = futures::stream::iter(vec![Ok::<_, std::io::Error>(
+        ::bytes::Bytes::copy_from_slice(bytes),
+    )]);
+    let mut parsed = EventStream::new(body);
+    let mut decoder = crate::openai_compat::decode::Decoder::new();
+    let mut out = Vec::new();
+    futures::executor::block_on(async {
+        while let Some(res) = parsed.next().await {
+            let evt = res.map_err(|e| ModelError::Decode(format!("sse parse: {e}")))?;
+            if evt.data.is_empty() || evt.data == "[DONE]" {
+                continue;
+            }
+            let chunk: crate::openai_compat::wire::StreamChunk =
+                serde_json::from_str(&evt.data)
+                    .map_err(|e| ModelError::Decode(e.to_string()))?;
+            for m in decoder.translate(chunk)? {
+                out.push(m);
+            }
+        }
+        Ok::<_, ModelError>(())
+    })?;
+    Ok(out)
+}
+
 /// Test helper: feed raw SSE bytes through the Anthropic decoder
 /// synchronously and collect the resulting `ModelEvent`s. Used by
 /// integration replay tests; not part of the public API surface.
