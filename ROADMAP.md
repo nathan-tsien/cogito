@@ -6,7 +6,7 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprint 0 + Sprint 1 complete; Sprint 2 (Minimal Loop) next.
+> **v0.1 · Foundation** — Sprint 0 + Sprint 1 + Sprint 2 complete; Sprint 3 (Resume Coordinator) next.
 
 ## Version plan
 
@@ -42,15 +42,19 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] `AGENTS.md` §2 + §7 inviolable rules amended
 
 #### Sprint 2 · Minimal Loop (2 days)
-- [ ] `read_file` tool only (in `cogito-tools`)
-- [ ] Anthropic adapter in `cogito-model` with streaming
-- [ ] H01 Turn Driver state machine wired up (Init → PromptBuilt → ModelCalling → ModelCompleted → ToolDispatching → Completed)
-- [ ] H04 Prompt Composer (basic — system + history + tool schemas)
-- [ ] H05 Tool Surface Builder (strategy-filtered list)
-- [ ] H06 Stream Demultiplexer (Anthropic events → cogito events)
-- [ ] H07 Tool Call Resolver (JSON Schema validation, structured errors)
-- [ ] H08 Tool Dispatcher (sync path; panic catch around invoke)
-- [ ] CLI `cogito chat` works end-to-end against Anthropic with `read_file`
+- [x] `read_file` tool only (in `cogito-tools`)
+- [x] Anthropic adapter in `cogito-model` with streaming (also brought forward: OpenAI Chat Completions for vLLM/SGLang private deployments)
+- [x] H01 Turn Driver state machine wired up (Init → ContextManaged → PromptBuilt → ModelCalling → ModelCompleted → ToolDispatching → Completed/Paused/Failed)
+- [x] H04 Prompt Composer (basic — system + history + tool schemas)
+- [x] H05 Tool Surface Builder (strategy-filtered list)
+- [x] H06 Stream Demultiplexer (Anthropic + OpenAI-Compat events → cogito events; gateway-preaggregation X mode)
+- [x] H07 Tool Call Resolver (JSON Schema validation, structured errors)
+- [x] H08 Tool Dispatcher (sync path; panic catch around invoke)
+- [x] H09 Hook Pipeline (no-op insertion points; real hooks in Sprint 6)
+- [x] H10 Strategy Selector (`HarnessStrategy::default_with_model` factory; YAML registry in Sprint 5)
+- [x] `MockModelGateway` for integration tests
+- [x] `SessionActor::actor_main` Topology I + `Runtime::open_session` + `SessionHandle::{send_user, cancel_turn, shutdown}`
+- [x] CLI `cogito chat` works end-to-end against Anthropic OR vLLM/SGLang with `read_file`
 
 #### Sprint 3 · Resume Coordinator (2 days)
 - [ ] H03 Resume Coordinator with decision table fully implemented
