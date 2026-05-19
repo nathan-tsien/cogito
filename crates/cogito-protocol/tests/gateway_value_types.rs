@@ -38,3 +38,70 @@ fn usage_default_is_zero() {
     assert_eq!(u.input_tokens, 0);
     assert_eq!(u.output_tokens, 0);
 }
+
+use cogito_protocol::content::ContentBlock;
+use cogito_protocol::gateway::{Message, ModelInput};
+use cogito_protocol::tool::{ExecutionClass, ToolDescriptor};
+
+#[test]
+fn message_user_wire() -> serde_json::Result<()> {
+    let msg = Message::User {
+        content: vec![ContentBlock::Text {
+            text: "hello".into(),
+        }],
+    };
+    let json = serde_json::to_value(&msg)?;
+    assert_eq!(json["role"], "user");
+    assert_eq!(json["content"][0]["type"], "text");
+    let back: Message = serde_json::from_value(json)?;
+    assert_eq!(msg, back);
+    Ok(())
+}
+
+#[test]
+fn message_assistant_with_tool_use_wire() -> serde_json::Result<()> {
+    let msg = Message::Assistant {
+        content: vec![
+            ContentBlock::Text {
+                text: "Let me check.".into(),
+            },
+            ContentBlock::ToolUse {
+                call_id: "call_1".into(),
+                tool_name: "read_file".into(),
+                args: serde_json::json!({ "path": "/etc/hosts" }),
+            },
+        ],
+    };
+    let back: Message = serde_json::from_str(&serde_json::to_string(&msg)?)?;
+    assert_eq!(msg, back);
+    Ok(())
+}
+
+#[test]
+fn model_input_round_trip() -> serde_json::Result<()> {
+    let mi = ModelInput {
+        system: "You are helpful.".into(),
+        messages: vec![Message::User {
+            content: vec![ContentBlock::Text { text: "hi".into() }],
+        }],
+        tools: vec![ToolDescriptor {
+            name: "read_file".into(),
+            description: "Read a file.".into(),
+            schema: serde_json::json!({ "type": "object" }),
+            execution_class: ExecutionClass::AlwaysSync,
+            outputs_model_visible_multimodal: false,
+        }],
+        params: ModelParams {
+            model: "test".into(),
+            max_tokens: 256,
+            temperature: None,
+            top_p: None,
+            stop_sequences: vec![],
+        },
+    };
+    let json = serde_json::to_string(&mi)?;
+    let back: ModelInput = serde_json::from_str(&json)?;
+    let json_back = serde_json::to_string(&back)?;
+    assert_eq!(json, json_back);
+    Ok(())
+}

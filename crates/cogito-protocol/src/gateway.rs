@@ -55,3 +55,42 @@ pub struct Usage {
     /// Tokens produced as output.
     pub output_tokens: u32,
 }
+
+use crate::content::ContentBlock;
+use crate::tool::ToolDescriptor;
+
+/// A single message in the dialogue history passed to a model.
+///
+/// `Message` is provider-agnostic. The Anthropic adapter maps it 1:1 to
+/// Anthropic Messages API; the `OpenAI` Chat Completions adapter splits
+/// `ContentBlock::ToolResult` blocks inside `User` messages out into
+/// independent `{role: "tool", ...}` wire messages.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "role", rename_all = "lowercase")]
+pub enum Message {
+    /// User message; may carry `Text`, `Image` (v0.2+), or `ToolResult` blocks.
+    User {
+        /// Content blocks comprising this message.
+        content: Vec<ContentBlock>,
+    },
+    /// Assistant message; may carry `Text` and `ToolUse` blocks.
+    Assistant {
+        /// Content blocks comprising this message.
+        content: Vec<ContentBlock>,
+    },
+}
+
+/// Fully-formed input to `ModelGateway::stream`. Produced by H04 Prompt
+/// Composer at the `ContextManaged → PromptBuilt` transition.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ModelInput {
+    /// System prompt; may be empty.
+    pub system: String,
+    /// Dialogue history in canonical order (oldest first).
+    pub messages: Vec<Message>,
+    /// Tool descriptors the model is allowed to call this turn.
+    /// Adapters serialize this list to the provider's tool-schema format.
+    pub tools: Vec<ToolDescriptor>,
+    /// Sampling parameters and model selection.
+    pub params: ModelParams,
+}
