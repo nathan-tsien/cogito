@@ -1,0 +1,855 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ConversationEvent",
+  "description": "One persisted entry in a conversation's event log.\n\nEnvelope fields are at the JSON top level. The variant-specific payload is adjacently tagged with `tag = \"type\"` / `content = \"data\"`, flattened into the envelope.\n\nNote: `Eq` is deliberately not derived because several payload variants transitively carry `serde_json::Value` (via `ToolResult`, `SessionMeta`, `JobOutcome`), which does not implement `Eq`. This mirrors the rationale recorded on [`crate::content::ContentBlock`] and [`crate::session::SessionMeta`].\n\n`JsonSchema` is derived so `cogito-gen-schema` can call `schema_for!(ConversationEvent)` to emit the canonical `docs/schemas/conversation-event-v1.json`.",
+  "type": "object",
+  "oneOf": [
+    {
+      "description": "First event of every session.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "meta"
+          ],
+          "properties": {
+            "meta": {
+              "description": "Session-level metadata.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/SessionMeta"
+                }
+              ]
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "session_started"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A new turn has begun.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "user_input"
+          ],
+          "properties": {
+            "user_input": {
+              "description": "User input that triggered this turn.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ContentBlock"
+              }
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "turn_started"
+          ]
+        }
+      }
+    },
+    {
+      "description": "One content block of assistant text has been fully emitted.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "description": "Full text of the completed content block.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "assistant_message_appended"
+          ]
+        }
+      }
+    },
+    {
+      "description": "The model emitted a `tool_use` content block.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "args",
+            "call_id",
+            "tool_name"
+          ],
+          "properties": {
+            "args": {
+              "description": "Tool arguments as JSON."
+            },
+            "call_id": {
+              "description": "Opaque identifier for the tool call.",
+              "type": "string"
+            },
+            "tool_name": {
+              "description": "Name of the tool being invoked.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool_use_recorded"
+          ]
+        }
+      }
+    },
+    {
+      "description": "H08 returned a `ToolResult` for a previously recorded call.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "call_id",
+            "result"
+          ],
+          "properties": {
+            "call_id": {
+              "description": "Identifier matching the originating `ToolUseRecorded.call_id`.",
+              "type": "string"
+            },
+            "result": {
+              "description": "The tool result.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ToolResult"
+                }
+              ]
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool_result_recorded"
+          ]
+        }
+      }
+    },
+    {
+      "description": "The turn paused on an async tool call.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "job_id"
+          ],
+          "properties": {
+            "job_id": {
+              "description": "Identifier of the async job being awaited.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "turn_paused"
+          ]
+        }
+      }
+    },
+    {
+      "description": "An async job that previously paused this turn has finished.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "job_id",
+            "outcome"
+          ],
+          "properties": {
+            "job_id": {
+              "description": "Identifier of the completed job.",
+              "type": "string"
+            },
+            "outcome": {
+              "description": "Terminal outcome of the job (success/failed/cancelled).",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/JobOutcome"
+                }
+              ]
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "job_completed_recorded"
+          ]
+        }
+      }
+    },
+    {
+      "description": "The turn reached terminal Completed state.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "outcome"
+          ],
+          "properties": {
+            "outcome": {
+              "description": "Outcome detail.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/TurnOutcome"
+                }
+              ]
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "turn_completed"
+          ]
+        }
+      }
+    },
+    {
+      "description": "The turn ended in failure.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "reason"
+          ],
+          "properties": {
+            "reason": {
+              "description": "Structured failure reason.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/TurnFailureReason"
+                }
+              ]
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "turn_failed"
+          ]
+        }
+      }
+    }
+  ],
+  "required": [
+    "event_id",
+    "schema_version",
+    "seq",
+    "session_id",
+    "ts"
+  ],
+  "properties": {
+    "event_id": {
+      "description": "Globally unique, monotonic-per-process event identifier.",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Schema version of the envelope and payload.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "seq": {
+      "description": "Monotonic per-session sequence number. First event has `seq = 0`.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "session_id": {
+      "description": "Session this event belongs to.",
+      "type": "string"
+    },
+    "ts": {
+      "description": "Wall-clock timestamp at recorder serialization time.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "turn_id": {
+      "description": "Turn this event belongs to. `None` for session-level events.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "definitions": {
+    "ContentBlock": {
+      "description": "One unit of content as defined by the Anthropic / `OpenAI` wire formats.\n\nAdjacently-tagged (`tag = \"type\", content = \"data\"`) for forward compatibility: newtype-with-sequence bodies are allowed (unlike internal tagging), and new variants can be added without bumping `SCHEMA_VERSION` (see ADR-0007).\n\nNote: `PartialEq` is derived but not `Eq` because the `ToolUse.args` field and the embedded `ToolResult` carry `serde_json::Value`, which does not implement `Eq`. This mirrors the rationale in [`crate::tool::ToolResult`].\n\n`JsonSchema` is derived for schema-gen (Plan 2 Task 11). `args`, a raw `serde_json::Value`, uses schemars's built-in impl which renders as an open `true` schema (any JSON allowed).",
+      "oneOf": [
+        {
+          "description": "Plain assistant or user text.",
+          "type": "object",
+          "required": [
+            "data",
+            "type"
+          ],
+          "properties": {
+            "data": {
+              "type": "object",
+              "required": [
+                "text"
+              ],
+              "properties": {
+                "text": {
+                  "description": "The text content.",
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "text"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Model-issued tool call.",
+          "type": "object",
+          "required": [
+            "data",
+            "type"
+          ],
+          "properties": {
+            "data": {
+              "type": "object",
+              "required": [
+                "args",
+                "call_id",
+                "tool_name"
+              ],
+              "properties": {
+                "args": {
+                  "description": "Tool arguments as JSON."
+                },
+                "call_id": {
+                  "description": "Opaque identifier for the tool call.",
+                  "type": "string"
+                },
+                "tool_name": {
+                  "description": "Name of the tool being invoked.",
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "tool_use"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Result fed back to the model for a previously-issued tool call.",
+          "type": "object",
+          "required": [
+            "data",
+            "type"
+          ],
+          "properties": {
+            "data": {
+              "type": "object",
+              "required": [
+                "call_id",
+                "result"
+              ],
+              "properties": {
+                "call_id": {
+                  "description": "Identifier matching the originating `ToolUse.call_id`.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Structured result.",
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/ToolResult"
+                    }
+                  ]
+                }
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "tool_result"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "JobOutcome": {
+      "description": "Terminal outcome of a job, delivered through `on_complete` and `result`.\n\n**Serde representation note**: internally-tagged with `tag = \"kind\"`. All variants are unit or struct (no newtype-with-primitive), and no inner field collides with the tag name, so internal tagging is safe.\n\nNote: `PartialEq` is derived but not `Eq` because `ToolResult::Output` wraps `serde_json::Value`, which does not implement `Eq`.",
+      "oneOf": [
+        {
+          "description": "Tool result produced by the job. The wire format matches `ToolResult::Output`; the actor wraps it back into `ToolResult` when resuming the turn.",
+          "type": "object",
+          "required": [
+            "kind",
+            "result"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "success"
+              ]
+            },
+            "result": {
+              "description": "The terminal tool result for this job.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ToolResult"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "Job failed; the tool will see `ToolResult::Error { kind: AsyncFailed }`.",
+          "type": "object",
+          "required": [
+            "kind",
+            "message"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "failed"
+              ]
+            },
+            "message": {
+              "description": "Human-readable error description.",
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "Job was cancelled before completion (by `JobManager::cancel`).",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "cancelled"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "SessionMeta": {
+      "description": "Session-level metadata. All fields except `cogito_version` are optional / consumer-supplied.\n\nNote: `Eq` is deliberately not derived because the `extra` field carries `serde_json::Value`, which does not implement `Eq`. This mirrors the rationale in [`crate::content::ContentBlock`].\n\n`JsonSchema` is derived for schema-gen (Plan 2 Task 11). The `extra` field, a `serde_json::Map<String, serde_json::Value>`, leans on schemars's built-in impls (open object of arbitrary JSON values).",
+      "type": "object",
+      "required": [
+        "cogito_version"
+      ],
+      "properties": {
+        "cogito_version": {
+          "description": "Cogito library version that created this session.",
+          "type": "string"
+        },
+        "extra": {
+          "description": "Opaque consumer-supplied metadata; preserved verbatim.",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "model": {
+          "description": "Model identifier intended for this session (e.g. `\"claude-sonnet-4-6\"`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strategy": {
+          "description": "Strategy name (from `HarnessStrategy::name`) selected for this session.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tenant_id": {
+          "description": "Optional consumer-supplied tenant identifier. Cogito propagates only; enforcement is the consumer's responsibility.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user_id": {
+          "description": "Optional consumer-supplied user identifier. Cogito does no auth on this field — opaque pass-through.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ToolErrorKind": {
+      "description": "Classification of why a tool call failed. The model only ever sees `ToolResult::Error`; this kind helps H09 hooks and H10 strategy decide whether to retry or surface to the user.\n\nMarked `#[non_exhaustive]` so v0.2+ multimedia / MCP / subagent tools can introduce new failure shapes (e.g. `StorageUnavailable`, `McpServerDisconnected`) without breaking downstream `match` arms.",
+      "oneOf": [
+        {
+          "description": "H07 schema validation rejected the args.",
+          "type": "string",
+          "enum": [
+            "invalid_args"
+          ]
+        },
+        {
+          "description": "Tool returned a business-logic error.",
+          "type": "string",
+          "enum": [
+            "invocation_failed"
+          ]
+        },
+        {
+          "description": "The tool implementation panicked; caught at H08 Layer 3 (see spec §9).",
+          "type": "string",
+          "enum": [
+            "tool_panicked"
+          ]
+        },
+        {
+          "description": "Cancellation token fired during the invocation.",
+          "type": "string",
+          "enum": [
+            "cancelled"
+          ]
+        },
+        {
+          "description": "Tool-internal timeout (distinct from turn-level timeout, which produces `TurnFailureReason::TurnTimedOut`).",
+          "type": "string",
+          "enum": [
+            "timeout"
+          ]
+        },
+        {
+          "description": "Resuming a paused turn: `JobManager` lost track of the `JobId`.",
+          "type": "string",
+          "enum": [
+            "job_state_lost"
+          ]
+        },
+        {
+          "description": "Async job completed but reported an internal failure.",
+          "type": "string",
+          "enum": [
+            "async_failed"
+          ]
+        }
+      ]
+    },
+    "ToolResult": {
+      "description": "Result body returned by a tool. `Vec<ContentBlock>` arrives in v0.2 when the multimodal upgrade lands; v0.1 uses plain text via the convenience constructor [`ToolResult::text`].\n\nNote: `PartialEq` is derived but not `Eq` because `serde_json::Value` (used in the `Output` variant) does not implement `Eq`.",
+      "oneOf": [
+        {
+          "description": "Successful output. v0.1 represents content as a list of opaque JSON values; v0.2 replaces this with `Vec<ContentBlock>`.",
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "array",
+              "items": true
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Structured error. H08 records this as the tool's result, then feeds it back to the model so the model can decide how to proceed.",
+          "type": "object",
+          "required": [
+            "error"
+          ],
+          "properties": {
+            "error": {
+              "type": "object",
+              "required": [
+                "kind",
+                "message",
+                "retryable"
+              ],
+              "properties": {
+                "kind": {
+                  "description": "Classification of the failure reason.",
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/ToolErrorKind"
+                    }
+                  ]
+                },
+                "message": {
+                  "description": "Human-readable error message for the model and operator.",
+                  "type": "string"
+                },
+                "retryable": {
+                  "description": "Whether it is safe for the caller to retry the invocation.",
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "TurnFailureReason": {
+      "description": "Why a turn ended in `Failed`. Only Runtime-level errors (store I/O, gateway hard failure, panic, timeout, hook reject) escape here; tool errors stay inside `ToolResult::Error` and never bubble up.\n\n**Serde representation note**: internally-tagged with `tag = \"kind\"`. `ModelGatewayFailed` is a struct variant `{ message: String }` rather than `ModelGatewayFailed(String)` because internally-tagged enums cannot wrap a JSON primitive (the tag would have nowhere to go). Similarly, `TurnPanicked.location` is an owned `String` rather than `&'static str` so the type can derive `Deserialize` without a lifetime.",
+      "oneOf": [
+        {
+          "description": "`ConversationStore::append` returned an error.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "store_unavailable"
+              ]
+            }
+          }
+        },
+        {
+          "description": "`ModelGateway::stream` returned `Err(...)`.",
+          "type": "object",
+          "required": [
+            "kind",
+            "message"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "model_gateway_failed"
+              ]
+            },
+            "message": {
+              "description": "Human-readable error from the gateway.",
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "A panic was caught by Layer 2 (`TurnDriver` task). See spec §9.",
+          "type": "object",
+          "required": [
+            "kind",
+            "location"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "turn_panicked"
+              ]
+            },
+            "location": {
+              "description": "Location string captured from the panic payload.",
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "`tokio::time::timeout` fired around the turn task.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "turn_timed_out"
+              ]
+            }
+          }
+        },
+        {
+          "description": "An H09 hook returned `HookDecision::Reject`.",
+          "type": "object",
+          "required": [
+            "hook_name",
+            "kind",
+            "message"
+          ],
+          "properties": {
+            "hook_name": {
+              "description": "Name of the hook that rejected the turn.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "hook_rejected"
+              ]
+            },
+            "message": {
+              "description": "Human-readable rejection message.",
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "TurnOutcome": {
+      "description": "Terminal outcome of a single turn iteration. Note the FSM may loop internally (multiple sub-turns when the model calls sync tools and continues); a turn ends only when one of these variants is produced.\n\n**Serde representation note**: internally-tagged with `tag = \"kind\"`. All variants are unit or struct (no newtype-with-primitive), and no field name collides with the tag, so internal tagging is safe.",
+      "oneOf": [
+        {
+          "description": "Model returned `end_turn` without further tool calls.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "completed"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A tool returned `InvokeOutcome::Async`; the turn will resume when the matching `JobCompletionEvent` arrives.",
+          "type": "object",
+          "required": [
+            "job_id",
+            "kind"
+          ],
+          "properties": {
+            "job_id": {
+              "description": "Identifier of the async job that must complete before resuming.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "paused"
+              ]
+            }
+          }
+        },
+        {
+          "description": "`SessionHandle::cancel_turn` fired during execution.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "cancelled"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Unrecoverable failure; details in `reason`. `recorded_event_id` points to the last persisted `ConversationEvent` for diagnosis.",
+          "type": "object",
+          "required": [
+            "kind",
+            "reason",
+            "recorded_event_id"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "failed"
+              ]
+            },
+            "reason": {
+              "description": "Structured reason for the failure.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/TurnFailureReason"
+                }
+              ]
+            },
+            "recorded_event_id": {
+              "description": "Identifier of the last persisted event, for diagnosis.",
+              "type": "string"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

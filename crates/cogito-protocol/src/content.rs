@@ -19,11 +19,10 @@ use crate::tool::ToolResult;
 /// does not implement `Eq`. This mirrors the rationale in
 /// [`crate::tool::ToolResult`].
 ///
-/// `JsonSchema` is deliberately not derived in v0.1: it would require
-/// fanning the bound across `ToolResult`, `InvokeOutcome`, and `JobId`,
-/// which is out of scope for Sprint 1 Task 3 and properly belongs to
-/// the schema-gen wiring (Plan 2 Task 11).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// `JsonSchema` is derived for schema-gen (Plan 2 Task 11). `args`, a
+/// raw `serde_json::Value`, uses schemars's built-in impl which renders
+/// as an open `true` schema (any JSON allowed).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ContentBlock {

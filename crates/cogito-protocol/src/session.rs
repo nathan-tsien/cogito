@@ -14,10 +14,10 @@ use serde::{Deserialize, Serialize};
 /// carries `serde_json::Value`, which does not implement `Eq`. This
 /// mirrors the rationale in [`crate::content::ContentBlock`].
 ///
-/// `JsonSchema` is deliberately not derived in v0.1: the wider
-/// schema-gen cascade is owned by Plan 2 Task 11, which will add the
-/// derive uniformly across the protocol surface.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+/// `JsonSchema` is derived for schema-gen (Plan 2 Task 11). The `extra`
+/// field, a `serde_json::Map<String, serde_json::Value>`, leans on
+/// schemars's built-in impls (open object of arbitrary JSON values).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct SessionMeta {
     /// Cogito library version that created this session.
     pub cogito_version: String,

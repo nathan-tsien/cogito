@@ -31,10 +31,10 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// `JobOutcome`), which does not implement `Eq`. This mirrors the rationale
 /// recorded on [`crate::content::ContentBlock`] and [`crate::session::SessionMeta`].
 ///
-/// `JsonSchema` is deliberately not derived in v0.1: the wider schema-gen
-/// cascade is owned by Plan 2 Task 11, which will add the derive uniformly
-/// across the protocol surface.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// `JsonSchema` is derived so `cogito-gen-schema` can call
+/// `schema_for!(ConversationEvent)` to emit the canonical
+/// `docs/schemas/conversation-event-v1.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConversationEvent {
     /// Schema version of the envelope and payload.
     pub schema_version: u32,
@@ -61,9 +61,9 @@ pub struct ConversationEvent {
 
 /// The variant-specific payload of a `ConversationEvent`.
 ///
-/// Note: `Eq` and `JsonSchema` are deliberately not derived; see the
-/// rationale on [`ConversationEvent`].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Note: `Eq` is deliberately not derived; see the rationale on
+/// [`ConversationEvent`]. `JsonSchema` is derived to support schema-gen.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum EventPayload {

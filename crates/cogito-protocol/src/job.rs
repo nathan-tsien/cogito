@@ -15,8 +15,12 @@ use crate::tool::ToolResult;
 
 /// Opaque job identifier. Currently a Ulid so order corresponds to
 /// submission time within a process.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct JobId(Ulid);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+// schemars attribute lives on the inner field; the struct is
+// `#[serde(transparent)]` so the wire schema is the inner type's schema
+// (a String rendering of the ULID). Mirrors the pattern used in `ids.rs`.
+pub struct JobId(#[schemars(with = "String")] Ulid);
 
 impl Default for JobId {
     fn default() -> Self {
@@ -31,7 +35,7 @@ impl std::fmt::Display for JobId {
 }
 
 /// Lifecycle state of a job.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum JobStatus {
     /// Accepted by the manager but not yet scheduled.
@@ -55,7 +59,7 @@ pub enum JobStatus {
 ///
 /// Note: `PartialEq` is derived but not `Eq` because `ToolResult::Output`
 /// wraps `serde_json::Value`, which does not implement `Eq`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JobOutcome {
     /// Tool result produced by the job. The wire format matches
@@ -80,7 +84,7 @@ pub enum JobOutcome {
 ///
 /// Note: `PartialEq` is derived but not `Eq`; see `JobOutcome` for the
 /// reason.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct JobCompletionEvent {
     /// Identifier of the completed job.
     pub job_id: JobId,

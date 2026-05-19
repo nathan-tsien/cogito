@@ -13,7 +13,7 @@ use crate::job::JobId;
 /// **Serde representation note**: internally-tagged with `tag = "kind"`.
 /// All variants are unit or struct (no newtype-with-primitive), and no
 /// field name collides with the tag, so internal tagging is safe.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TurnOutcome {
@@ -47,7 +47,7 @@ pub enum TurnOutcome {
 /// cannot wrap a JSON primitive (the tag would have nowhere to go).
 /// Similarly, `TurnPanicked.location` is an owned `String` rather than
 /// `&'static str` so the type can derive `Deserialize` without a lifetime.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TurnFailureReason {
