@@ -157,6 +157,7 @@ fn parse_stop_reason(s: &str) -> StopReason {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     #[allow(clippy::wildcard_imports)]
     use super::*;

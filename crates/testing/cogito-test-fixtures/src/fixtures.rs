@@ -186,6 +186,17 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
     ]
 }
 
+/// Absolute path to a recorded SSE fixture under `fixtures/sse/`.
+///
+/// Returns a [`std::path::PathBuf`] rooted at this crate's source tree so the
+/// path is valid regardless of where the test binary runs.
+#[must_use]
+pub fn sse_fixture(name: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures/sse")
+        .join(name)
+}
+
 /// Serialize the canonical sample to JSONL bytes. Each event becomes
 /// one line; the final byte is a trailing newline.
 ///
