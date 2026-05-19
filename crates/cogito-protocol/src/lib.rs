@@ -31,6 +31,7 @@ pub mod ids;
 pub mod job;
 pub mod session;
 pub mod store;
+pub mod strategy;
 pub mod stream;
 pub mod tool;
 pub mod turn;
@@ -45,3 +46,4 @@ pub use gateway::{
 pub use ids::{EventId, SessionId, TurnId};
 pub use session::SessionMeta;
 pub use store::{ConversationStore, StoreError};
+pub use strategy::{HarnessStrategy, ToolFilter};
