@@ -9,12 +9,18 @@ publish.workspace = true
 [dependencies]
 cogito-protocol.workspace = true
 
+anyhow.workspace = true
 tokio.workspace = true
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+ulid.workspace = true
 chrono.workspace = true
+
+[[bin]]
+name = "write-sample"
+path = "src/bin/write_sample.rs"
 
 [lints]
 workspace = true

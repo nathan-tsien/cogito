@@ -506,12 +506,14 @@ dependencies = [
 name = "cogito-test-fixtures"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "cogito-protocol",
  "futures",
  "serde",
  "serde_json",
  "tokio",
+ "ulid",
  "uuid",
 ]
 
