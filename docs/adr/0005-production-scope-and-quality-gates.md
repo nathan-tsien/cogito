@@ -97,7 +97,7 @@ respective components.
    - Secret redaction via a `Redactor` trait applied to events before persistence (default no-op in v0.1; default redactor in v0.2; consumer-supplied policy at any version).
    - LLM provider credentials never logged.
    - **Threat model document** required before 1.0.
-   - **Credential isolation pattern** (sandbox proxy; tokens never reachable from sandbox-executed code) defined in ADR-0011 at v0.4. v0.1–v0.3 ship with documented hazard notice in the sandbox component doc.
+   - **Credential isolation pattern** (sandbox proxy; tokens never reachable from sandbox-executed code) defined in ADR-0013 at v0.4 (renumbered from ADR-0011 by PR #6). v0.1–v0.3 ship with documented hazard notice in the sandbox component doc.
 
 6. **Test depth**
    - Existing: unit + contract + integration + resume_chaos.
@@ -115,7 +115,7 @@ respective components.
 | `ConversationEvent` schema | Breaking allowed with migration tool + runbook; `schema_version` carries forward | Strict forward-compat: every future version reads every past version |
 | `ContentBlock` variants | Additive only (new variants OK); removing variants = major version | Same |
 | `StorageSystem` URI resolvability | Not guaranteed across time (backend's concern) | Same |
-| Storage HTTP wire protocol (ADR-0013, lands v0.6) | Independent versioning from event log; documented matrix in ADR-0013 | Same |
+| Storage HTTP wire protocol (ADR-0015, lands v0.6) | Independent versioning from event log; documented matrix in ADR-0015 | Same |
 | Trait shapes (`ToolProvider`, `JobManager`, etc.) | Breaking allowed in minor; default-method additions are non-breaking | SemVer strict |
 | Strategy YAML schema | Additive fields only (existing fields keep meaning) | Same; deprecation cycle for removals |
 
@@ -141,7 +141,7 @@ respective components.
 - v0.1 Sprint 1: lock the first SLO number (step record write latency).
 - v0.2 onward: each version adds its quality-gate evidence to `docs/quality/` (load tests, migration tools, audit reports).
 - 1.0: full public API stability commitment.
-- Sandbox / credential isolation work (ADR-0010 / ADR-0011) at v0.4.
+- Sandbox / credential isolation work (ADR-0012 / ADR-0013) at v0.4 (renumbered from ADR-0010/ADR-0011 by PR #6).
 
 ## References
 
