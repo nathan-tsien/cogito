@@ -1,0 +1,22 @@
+[package]
+name = "cogito-gen-schema"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Internal tool: generate JSON Schema for cogito-protocol public types"
+
+[[bin]]
+name = "cogito-gen-schema"
+path = "src/main.rs"
+
+[dependencies]
+cogito-protocol.workspace = true
+schemars.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true

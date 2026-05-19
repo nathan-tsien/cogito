@@ -15,8 +15,12 @@ use crate::tool::ToolResult;
 
 /// Opaque job identifier. Currently a Ulid so order corresponds to
 /// submission time within a process.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct JobId(Ulid);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+// schemars attribute lives on the inner field; the struct is
+// `#[serde(transparent)]` so the wire schema is the inner type's schema
+// (a String rendering of the ULID). Mirrors the pattern used in `ids.rs`.
+pub struct JobId(#[schemars(with = "String")] Ulid);
 
 impl Default for JobId {
     fn default() -> Self {
@@ -31,8 +35,14 @@ impl std::fmt::Display for JobId {
 }
 
 /// Lifecycle state of a job.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Marked `#[non_exhaustive]` because this type is part of the cross-language
+/// wire contract (per ADR-0007). Future distributed backends (v0.4+) may add
+/// states like `Retrying` or `Suspended`; reserving the variant set lets
+/// those land without breaking downstream `match` arms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum JobStatus {
     /// Accepted by the manager but not yet scheduled.
     Pending,
@@ -55,8 +65,15 @@ pub enum JobStatus {
 ///
 /// Note: `PartialEq` is derived but not `Eq` because `ToolResult::Output`
 /// wraps `serde_json::Value`, which does not implement `Eq`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Marked `#[non_exhaustive]` because this type is part of the cross-language
+/// wire contract (per ADR-0007) and reaches external readers via
+/// `EventPayload::JobCompletedRecorded`. Future variants (e.g.
+/// `TimedOut`, `Preempted`) can land without breaking downstream
+/// `match` arms.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum JobOutcome {
     /// Tool result produced by the job. The wire format matches
     /// `ToolResult::Output`; the actor wraps it back into `ToolResult`
@@ -80,7 +97,7 @@ pub enum JobOutcome {
 ///
 /// Note: `PartialEq` is derived but not `Eq`; see `JobOutcome` for the
 /// reason.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct JobCompletionEvent {
     /// Identifier of the completed job.
     pub job_id: JobId,

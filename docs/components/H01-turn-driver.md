@@ -5,7 +5,7 @@
 ## Role in Harness
 
 Drive one iteration of the agent loop as an **explicit finite state
-machine**. The only coordinator inside Brain — H02 through H10 do not call
+machine**. The only coordinator inside Brain — H02 through H11 do not call
 each other; H01 calls them.
 
 ## State machine

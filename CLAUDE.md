@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This repo already has detailed agent-facing documentation. Before making changes, consult:
 
 - **`AGENTS.md`** — the operating manual for AI coding agents. Inviolable design principles, coding standards, what to do when finishing a task, what's not OK. Read every time.
-- **`ARCHITECTURE.md`** — the 10-component Harness design, dependency constraints, workspace layout, turn states.
+- **`ARCHITECTURE.md`** — the 11-component Harness design (H01-H11), dependency constraints, workspace layout, turn states.
 - **`ROADMAP.md`** — the current sprint. **Only work on the current sprint** unless explicitly directed otherwise.
 - **`docs/components/H0X-*.md`** — per-component design notes. Read the doc for any component you're touching.
 - **`docs/adr/`** — architecture decision records.
@@ -24,7 +24,7 @@ If `AGENTS.md` and this file conflict, `AGENTS.md` wins.
 
 ## Inviolable design rules (summary; see AGENTS.md §"Inviolable design principles")
 
-1. **H01 Turn Driver is the only coordinator.** H02–H10 never call each other. Calling H05 from H04 is a bug, not a shortcut.
+1. **H01 Turn Driver is the only coordinator.** H02–H11 never call each other. Calling H05 from H04 is a bug, not a shortcut.
 2. **H02 Step Recorder writes events immediately.** No batching, except `text_delta` events (≤200ms or ≤500 chars, then flush).
 3. **State lives in Conversation Service, not Harness memory.** If a Harness instance crashes mid-turn, a new instance must resume from the event log. No cross-turn state in structs. Ask: "can this be rebuilt from the event log?"
 4. **Turn Driver is a state machine**, not a function chain. States: `Init → PromptBuilt → ModelCalling → ModelCompleted → ToolDispatching → {Completed | Paused | Failed}`. Each transition writes an event *before* transitioning.
@@ -77,8 +77,8 @@ Each crate maps to exactly one layer in the Brain / Hands / Session design (ADR-
 | `cogito-subagent` | Hands | v0.3 | `SubagentToolProvider` with 4 tools. |
 | `cogito-cli` | Surface | v0.1 | CLI entry point. |
 | `cogito-tui` | Surface | v0.2 | TUI. |
-| `testing/cogito-test-fixtures` | Testing | v0.1 | Test fixtures. |
-| `testing/cogito-mock-model` | Testing | v0.1 | Mock `ModelGateway`. |
+| `crates/testing/cogito-test-fixtures` | Testing | v0.1 | Test fixtures. |
+| `crates/testing/cogito-mock-model` | Testing | v0.1 | Mock `ModelGateway`. |
 
 **Brain importing a Hand directly is a build error.** Don't bloat `cogito-core` either: if something could live in `cogito-protocol` or another crate, put it there. (Codex learned this the hard way.) Adding a new crate requires explicit approval.
 

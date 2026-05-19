@@ -60,11 +60,13 @@ component work:
 
 | Metric | Provisional target | Owner |
 |---|---|---|
-| P99 step record write latency | < 5 ms | H02 + `ConversationStore` impl |
+| P99 step record write latency † | < 5 ms | H02 + `ConversationStore` impl |
 | P99 TTFT overhead from cogito above raw `ModelGateway` TTFT | < 50 ms | H01 + H04 + H06 |
 | P99 sync tool dispatch overhead | < 10 ms | H08 |
 | Idle session memory footprint | < 1 MiB | Runtime |
 | Concurrent sessions per process | ≥ 1000 active (degradation-free) | Runtime + tokio scheduler |
+
+> _† JSONL backend baseline is informational only (see `docs/quality/v0.1-jsonl-baseline.md`); production SLO is locked against `cogito-store-postgres` at v0.4._
 
 Sprint 1 must include a benchmark suite that measures the first metric
 to lock its real number. Subsequent sprints add measurements for their

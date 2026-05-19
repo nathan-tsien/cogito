@@ -108,6 +108,11 @@ fn invoke_outcome_serde_roundtrips() -> serde_json::Result<()> {
     match back {
         InvokeOutcome::Async(id) => assert_eq!(id, original_id),
         InvokeOutcome::Sync(_) => unreachable!("expected Async variant"),
+        // `InvokeOutcome` is `#[non_exhaustive]` (cross-language wire
+        // contract). Integration tests live in a sibling crate, so the
+        // wildcard arm is required even though no other variants exist
+        // today.
+        _ => unreachable!("unknown InvokeOutcome variant in fixture"),
     }
     Ok(())
 }

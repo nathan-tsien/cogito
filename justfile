@@ -28,6 +28,10 @@ test crate="":
 bench:
     cargo bench --workspace
 
+# Run JSONL append baseline benchmark. Output lands in target/criterion.
+bench-baseline:
+    cargo bench -p cogito-store-jsonl --bench append_throughput
+
 # Run chaos tests (slow)
 chaos:
     cargo test --test resume_chaos -p cogito-core --release -- --nocapture
@@ -59,3 +63,14 @@ replay session_id:
 
 clean:
     cargo clean
+
+# Regenerate JSON Schema for ConversationEvent into docs/schemas/.
+gen-schema:
+    cargo run -p cogito-gen-schema --release -- \
+        --output docs/schemas/conversation-event-v1.json
+
+# Verify committed schema matches the current Rust types (CI gate).
+gen-schema-check:
+    cargo run -p cogito-gen-schema --release -- \
+        --output docs/schemas/conversation-event-v1.json \
+        --check

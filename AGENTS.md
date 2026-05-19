@@ -34,9 +34,13 @@ Calling H05 from H04 is a bug, not a shortcut.
 
 ### 2. H02 Step Recorder writes events immediately
 
-No batching. No buffering across components. The only exception is
-`text_delta` events, which may be batched for ≤200ms or ≤500 chars,
-then flushed.
+No batching. No buffering across components. `StreamEvent::TextDelta`
+is live-only (never persisted by H02). Persistence happens at the
+wire-protocol content_block boundary: when the demultiplexer signals
+`text_block_complete`, H02 writes one `AssistantMessageAppended`
+carrying the full block text. This matches Codex and Claude Code,
+both of which align persistence with content_block boundaries. No
+timer-based or size-based batching exists.
 
 ### 3. State lives in Conversation Service, not in Harness memory
 
@@ -76,6 +80,18 @@ does not get to do I/O — if it needs to, it goes through a
 
 See ADR-0004 for the full layer map and import rules. See
 `docs/components/H09-hook-pipeline.md` for the hook purity rule.
+
+### 7. `ConversationStore` is Brain's command + single-session replay trait
+
+Methods on `ConversationStore` (`cogito-protocol::store`) MUST be
+scoped to: (a) writing one event, (b) reading events for one
+explicitly-named session. Adding any cross-session, cross-tenant, or
+user-history query method to this trait is a design error.
+
+Cross-session / catalog access for external (Go/Python/Node) services
+is served by reading the underlying storage directly (JSONL files in
+v0.1 dev/debug; Postgres tables in v0.4 production). See ADR-0007 for
+the principle and ADR-0014 (v0.4) for the `TenantContext` model.
 
 ## Coding standards
 

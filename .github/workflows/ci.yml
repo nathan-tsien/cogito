@@ -54,3 +54,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  schema-check:
+    name: gen-schema --check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify docs/schemas/conversation-event-v1.json is up-to-date
+        run: |
+          cargo run -p cogito-gen-schema --release -- \
+            --output docs/schemas/conversation-event-v1.json --check
