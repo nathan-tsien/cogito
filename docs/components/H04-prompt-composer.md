@@ -1,6 +1,6 @@
 # H04 · Prompt Composer
 
-> **Status**: 🚧 Not implemented · Sprint 2
+> **Status**: 🚧 In progress · Sprint 2
 
 ## Role in Harness
 
@@ -23,11 +23,18 @@ collaborate.
 ## Interface (design level)
 
 - `compose(history: &[ConversationEvent], strategy: &HarnessStrategy, surface: &[ToolDescriptor]) -> ModelInput`
-- `ModelInput` is a value type in `cogito-protocol`. It carries:
+- `ModelInput` is a value type in `cogito-protocol::gateway`. It carries:
   - `system: String` (the system message, from strategy)
-  - `messages: Vec<Message>` (the dialogue history in model-shaped form: user / assistant / tool_result turns)
-  - `tools: Vec<ToolSchema>` (the surfaced tools' name + JSON Schema, in stable order)
+  - `messages: Vec<Message>` (the dialogue history; each `Message::User { content: Vec<ContentBlock> }` or `Message::Assistant { content: Vec<ContentBlock> }`)
+  - `tools: Vec<ToolDescriptor>` (the surfaced tools, in stable order — adapter serializes to provider-specific tool schema at the wire level)
   - `params: ModelParams` (temperature, max_tokens, etc., from strategy)
+
+`Message` is a tagged union of two roles. There is **no third
+`ToolResult` role**: per Anthropic Messages API semantics, a tool result
+is a `ContentBlock::ToolResult { call_id, content, is_error }` carried
+*inside* a `Message::User`. The OpenAI Chat Completions adapter splits
+these into separate `{role: "tool", tool_call_id, content}` messages at
+serialization time; the cogito-internal shape stays user/assistant only.
 
 The function is **synchronous** and **deterministic**: same inputs always
 produce the same `ModelInput`.
@@ -62,9 +69,10 @@ The function walks events in seq order and projects to `Message`s:
 
 | Event | Projects to |
 |---|---|
-| `UserMessageAdded { text }` | `Message::User(text)` |
-| `ModelCallCompleted { text, tool_calls }` | `Message::Assistant { text, tool_calls }` |
-| `ToolResultRecorded { call_id, result }` | `Message::ToolResult { call_id, result }` |
+| `UserMessageAdded { content: Vec<ContentBlock> }` | `Message::User { content }` |
+| `AssistantMessageAppended { content: Vec<ContentBlock> }` (one per text block sealed by H02) | merged into the in-progress `Message::Assistant { content: [accumulated] }` for the same turn (multiple `AssistantMessageAppended`s within one turn append blocks to the same assistant message) |
+| `ToolUseEmitted { call_id, name, args }` | appended as `ContentBlock::ToolUse { call_id, name, args }` to the current assistant message |
+| `ToolResultRecorded { call_id, result }` | emitted as a fresh `Message::User { content: [ContentBlock::ToolResult { call_id, content, is_error }] }` after the assistant message that requested it |
 | `HookModified { ... }` | (no projection — informational only) |
 | `ContextCompacted { replaced_seq_range, replacement, ... }` (pending ADR-0008) | skip events with seq in `replaced_seq_range`; project `replacement` blocks into messages |
 | `SystemPromptInjected { suffix }` (pending ADR-0008) | append `suffix` to the composed `system` field |

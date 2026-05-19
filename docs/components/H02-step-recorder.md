@@ -1,6 +1,6 @@
 # H02 · Step Recorder
 
-> **Status**: 🚧 Not implemented · Sprint 1
+> **Status**: ✅ Implemented · Sprint 1 (text-block lifecycle, JSONL backend) · `crates/cogito-core/src/harness/step_recorder.rs`
 
 ## Role in Harness
 
@@ -36,7 +36,7 @@ lifecycle" below for the full state diagram.
 ## Critical invariants
 
 1. **Non-text-delta records write immediately.** No buffering, no batching, no coalescing. `record(event).await` returns only after the store has durably accepted the event.
-2. **Text-delta batching is the *only* exception**, bounded by 200 ms / 500 chars / explicit flush.
+2. **Text content is persisted at content_block boundary** — see "Text block lifecycle" below. Text deltas accumulate in an in-memory buffer; the buffer is drained to a single `AssistantMessageAppended` event when the demultiplexer signals `text_block_complete`. **No timer-based or size-based batching exists** (AGENTS.md §2). The live `StreamEvent::TextDelta` broadcast is independent of persistence.
 3. **Append-only.** Records are never updated, never deleted. Compaction / archival is out of scope.
 4. **Sequence is monotonic per session.** `EventSeq` is assigned by the store; H02 surfaces it back to the caller for ordering reference but does not generate it.
 5. **Failure surfaces upward as `RecordError`.** Store-level errors do not become panics or silent drops. H01 treats most `RecordError`s as fatal for the current turn (transition to `Failed`).
@@ -73,9 +73,9 @@ lifecycle" below for the full state diagram.
 
 ## Testing strategy
 
-- **Unit**: text-delta batching behavior under all three flush triggers (timer, char count, explicit flush). Synthetic delta streams.
+- **Unit**: text-block lifecycle — `on_text_delta` accumulates into the buffer + broadcasts each chunk; `on_text_block_complete` drains and writes one `AssistantMessageAppended`. Verify with synthetic delta streams that multiple `text_block_complete` boundaries produce N separate events (not one combined event).
 - **Contract**: any future `ConversationStore` impl must pass the same contract test as `cogito-store-jsonl`. Shared test in `cogito-protocol::tests::store_contract` (consumed by each store crate).
-- **Property** (proptest): given an arbitrary sequence of `record` and `record_text_delta` calls, the resulting event log replays to a structurally equivalent state.
+- **Property** (proptest): given an arbitrary sequence of `record`, `on_text_delta`, and `on_text_block_complete` calls, the resulting event log replays to a structurally equivalent state.
 - **Performance**: experiment E01 (10K events) targets P99 write < 5 ms and is the published budget.
 
 ## References
@@ -121,9 +121,11 @@ H02 has no standalone object in v0.1. Logically it splits into:
 
 - **Consumer side**: a `store_writer` tokio subtask owns the
   `ConversationStore` handle (`crates/cogito-core/src/runtime/store_writer.rs`).
-  It batches text-delta events on a 200ms timer or 500-char threshold,
-  force-flushes before any non-delta event, calls `store.append` with
-  per-event `fsync` (via `spawn_blocking`), and signals the `ack` oneshot.
+  It writes each `PersistCommand::Append` to the store as a single event
+  (no batching), calls `store.append` with per-event userspace flush (via
+  `spawn_blocking`), and signals the `ack` oneshot. Text-block accumulation
+  happens upstream in the recorder's in-memory `TextBlockBuf`; the writer
+  sees only sealed `AssistantMessageAppended` events.
 
 The producer/consumer split is what makes the inviolable rule "every
 state transition writes an event before transitioning" cheap: the

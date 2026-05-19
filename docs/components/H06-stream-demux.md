@@ -10,44 +10,63 @@ and feeds the buffer that H07 reads at `ModelCompleted`.
 
 ## Interface (design level)
 
-- `demux<S: Stream<Item = ModelEvent>>(stream: S, ctx: ExecCtx, recorder: &dyn StepRecorderHandle) -> impl Future<Output = ModelOutput>`
-- `ModelOutput` contains the sealed assistant message: `{ text, tool_uses, stop_reason, usage }`. It is what H07 reads.
-- Side effects during streaming: each chunk produces zero or more `record(...)` / `record_text_delta(...)` calls.
+- `demux<S: Stream<Item = Result<ModelEvent, ModelError>>>(stream: S, ctx: ExecCtx, recorder: &dyn StepRecorderHandle, broadcast: &broadcast::Sender<StreamEvent>) -> Result<ModelOutput, ModelError>`
+- `ModelOutput` contains the sealed assistant message: `{ content: Vec<ContentBlock>, stop_reason, usage }`. It is what H07 reads.
+- Side effects during streaming: each event produces zero or more `record(...)` / `on_text_delta(...)` / `on_text_block_complete(...)` calls on the recorder, plus broadcast sends on the live channel.
 
 ## Dependencies
 
 **Calls (out)**:
-- H02 Step Recorder (`record_text_delta` for assistant text; `record` for tool_use start / arg deltas / end events).
+- H02 Step Recorder (`on_text_delta` for live text fanout; `on_text_block_complete` to seal a text block; `record` for the eventual `ModelCallCompleted` event emitted by H01).
 
 **Called by**: H01 Turn Driver, during the `ModelCalling → ModelCompleted` transition.
 
 ## What gets emitted (provider-agnostic)
 
-Different LLM providers stream different event shapes. H06 normalizes them
-into a small, stable set of cogito-internal events:
+Different LLM providers stream different event shapes. The `ModelGateway`
+adapter **pre-aggregates** them into a small, stable set of cogito-internal
+`ModelEvent` variants (see `cogito-protocol::gateway::ModelEvent`). H06
+consumes this normalized stream:
 
-| Provider input (examples) | cogito event emitted |
+| Provider input (examples) | adapter emits `ModelEvent::` |
 |---|---|
-| Anthropic `content_block_delta { delta: text_delta }` | `TextDelta { turn_id, content }` (via batched recorder) |
-| Anthropic `content_block_start { tool_use }` | `ToolUseStarted { turn_id, call_id, name }` |
-| Anthropic `content_block_delta { delta: input_json_delta }` | (buffered internally; not recorded yet) |
-| Anthropic `content_block_stop` (for tool_use) | `ToolUseEmitted { turn_id, call_id, name, args }` |
-| OpenAI `chat.completion.chunk.choices[].delta.content` | `TextDelta` |
-| OpenAI `chat.completion.chunk.choices[].delta.tool_calls[]` | combined into `ToolUseEmitted` at message end |
-| `stop_reason: end_turn / tool_use / max_tokens / stop_sequence` | (returned in `ModelOutput.stop_reason`; turn transition recorded by H01) |
+| Anthropic `content_block_delta { delta: text_delta }` | `TextDelta { block_index, chunk }` |
+| Anthropic `content_block_stop` (text block) | `TextBlockCompleted { block_index, text }` (gateway accumulates per-block text) |
+| Anthropic `content_block_start { tool_use }` | `ToolUseStarted { block_index, call_id, name }` |
+| Anthropic `content_block_delta { delta: input_json_delta }` | (buffered inside adapter; not emitted) |
+| Anthropic `content_block_stop` (tool_use block) | `ToolUseCompleted { block_index, call_id, name, args }` |
+| OpenAI `choices[].delta.content` | `TextDelta { block_index: 0, chunk }` |
+| OpenAI `choices[].delta.tool_calls[i]` | buffered per call_id inside adapter |
+| OpenAI `finish_reason: tool_calls` | one `ToolUseCompleted` per buffered call + `MessageCompleted` |
+| `stop_reason: end_turn / tool_use / max_tokens / stop_sequence` | last event: `MessageCompleted { stop_reason, usage }` |
 
-The provider mapping lives in each `ModelGateway` impl; H06 receives the
-already-normalized `ModelEvent` stream from the gateway. The gateway is
-responsible for translating provider quirks; H06 is responsible for *what
-events get recorded as the stream progresses*.
+The **pre-aggregation responsibility lives in each `ModelGateway` adapter**
+(see `cogito-model::anthropic::decode` / `cogito-model::openai_compat::decode`).
+H06 never sees partial JSON or per-block running text — it only sees sealed
+`*Completed` events. This keeps H06 stateless w.r.t. block accumulation.
 
 ## Critical invariants
 
-1. **Streaming.** H06 does not buffer the entire response. Text deltas flow through to H02's batched path as they arrive.
-2. **Tool-use is buffered until `content_block_stop`.** Mid-stream partial JSON args are not recorded — only the fully-emitted `ToolUseEmitted` event is. (Partial JSON is rarely useful and is fragile to re-stream after resume.)
-3. **`text_delta` events use the batched recorder path** (200 ms / 500 char window); all other events go through immediate `record()`.
-4. **`ModelCallCompleted` is recorded by H01**, not by H06. H06 returns `ModelOutput`; H01 calls `record(ModelCallCompleted { ... })` as part of the transition to `ModelCompleted`.
-5. **No interpretation.** H06 does not parse tool args against schemas, doesn't validate names — that's H07. It just normalizes shape.
+1. **Streaming.** H06 does not buffer the entire response. `TextDelta`
+   events flow through to the live broadcast channel and to the recorder's
+   `on_text_delta` accumulator as they arrive.
+2. **Persistence is at content_block boundary, not chunk-by-chunk.**
+   H06 calls `recorder.on_text_block_complete()` exactly when
+   `ModelEvent::TextBlockCompleted` arrives. The recorder writes one
+   `AssistantMessageAppended` event per text block (no 200 ms timer, no
+   character threshold — see AGENTS.md §2 and H02 §"Text block lifecycle").
+3. **`TextDelta` is live-only.** Each `TextDelta` is broadcast to subscribers
+   via `StreamEvent::TextDelta` but **not** persisted directly; persistence
+   happens at `TextBlockCompleted`.
+4. **`ToolUseCompleted` is recorded immediately.** When H06 receives a
+   `ToolUseCompleted`, it calls `recorder.record(ToolUseEmitted { ... })`
+   immediately — no batching applies to non-text events.
+5. **`ModelCallCompleted` is recorded by H01**, not by H06. H06 returns
+   `ModelOutput`; H01 calls `record(ModelCallCompleted { ... })` as part of
+   the transition to `ModelCompleted`.
+6. **No interpretation.** H06 does not parse tool args against schemas,
+   doesn't validate names — that's H07. It only consumes the normalized
+   `ModelEvent` stream and writes the appropriate H02 events.
 
 ## v0.1 scope
 

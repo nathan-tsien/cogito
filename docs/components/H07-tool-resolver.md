@@ -1,22 +1,27 @@
 # H07 · Tool Call Resolver
 
-> **Status**: 🚧 Not implemented · Sprint 2
+> **Status**: 🚧 In progress · Sprint 2
 
 ## Role in Harness
 
-Parse each `ToolUseEmitted` event into a structured `ToolInvocation`,
-validate the args against the tool's JSON Schema, and surface failures as
-**structured results that the LLM can act on** — never as panics or
-propagated `Err`s.
+Parse each `ToolUseCompleted` event (emitted by H06 from the model
+stream) into a structured `ToolInvocation`, validate the args against
+the tool's JSON Schema, and surface failures as **structured results
+that the LLM can act on** — never as panics or propagated `Err`s.
 
 ## Interface (design level)
 
 - `resolve(use_event: &ToolUseEmitted, surface: &[ToolDescriptor]) -> ResolvedCall`
+- `ToolInvocation` and `ResolvedCall` are **harness-internal** value
+  types (not in `cogito-protocol`): they never persist, never cross a
+  language boundary, and are consumed exclusively by H08. They live in
+  `cogito-core::harness::tool_resolver`.
 - `ResolvedCall::Ok(ToolInvocation { call_id, name, args })`
-- `ResolvedCall::Error(ToolResult::Error { kind, message, call_id })`
-  - `kind: UnknownTool` — tool name not in this turn's surface
-  - `kind: SchemaMismatch` — args fail JSON Schema validation
-  - `kind: MalformedJson` — args weren't valid JSON in the first place
+- `ResolvedCall::Error(ToolResult)` — wraps a `ToolResult::Error` value
+  using the existing protocol types (`ToolErrorKind::InvalidArgs` for
+  schema mismatch or malformed JSON; a fresh local kind for unknown tool
+  is mapped onto `ToolErrorKind::InvocationFailed` with a descriptive
+  message)
 
 ## Dependencies
 

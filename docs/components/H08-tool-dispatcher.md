@@ -1,6 +1,6 @@
 # H08 · Tool Dispatcher
 
-> **Status**: 🚧 Not implemented · Sprint 4 (sync path in Sprint 2 as part of minimal loop)
+> **Status**: 🚧 In progress · Sprint 2 (sync path; `InvokeOutcome::Async` returns a stubbed `ToolResult::Error { kind: InvocationFailed }` until Sprint 4 wires `JobManager`)
 
 ## Role in Harness
 
@@ -11,8 +11,15 @@ Hands.
 ## Interface (design level)
 
 - `dispatch(call: ToolInvocation, provider: &dyn ToolProvider, ctx: ExecCtx) -> DispatchOutcome`
+- `DispatchOutcome` is **harness-internal** (lives in
+  `cogito-core::harness::dispatcher`), not in `cogito-protocol`. It is
+  consumed only by `transitions::tool_dispatching` to decide the next
+  `TurnState`.
 - `DispatchOutcome::SyncResult(ToolResult)` — proceed to next call (or back to `PromptBuilt`)
-- `DispatchOutcome::AsyncJob(JobId)` — turn transitions to `Paused`; resumes on `JobCompleted` event
+- `DispatchOutcome::AsyncJob(JobId)` — Sprint 4: turn transitions to
+  `Paused`; resumes on `JobCompleted` event. Sprint 2 never returns this
+  variant — `read_file` is `ExecutionClass::AlwaysSync`. The variant is
+  retained in the enum (`#[non_exhaustive]`) to avoid Sprint-4 re-shaping.
 
 ## Dependencies
 

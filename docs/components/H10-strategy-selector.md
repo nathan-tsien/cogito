@@ -1,6 +1,8 @@
 # H10 · Strategy Selector
 
-> **Status**: 🚧 Not implemented · Sprint 5
+> **Status**: 🚧 Sprint 2 lands the `HarnessStrategy::default_with_model(model_id)` factory + Mid field set
+> (name / system_prompt / allowed_tools / tool_order / model_params / max_turns).
+> YAML loader + multi-strategy registry + per-task selection remain Sprint 5.
 
 ## Role in Harness
 
@@ -26,17 +28,23 @@ sequence" for the canonical walkthrough.
 
 ## Interface (design level)
 
-- `select(model_id: &str, task: &TaskContext, registry: &StrategyRegistry) -> HarnessStrategy`
-- `HarnessStrategy` is a plain value type containing:
+- Sprint 2: `HarnessStrategy::default_with_model(model_id: impl Into<String>) -> HarnessStrategy` — a free constructor; no registry, no per-task selection.
+- Sprint 5: `select(model_id: &str, task: &TaskContext, registry: &StrategyRegistry) -> HarnessStrategy` — the full selector backed by a YAML registry.
+- `HarnessStrategy` is a plain value type in `cogito-protocol::strategy`. **v0.1 Mid field set** (locked Sprint 2):
+  - `name: String` — strategy identifier, written into `TurnStarted` event
   - `system_prompt: String`
-  - `allowed_tools: ToolFilter` (`All` or `Names(Vec<String>)`)
-  - `tool_order: Option<Vec<String>>` — for prompt cache stability
-  - `length_budget: usize` — max prompt tokens (consumed by H04)
-  - `model_params: ModelParams` — temperature, max_tokens, top_p, etc.
-  - `hooks: Vec<HookConfig>` — which hooks run, with what config (consumed by H09)
-  - `parallel_dispatch: bool` (0.x — false in v0.1)
+  - `allowed_tools: ToolFilter` — `All` or `Allow(Vec<String>)`
+  - `tool_order: Option<Vec<String>>` — explicit tool ordering for prompt-cache stability; `None` falls back to alphabetical
+  - `model_params: ModelParams` — model + temperature + max_tokens + top_p + stop_sequences
+  - `max_turns: u32` — agent-loop safety budget; default 16
 
-The function is **pure**: same `(model_id, task, registry)` → same strategy.
+  Reserved for later versions (intentionally **not** in v0.1):
+  - `length_budget: usize` — Sprint 7 / H11 ADR-0008
+  - `hooks: Vec<HookConfig>` — Sprint 6
+  - `allow_async_tools: bool` — Sprint 4 (with JobManager)
+  - `parallel_dispatch: bool` — 0.x option, off in v0.1
+
+The Sprint 2 factory and the Sprint 5 selector are both **pure**: same inputs → same strategy.
 
 ## Dependencies
 
@@ -52,14 +60,25 @@ the duration of the turn** and consumed (read-only) by H11, H04, H05, H09.
 3. **Strategy is immutable for the duration of a turn.** Even if a hook returns `Modify(strategy_override)`, the modification is recorded as an event and applied on the *next* re-entry (e.g., for the next iteration of the prompt-model-tool loop within the same turn).
 4. **Selection is deterministic.** No "if the model has been slow lately, pick a different one" logic; that's the consumer's deployment concern.
 
-## v0.1 scope
+## v0.1 Sprint 2 scope
+
+- `HarnessStrategy::default_with_model(model_id)` is the **only** way to obtain a strategy. CLI surfaces it via `--model <id> [--system "<prompt>"]`. No YAML, no per-task selection, no registry — that machinery is intentionally deferred.
+- Defaults baked into the factory:
+  - `name = "default"`
+  - `system_prompt = "You are a helpful assistant."` (overridable by CLI `--system`)
+  - `allowed_tools = ToolFilter::All`
+  - `tool_order = None`
+  - `model_params = { model: <model_id>, max_tokens: 4096, temperature: Some(0.7), top_p: None, stop_sequences: [] }`
+  - `max_turns = 16`
+
+## v0.x Sprint 5 scope (designed, not implemented)
 
 - Strategies are loaded from YAML files at runtime startup (`strategies/*.yaml`)
-- Selection key: `model_id` → strategy file (one-to-one mapping in v0.1)
-- `task` (e.g., "code-review" vs "chat" vs "tool-heavy") is reserved in the API but ignored in v0.1 (defaults to a single per-model strategy)
+- Selection key: `model_id` → strategy file (one-to-one mapping in 0.x)
+- `task` (e.g., "code-review" vs "chat" vs "tool-heavy") is reserved in the API but ignored in 0.x (defaults to a single per-model strategy)
 - Strategy registry is in-memory; no hot reload (process restart to pick up YAML edits)
 
-## Example strategy YAML
+## Example strategy YAML (Sprint 5+)
 
 ```yaml
 # strategies/claude-sonnet-default.yaml
@@ -68,14 +87,14 @@ system_prompt: |
   You are a helpful assistant for software engineering tasks.
 allowed_tools: ["read_file", "grep", "shell"]
 tool_order: ["read_file", "grep", "shell"]
-length_budget: 100000
 model_params:
   temperature: 0.7
   max_tokens: 4096
-hooks:
-  - name: "sensitive_content_filter"
-    config: { severity: "high" }
-parallel_dispatch: false
+max_turns: 32
+# Sprint 6+ fields (when H09 hooks land):
+# hooks:
+#   - name: "sensitive_content_filter"
+#     config: { severity: "high" }
 ```
 
 ## Open design questions
