@@ -201,3 +201,38 @@ pub enum ModelError {
     #[error("cancelled")]
     Cancelled,
 }
+
+use crate::ExecCtx;
+use futures::stream::BoxStream;
+
+/// Boundary contract between Brain and external LLM providers.
+///
+/// Implementations live in `cogito-model::anthropic` and
+/// `cogito-model::openai_compat`; consumers may add provider adapters of
+/// their own. Brain never imports those crates — it holds an
+/// `Arc<dyn ModelGateway>` injected by Runtime.
+///
+/// Cancellation: dropping the returned stream causes the adapter to abort
+/// the underlying HTTP connection. Tools / hooks signal cancellation via
+/// `ExecCtx.cancel`; adapters should listen on it (e.g. `select!` against
+/// `ctx.cancel.cancelled()`) to short-circuit before the next chunk read.
+#[async_trait::async_trait]
+pub trait ModelGateway: Send + Sync {
+    /// Open a streaming model call. The returned stream emits zero or more
+    /// non-`MessageCompleted` events followed by exactly one
+    /// `MessageCompleted` event, then ends.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError` if request construction or initial connect
+    /// fails. Per-chunk errors arrive as `Err` items inside the stream.
+    async fn stream(
+        &self,
+        input: ModelInput,
+        ctx: ExecCtx,
+    ) -> Result<BoxStream<'static, Result<ModelEvent, ModelError>>, ModelError>;
+
+    /// Stable identifier for telemetry and logging. Adapters return a
+    /// fixed string, not a per-instance value.
+    fn provider_id(&self) -> &'static str;
+}
