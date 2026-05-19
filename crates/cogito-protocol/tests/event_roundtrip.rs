@@ -19,7 +19,10 @@ fn context_manage_entered_round_trip() -> serde_json::Result<()> {
     };
     let back: ConversationEvent = serde_json::from_str(&serde_json::to_string(&evt)?)?;
     assert_eq!(evt.event_id, back.event_id);
-    assert!(matches!(back.payload, EventPayload::ContextManageEntered { .. }));
+    assert!(matches!(
+        back.payload,
+        EventPayload::ContextManageEntered { .. }
+    ));
     Ok(())
 }
 

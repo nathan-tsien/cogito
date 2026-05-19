@@ -297,6 +297,135 @@
           ]
         }
       }
+    },
+    {
+      "description": "Recorded at the start of the `Init -> ContextManaged` transition. v0.1 ships an immediate companion `ContextManageCompleted` because H11 is a pass-through; ADR-0008 will replace the body with real context decisions.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "turn_id"
+          ],
+          "properties": {
+            "turn_id": {
+              "description": "Turn this event belongs to.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "context_manage_entered"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Recorded at the end of the `ContextManaged -> PromptBuilt` transition. v0.1 pass-through carries no decision body.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "turn_id"
+          ],
+          "properties": {
+            "turn_id": {
+              "description": "Turn this event belongs to.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "context_manage_completed"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Recorded after H04 composes the prompt and H05 builds the tool surface. Carries metadata only — the full prompt is NOT persisted (event log is a state-recovery source, not a prompt cache; see ADR-0007).",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "model",
+            "surface_size",
+            "turn_id"
+          ],
+          "properties": {
+            "model": {
+              "description": "Provider model identifier used for this call.",
+              "type": "string"
+            },
+            "surface_size": {
+              "description": "Number of tool descriptors in the surface.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "turn_id": {
+              "description": "Turn this event belongs to.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "prompt_composed"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Recorded at the start of the `PromptBuilt -> ModelCalling` transition (right before the gateway stream opens).",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "model",
+            "turn_id"
+          ],
+          "properties": {
+            "model": {
+              "description": "Provider model identifier.",
+              "type": "string"
+            },
+            "turn_id": {
+              "description": "Turn this event belongs to.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "model_call_started"
+          ]
+        }
+      }
     }
   ],
   "required": [

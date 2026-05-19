@@ -25,7 +25,7 @@ use cogito_protocol::{
 };
 use ulid::Ulid;
 
-/// Build the canonical sample session: one session covering all nine
+/// Build the canonical sample session: one session covering all known
 /// [`EventPayload`] variants in their natural turn order, with
 /// deterministic identifiers and timestamps so the JSONL file is
 /// byte-reproducible.
@@ -176,6 +176,12 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
                 // precedent in event.rs's roundtrip test).
                 reason: TurnFailureReason::TurnTimedOut,
             },
+        ),
+        // Sprint 2: exercise the new context-management transition events.
+        envelope(
+            9,
+            Some(turn),
+            EventPayload::ContextManageEntered { turn_id: turn },
         ),
     ]
 }
