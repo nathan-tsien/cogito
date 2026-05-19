@@ -207,6 +207,53 @@ impl StepRecorder {
             .await
     }
 
+    /// Record the `Init → ContextManaged` transition entry point.
+    pub async fn record_context_manage_entered(
+        &mut self,
+        turn_id: TurnId,
+    ) -> Result<(), StoreError> {
+        self.append(Some(turn_id), EventPayload::ContextManageEntered {})
+            .await
+    }
+
+    /// Record the `ContextManaged → PromptBuilt` transition entry point.
+    pub async fn record_context_manage_completed(
+        &mut self,
+        turn_id: TurnId,
+    ) -> Result<(), StoreError> {
+        self.append(Some(turn_id), EventPayload::ContextManageCompleted {})
+            .await
+    }
+
+    /// Record prompt composition metadata. Called after H04/H05 produce the
+    /// `ModelInput` but before the gateway stream opens.
+    pub async fn record_prompt_composed(
+        &mut self,
+        turn_id: TurnId,
+        model: String,
+        surface_size: u32,
+    ) -> Result<(), StoreError> {
+        self.append(
+            Some(turn_id),
+            EventPayload::PromptComposed {
+                model,
+                surface_size,
+            },
+        )
+        .await
+    }
+
+    /// Record the start of a model gateway call. Called at the
+    /// `PromptBuilt → ModelCalling` transition boundary.
+    pub async fn record_model_call_started(
+        &mut self,
+        turn_id: TurnId,
+        model: String,
+    ) -> Result<(), StoreError> {
+        self.append(Some(turn_id), EventPayload::ModelCallStarted { model })
+            .await
+    }
+
     /// Record turn failure and broadcast [`StreamEvent::TurnFailed`] with
     /// a human-readable rendering of the reason.
     ///

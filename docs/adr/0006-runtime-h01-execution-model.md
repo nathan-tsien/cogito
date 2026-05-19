@@ -336,3 +336,39 @@ These are the central design work of the Context Management initiative.
 ADR-0008 will ratify them; this amendment only locks the architectural
 slot to ensure the initiative's deliverables are additive (no schema
 version bumps, no FSM breakage).
+
+### 2026-05-19 — Sprint 2 protocol-layer additions (design branch `design/sprint-2-minimal-loop`)
+
+Two scoping decisions taken while preparing Sprint 2 implementation,
+both consistent with this ADR's principles. Recorded here so future
+readers see the layer-rule reasoning without trawling the sprint spec.
+
+**1. `tokio_util::sync::CancellationToken` enters `cogito-protocol`.**
+
+`ExecCtx`, defined in `cogito-protocol::exec_ctx`, carries
+`cancel: CancellationToken`. This is the cooperative-cancel handle every
+tool / hook / model adapter checks. The rule "protocol stays
+dependency-light" still holds — `tokio-util` was already in the
+workspace (`features = ["rt"]`); Sprint 2 adds the `sync` feature for
+`CancellationToken`. The alternative (a hand-rolled `Arc<AtomicBool>`
+cancel signal) would force every implementor to re-create the
+`select!`-compatible primitive that `CancellationToken` already
+provides. The semantics (cooperative cancel signaled from
+`SessionHandle::cancel_turn`) is genuinely a Brain↔Hand boundary
+concern, so it belongs in protocol.
+
+**2. OpenAI-Compatible (Chat Completions) adapter brought forward into Sprint 2.**
+
+The original ROADMAP put OpenAI work in Sprint 5 as a multi-model
+strategy concern. Sprint 2 brings forward a **Chat Completions** adapter
+(not the OpenAI Responses API — that is still Sprint 5). The Chat
+Completions wire format is the de-facto contract for private
+OpenAI-compatible deployments (vLLM, SGLang, Azure OpenAI, internal LLM
+gateways); supporting it from v0.1 lets contributors test cogito against
+private-deployment endpoints without depending on Anthropic
+connectivity. Both adapters implement the same `ModelGateway` trait;
+the surface to the rest of Brain is unchanged. Sprint 5's work narrows
+to "add OpenAI Responses API adapter + multi-strategy selection".
+
+See `docs/superpowers/specs/2026-05-19-sprint-2-minimal-loop-design.md`
+for the full Sprint 2 design discussion.

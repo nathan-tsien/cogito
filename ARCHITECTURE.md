@@ -139,6 +139,16 @@ H02 Step Recorder
 Each transition writes an event to the event log **before** moving on
 (ADR-0003). H03 reconstructs state by replaying the log.
 
+**What is a finite state machine in cogito?** See
+`docs/components/H01-turn-driver.md` §"What is a Finite State Machine
+here?" for a primer covering the states-as-values model, the
+"event-before-transition" invariant, and why this design substitutes
+for cross-turn state. The Rust realization (typed-state enum
+`TurnState`, single-`run()` match loop, free transition functions per
+state) is sized for Sprint 2 / 3 implementation; the Sprint 2 design
+discussion that locked these choices lives in
+`docs/superpowers/specs/2026-05-19-sprint-2-minimal-loop-design.md` §Q5.
+
 **`ContextManaged` state** was added 2026-05-19 by PR #6 as an ADR-0006
 amendment. v0.1 Sprint 2 implements it as a pass-through (H11 not yet
 implemented; immediately transitions to `PromptBuilt`). The real H11
@@ -519,7 +529,10 @@ Notes:
 | `ConversationStore` | `cogito-store-*` crates + consumer | Append-only event log read / append / range / tail | v0.1 |
 | `ConversationEvent` (type) | (value type) | Wire format of every event, with `schema_version: u32` and `Vec<ContentBlock>` content | v0.1 |
 | `ContentBlock` (type) | (value type) | Tagged union of `Text` / `ToolUse` / `ToolResult` / `Image` / ... | v0.1 (Text + ToolUse + ToolResult); `Image` lands v0.2 |
-| `ModelGateway` | `cogito-model` | Streamed turn against an external LLM; ContentBlock serialization | v0.1 |
+| `ModelGateway` | `cogito-model::anthropic` + `cogito-model::openai_compat` (v0.1 Sprint 2); future provider adapters | `async fn stream(input, ctx) -> BoxStream<Result<ModelEvent, ModelError>>`; provider adapter pre-aggregates per-content-block sealed events (`TextBlockCompleted`, `ToolUseCompleted`, `MessageCompleted`). See `cogito-protocol::gateway`. | v0.1 |
+| `ModelInput` / `ModelOutput` / `ModelEvent` / `Message` / `ModelParams` / `StopReason` / `Usage` / `ModelError` (types) | (value types in `cogito-protocol::gateway`) | Provider-agnostic shapes consumed by `ModelGateway`; `Message` is `User { content: Vec<ContentBlock> }` ｜ `Assistant { content: Vec<ContentBlock> }` — tool_result lives inside `Message::User` per Anthropic semantics | v0.1 |
+| `HarnessStrategy` / `ToolFilter` (types) | (value types in `cogito-protocol::strategy`) | Per-turn behavior knobs: name, system_prompt, allowed_tools, tool_order, model_params, max_turns. v0.1 Sprint 2 ships `default_with_model` factory; Sprint 5 adds YAML registry. | v0.1 |
+| `ExecCtx` (type) | (value type in `cogito-protocol::exec_ctx`) | Per-invocation context handed to every tool/hook: `session_id`, `turn_id`, `deadline: Option<Instant>`, `cancel: CancellationToken`. v0.2 adds `storage`; v0.4 adds `tenant`. | v0.1 |
 | `ToolProvider` | `cogito-tools` / `cogito-mcp` / `cogito-subagent` / consumer | Tool catalog + `invoke(name, args, ctx) → InvokeOutcome` | v0.1 |
 | `JobManager` | `cogito-jobs` / consumer | Async work state tracking (`status` / `result` / `cancel`) plus mailbox-injected completion callback (`on_complete`). Submission lives on the concrete `LocalJobManager` type per ADR-0004 (Hands-internal). | v0.1 |
 | `HookHandler` | (Sprint 6) | Brain-side policy gates (see H09) | v0.1 |
@@ -529,6 +542,13 @@ Notes:
 | `StorageSystem` | `cogito-storage-*` / consumer | Non-text I/O via URI strings: `resolve` / `open` / `create` | v0.2 |
 | `BrainSpawner` | `cogito-core::runtime` | Recursive Brain spawning — used only by `cogito-subagent` | v0.3 |
 | `MetricsRecorder` | `cogito-observability-otel` / consumer | Pluggable metrics sink (no hard Prometheus dep) | v0.4 |
+
+> **Harness-internal value types** (`TurnState`, `TurnCtx`, `TurnDeps`,
+> `ResumeDecision`, `ToolInvocation`, `ResolvedCall`, `DispatchOutcome`)
+> live in `cogito-core::harness::*` rather than `cogito-protocol`. They
+> are not part of the cross-crate / cross-language contract — they are
+> the Brain's internal wiring between H01 and H03/H07/H08. See the
+> Sprint 2 design spec §Q1 for the placement rationale.
 
 Hand-internal primitives (`Sandbox`, HTTP clients, FS adapters) do **not**
 live in Protocol. They are scoped inside their owning Hand crate and used

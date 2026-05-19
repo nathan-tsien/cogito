@@ -108,6 +108,31 @@ impl ToolResult {
     }
 }
 
+/// Brain-facing contract for any component that exposes callable tools.
+///
+/// Implementations live in `cogito-tools` (builtin), `cogito-mcp` (v0.2+),
+/// and `cogito-subagent` (v0.3+). Brain holds an `Arc<dyn ToolProvider>`
+/// injected at Runtime construction; it never imports concrete crates directly
+/// (ADR-0004 layer rule).
+#[async_trait::async_trait]
+pub trait ToolProvider: Send + Sync {
+    /// Return metadata for every tool this provider exposes. H05 (Tool Surface
+    /// Builder) calls this once per turn to populate the model's tool schema.
+    fn list(&self) -> Vec<ToolDescriptor>;
+
+    /// Invoke a single tool by name. `args` is the raw JSON the model emitted
+    /// for this call; the implementation validates and executes it.
+    ///
+    /// Implementations MUST NOT panic — all failures must be returned as
+    /// `InvokeOutcome::Sync(ToolResult::Error { ... })`.
+    async fn invoke(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+        ctx: crate::ExecCtx,
+    ) -> InvokeOutcome;
+}
+
 /// Classification of why a tool call failed. The model only ever sees
 /// `ToolResult::Error`; this kind helps H09 hooks and H10 strategy decide
 /// whether to retry or surface to the user.

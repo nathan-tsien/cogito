@@ -1,6 +1,6 @@
 # H05 · Tool Surface Builder
 
-> **Status**: 🚧 Not implemented · Sprint 2
+> **Status**: 🚧 In progress · Sprint 2
 
 ## Role in Harness
 
@@ -44,8 +44,9 @@ to be a fast in-memory operation) and **deterministic**.
 
 ## v0.1 scope
 
-- Strategy declares an allow-list (`tools: ["read_file", "grep"]`) or a wildcard (`tools: "*"`)
-- H05 returns `provider.list()` filtered by the allow-list, sorted by name
+- Strategy declares `allowed_tools: ToolFilter` — `ToolFilter::All` (wildcard) or `ToolFilter::Allow(Vec<String>)` (explicit allow-list)
+- Strategy may set `tool_order: Option<Vec<String>>` — Sprint 2 honors this; tools named in `tool_order` come first in the order given, remaining tools follow alphabetically. `None` falls back to all-alphabetical (prompt-cache stable)
+- H05 returns `provider.list()` filtered by the allow-list and sorted per the rule above
 - No dynamic per-turn filtering by H05 itself. Dynamic narrowing is H11's responsibility (writes a `ToolFilterOverridden` event; H05 intersects with its strategy filter). A `pre_prompt` hook may also `Reject` an entire turn whose tool surface is unsafe.
 - No tool synthesis (we don't make up new tools per turn).
 - H11 itself is a Sprint-2-pass-through in v0.1, so dynamic narrowing is **not** observable yet; the architectural slot is reserved.

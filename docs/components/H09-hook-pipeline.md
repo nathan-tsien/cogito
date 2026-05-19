@@ -1,6 +1,10 @@
 # H09-hook · Hook Pipeline
 
-> **Status**: 🚧 Not implemented · See ROADMAP.md (Sprint 6)
+> **Status**: 🚧 Sprint 2 wires the five lifecycle insertion points
+> (`pre_prompt`, `pre_dispatch`, `post_model`, `post_turn`, `on_error`)
+> as no-op slots that always return `HookDecision::Allow`. Real
+> `HookHandler` trait, policy hooks, and `MetricsRecorder` integration
+> land Sprint 6.
 
 ## Role in Harness
 

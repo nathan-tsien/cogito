@@ -9,6 +9,8 @@
 //! - [`content`]: `ContentBlock` — wire-format unit shared between model, tools, persisted events
 //! - [`error`]: shared error kinds and helpers
 //! - [`event`]: `ConversationEvent` + `EventPayload` + `SCHEMA_VERSION` (persisted event log)
+//! - [`exec_ctx`]: `ExecCtx` — per-invocation context handed to every tool and hook
+//! - [`gateway`]: `ModelGateway` trait + value types (`ModelInput`, `ModelOutput`, `ModelEvent`, …)
 //! - [`ids`]: strongly-typed ULID newtypes (`EventId`, `SessionId`, `TurnId`)
 //! - [`job`]: `JobManager` trait, `JobId`, `JobStatus`, `JobCompletionEvent`
 //! - [`session`]: `SessionMeta` — per-session pass-through metadata
@@ -23,16 +25,28 @@
 pub mod content;
 pub mod error;
 pub mod event;
+pub mod exec_ctx;
+pub mod gateway;
 pub mod ids;
 pub mod job;
 pub mod session;
 pub mod store;
+pub mod strategy;
 pub mod stream;
 pub mod tool;
 pub mod turn;
 
 pub use content::ContentBlock;
 pub use event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
+pub use exec_ctx::ExecCtx;
+pub use gateway::{
+    Message, ModelError, ModelEvent, ModelGateway, ModelInput, ModelOutput, ModelParams,
+    StopReason, Usage,
+};
 pub use ids::{EventId, SessionId, TurnId};
 pub use session::SessionMeta;
 pub use store::{ConversationStore, StoreError};
+pub use strategy::{HarnessStrategy, ToolFilter};
+pub use tool::{
+    ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
+};

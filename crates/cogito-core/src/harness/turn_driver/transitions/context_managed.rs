@@ -1,0 +1,82 @@
+//! `ContextManaged → PromptBuilt` transition.
+//!
+//! Reads event history from the store, calls H04 Prompt Composer and H05
+//! Tool Surface Builder, runs the `pre_prompt` hook, and records
+//! `ContextManageCompleted` + `PromptComposed` before advancing.
+
+use futures::StreamExt;
+
+use crate::harness::hooks::HookDecision;
+use crate::harness::prompt::compose;
+use crate::harness::tool_surface::surface;
+use crate::harness::turn_driver::deps::TurnDeps;
+use crate::harness::turn_driver::state::{TurnCtx, TurnState};
+
+/// Transition from `ContextManaged` to `PromptBuilt` (or `Failed`).
+///
+/// Event-write order (ADR-0003):
+/// 1. `ContextManageCompleted` — marks the context-manage pass-through done.
+/// 2. `PromptComposed`          — records the prompt metadata.
+///
+/// History is read via `ConversationStore::replay(session_id, 0)` which
+/// streams all events. An empty history is valid (fresh session).
+pub async fn transit(ctx: TurnCtx, deps: &TurnDeps) -> TurnState {
+    // --- Record ContextManageCompleted (write before transition, ADR-0003) ---
+    let _ = deps
+        .step
+        .lock()
+        .await
+        .record_context_manage_completed(ctx.turn_id)
+        .await;
+
+    // --- Read history for H04 ---
+    // `replay(session_id, 0)` streams events with seq > 0, so the first event
+    // (seq 0, typically SessionStarted / TurnStarted) is skipped. For Sprint 2
+    // this is acceptable; Sprint 3 will pass `from_seq = u64::MAX` on fresh
+    // sessions and use the full log on resumes.
+    //
+    // If the store fails to replay we fall back to an empty history so the
+    // FSM can still make progress with an empty conversation context.
+    let mut history_stream = deps.store.replay(ctx.session_id, 0);
+    let mut history = Vec::new();
+    while let Some(result) = history_stream.next().await {
+        match result {
+            Ok(event) => history.push(event),
+            Err(_) => break,
+        }
+    }
+
+    // --- H05 Tool Surface Builder ---
+    let tool_surface = surface(&ctx.strategy, deps.tools.as_ref());
+
+    // --- H04 Prompt Composer ---
+    let model_input = compose(&history, &ctx.strategy, &tool_surface);
+
+    // --- Record PromptComposed ---
+    let surface_size = u32::try_from(tool_surface.len()).unwrap_or(u32::MAX);
+    let _ = deps
+        .step
+        .lock()
+        .await
+        .record_prompt_composed(
+            ctx.turn_id,
+            ctx.strategy.model_params.model.clone(),
+            surface_size,
+        )
+        .await;
+
+    // --- H09 pre_prompt hook ---
+    match deps.hooks.pre_prompt(&model_input) {
+        HookDecision::Allow => TurnState::PromptBuilt {
+            ctx,
+            input: model_input,
+            surface: tool_surface,
+        },
+        HookDecision::Reject { reason } => TurnState::Failed {
+            reason: cogito_protocol::turn::TurnFailureReason::HookRejected {
+                hook_name: "pre_prompt".into(),
+                message: reason,
+            },
+        },
+    }
+}

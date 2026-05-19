@@ -1,12 +1,51 @@
 # H01 · Turn Driver
 
-> **Status**: 🚧 Not implemented · Sprint 2–3
+> **Status**: 🚧 In progress · Sprint 2 (FSM body + sync tool loop) · resume logic Sprint 3 · chaos test Sprint 3
 
 ## Role in Harness
 
 Drive one iteration of the agent loop as an **explicit finite state
 machine**. The only coordinator inside Brain — H02 through H11 do not call
 each other; H01 calls them.
+
+## What is a Finite State Machine here?
+
+H01 is implemented as a **finite state machine (FSM)**, not as a function
+chain. Concretely:
+
+1. **States are values, not call positions.** Each state — `Init`,
+   `ContextManaged`, `PromptBuilt`, `ModelCalling`, `ModelCompleted`,
+   `ToolDispatching`, `Completed`, `Paused`, `Failed` — is a Rust enum
+   variant (`TurnState`) carrying the data its outgoing transition needs.
+2. **Transitions are explicit.** Each transition is a function that
+   consumes one state value and returns the next. The set of legal
+   transitions is enforced by the type system: you cannot construct
+   `TurnState::ModelCalling` without the prior `ModelInput` value, and you
+   cannot accidentally re-enter a prior state without going through the
+   loop.
+3. **Every transition writes one event to the conversation log
+   *before* moving on.** This is the load-bearing invariant from
+   [ADR-0003](../adr/0003-state-machine-turn-driver.md). On crash, the
+   next Brain instance reconstructs the FSM's position by replaying the
+   event log — there is no other source of truth.
+4. **Resume is a pure function from events.** The position the next
+   instance enters is determined entirely by `replay(events)` returning
+   a `ResumeDecision`; H01 does not query external state to know where
+   it left off.
+
+Why this matters in practice:
+
+- A naive function chain (`compose → model → resolve → dispatch`) has
+  no addressable mid-flight position. A crash between any two `await`s
+  loses the chain's progress; you can only restart from the start.
+- The FSM is the **substitute for cross-turn state**. By making each
+  transition write its event, the event log itself becomes the place
+  where "where are we now" lives. Adding fields to `TurnState` to
+  cache things across turns is a bug, not an optimization
+  (AGENTS.md §"Inviolable design principles" #3).
+
+See ADR-0003 for the original decision and `harness::turn_driver` for
+the Rust realization.
 
 ## State machine
 
@@ -176,18 +215,111 @@ H01 transitions: PromptBuilt → ModelCalling   (H02 records; ModelGateway::stre
 
 ## Implementation note (v0.1)
 
-H01 runs as a per-turn tokio task spawned by `SessionActor`
-(`crates/cogito-core/src/runtime/actor.rs`). The FSM is an `enum
-TurnState` where each variant carries the data its transition needs
-(prompt, stream, surface, strategy), so the type system enforces
-state-data invariants and forbids skipped transitions.
+### Three layers of "TurnDriver"
 
-A single TurnDriver task = one `input → final answer or paused`
-cycle. Multi-turn tool loops are an *inner* loop within the FSM
-(re-entering `TurnState::Init` after `DispatchOutcome::AllSync`); a
-paused turn ends the current task and is later resumed by *another*
-TurnDriver task that starts at `TurnState::ToolDispatching` with the
-async result. The actor coordinates the handoff.
+The name **TurnDriver** appears at three different abstraction levels.
+Keeping them straight when reading code:
+
+| Layer | Name | What it is |
+|---|---|---|
+| Design concept | "H01 Turn Driver" (Title Case) | The 11-component-Brain abstraction; this doc. Not a Rust entity. |
+| Rust implementation | `cogito_core::harness::turn_driver` module (snake_case) | The module that realizes H01. Contains `TurnState`, `TurnCtx`, `TurnDeps`, `run()`, `enter_turn()`, and the `transitions/*` submodules. |
+| tokio runtime entity | "TurnDriver task" | A per-turn `tokio::spawn`-ed task that runs `enter_turn(...)`. Its `JoinHandle` is held by `SessionActor::InFlight::Active`. One task = one turn. |
+
+A reader saying "the TurnDriver crashed" almost always means the task;
+a reader saying "TurnDriver decides X" almost always means the
+component / module. `run()` itself is not "the TurnDriver" — it is the
+loop body inside the module.
+
+### Module structure (Sprint 2)
+
+```
+crates/cogito-core/src/harness/turn_driver/
+├── mod.rs                 # pub use; defines run() + enter_turn()
+├── state.rs               # TurnState enum + TurnCtx struct + ResumeDecision (re-export)
+├── deps.rs                # TurnDeps (container of injected protocol trait objects)
+└── transitions/
+    ├── mod.rs
+    ├── init.rs                  # transit_init_to_context_managed
+    ├── context_managed.rs       # transit_context_managed_to_prompt_built (Sprint 2: pass-through)
+    ├── prompt_built.rs          # transit_prompt_built_to_model_calling (calls H04 + H05 + H09 pre_prompt)
+    ├── model_calling.rs         # transit_model_calling_to_model_completed (drives stream via H06)
+    ├── model_completed.rs       # transit_model_completed_to_dispatching_or_completed (calls H07)
+    └── tool_dispatching.rs      # transit_tool_dispatching_step (calls H08 sync path)
+```
+
+`TurnCtx` carries turn-lifetime invariants shared by every transition:
+
+```rust
+#[derive(Clone)]
+pub struct TurnCtx {
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub exec_ctx: ExecCtx,
+    pub strategy: HarnessStrategy,
+}
+```
+
+The discipline for `TurnCtx`: only fields that are (a) unchanged for the
+entire turn AND (b) read by at least 3 transitions. Anything narrower
+stays inside the relevant variant.
+
+### Call graph
+
+```
+SessionActor::on_command(Input { text })         [runtime/actor.rs]
+  │
+  ├── ctx     = TurnCtx { session_id, turn_id, exec_ctx, strategy }
+  ├── deps    = TurnDeps { step, model, tools, broadcast, ... }
+  ├── decision = h03::replay(&events_so_far)?    // Sprint 2 stub: always FreshTurn
+  └── tokio::spawn( turn_driver::enter_turn(decision, ctx, deps) )
+        │                              ↓
+        │                      JoinHandle<TurnOutcome>
+        │                              ↓
+        └─→  state.in_flight = Some(InFlight::Active { turn_join, started_at })
+
+  ──── inside the spawned task ────
+
+turn_driver::enter_turn(decision, ctx, deps)     [harness/turn_driver/mod.rs]
+  │
+  ├── initial: TurnState = match decision { /* ResumeDecision → TurnState */ }
+  └─→ turn_driver::run(initial, &deps)
+        │
+        └── loop {
+              state = match state {
+                TurnState::Init { ctx, resume }                              => transitions::init::transit(...).await,
+                TurnState::ContextManaged { ctx, context_decision }          => transitions::context_managed::transit(...).await,
+                TurnState::PromptBuilt { ctx, input, surface }               => transitions::prompt_built::transit(...).await,
+                TurnState::ModelCalling { ctx, stream, accumulator, surface }=> transitions::model_calling::transit(...).await,
+                TurnState::ModelCompleted { ctx, output, surface }           => transitions::model_completed::transit(...).await,
+                TurnState::ToolDispatching { ctx, pending, completed, surface } => transitions::tool_dispatching::transit(...).await,
+                terminal => break terminal.into_outcome(),
+              };
+            }
+
+  ──── task completes; SessionActor's select! wakes on turn_join ────
+
+SessionActor::on_turn_complete(TurnOutcome)      [back in runtime/actor.rs]
+```
+
+### Loop topology
+
+A single TurnDriver task = one `input → final answer or paused` cycle.
+Multi-turn tool loops are an **inner** loop within the FSM — after
+`ToolDispatching` completes all sync calls, the FSM re-enters
+`Init` (with a new `turn_id`) to compose another prompt with the tool
+results appended. A paused turn ends the current task; it is later
+resumed by *another* TurnDriver task that starts at
+`TurnState::ToolDispatching` (carrying the now-completed job's result).
+The `SessionActor` coordinates that handoff via mailbox-injected
+`JobCompleted`.
+
+### References
 
 See `docs/superpowers/specs/2026-05-18-runtime-h01-execution-model-design.md`
-§5 for the FSM pseudocode and ADR-0006 for the load-bearing decisions.
+§5 for the FSM pseudocode and the load-bearing decisions in
+[ADR-0006](../adr/0006-runtime-h01-execution-model.md).
+The Sprint 2 design discussion that locked the Hybrid `TurnCtx`,
+single-`run()` match, and `enter_turn`-as-resume-translator decisions
+lives in `docs/superpowers/specs/2026-05-19-sprint-2-minimal-loop-design.md`
+§"Q5 · TurnState FSM 表达".

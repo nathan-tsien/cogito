@@ -25,7 +25,7 @@ use cogito_protocol::{
 };
 use ulid::Ulid;
 
-/// Build the canonical sample session: one session covering all nine
+/// Build the canonical sample session: one session covering all known
 /// [`EventPayload`] variants in their natural turn order, with
 /// deterministic identifiers and timestamps so the JSONL file is
 /// byte-reproducible.
@@ -177,7 +177,20 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
                 reason: TurnFailureReason::TurnTimedOut,
             },
         ),
+        // Sprint 2: exercise the new context-management transition events.
+        envelope(9, Some(turn), EventPayload::ContextManageEntered {}),
     ]
+}
+
+/// Absolute path to a recorded SSE fixture under `fixtures/sse/`.
+///
+/// Returns a [`std::path::PathBuf`] rooted at this crate's source tree so the
+/// path is valid regardless of where the test binary runs.
+#[must_use]
+pub fn sse_fixture(name: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures/sse")
+        .join(name)
 }
 
 /// Serialize the canonical sample to JSONL bytes. Each event becomes

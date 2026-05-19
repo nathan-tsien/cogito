@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 cogito-protocol.workspace = true
+jsonschema.workspace = true
 
 tokio.workspace = true
 tokio-stream.workspace = true
@@ -26,6 +27,7 @@ chrono.workspace = true
 
 [dev-dependencies]
 cogito-test-fixtures.workspace = true
+cogito-tools.workspace = true
 cogito-mock-model.workspace = true
 cogito-store-jsonl.workspace = true
 tokio-test.workspace = true

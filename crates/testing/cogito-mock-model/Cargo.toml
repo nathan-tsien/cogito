@@ -7,14 +7,15 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-cogito-protocol.workspace = true
-cogito-model.workspace = true
+cogito-protocol = { workspace = true }
+async-trait = { workspace = true }
+async-stream = { workspace = true }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true }
 
-tokio.workspace = true
-tokio-stream.workspace = true
-async-trait.workspace = true
-serde.workspace = true
-serde_json.workspace = true
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true
