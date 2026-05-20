@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::types::{NewMessage, SessionCommand, ShutdownOutcome};
 use crate::harness::hooks::HookPipeline;
-use crate::harness::resume::{ResumeDecision, replay};
+use crate::harness::resume::{ResumeDecision, ResumePoint, replay};
 use crate::harness::step_recorder::StepRecorder;
 use crate::harness::turn_driver::{TurnCtx, TurnDeps, enter_turn};
 
@@ -223,7 +223,10 @@ async fn try_start_turn(state: &mut ActorState, msg: NewMessage, deps: &ActorDep
 
     // Clone the sender so the wrapper task can deliver the outcome back.
     let result_tx = state.turn_result_tx.clone();
-    let decision = replay(&[]).unwrap_or(ResumeDecision::FreshTurn);
+    let decision = replay(&[]).unwrap_or(ResumeDecision {
+        point: ResumePoint::FreshTurn,
+        last_event_seq: None,
+    });
 
     tokio::spawn(async move {
         let outcome = enter_turn(decision, ctx, turn_deps).await;

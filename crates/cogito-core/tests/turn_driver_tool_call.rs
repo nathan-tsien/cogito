@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use cogito_core::harness::hooks::HookPipeline;
-use cogito_core::harness::resume::ResumeDecision;
+use cogito_core::harness::resume::{ResumeDecision, ResumePoint};
 use cogito_core::harness::step_recorder::StepRecorder;
 use cogito_core::harness::turn_driver::deps::TurnDeps;
 use cogito_core::harness::turn_driver::enter_turn;
@@ -113,7 +113,7 @@ async fn tool_call_completes_via_second_model_call() -> Result<(), Box<dyn std::
         consecutive_tool_errors: 0,
     };
 
-    let outcome = enter_turn(ResumeDecision::FreshTurn, ctx, deps).await;
+    let outcome = enter_turn(ResumeDecision { point: ResumePoint::FreshTurn, last_event_seq: None }, ctx, deps).await;
     assert!(
         matches!(outcome, TurnOutcome::Completed),
         "expected Completed, got {outcome:?}"
@@ -206,7 +206,7 @@ async fn invalid_tool_args_persist_error_result() -> Result<(), Box<dyn std::err
         consecutive_tool_errors: 0,
     };
 
-    let outcome = enter_turn(ResumeDecision::FreshTurn, ctx, deps).await;
+    let outcome = enter_turn(ResumeDecision { point: ResumePoint::FreshTurn, last_event_seq: None }, ctx, deps).await;
     assert!(
         matches!(outcome, TurnOutcome::Completed),
         "expected Completed (model retried after validation error), got {outcome:?}"

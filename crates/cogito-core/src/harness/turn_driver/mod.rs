@@ -10,34 +10,37 @@ pub use state::{TurnCtx, TurnState};
 
 use cogito_protocol::turn::TurnOutcome;
 
-use crate::harness::resume::ResumeDecision;
+use crate::harness::resume::{ResumeDecision, ResumePoint};
 
 /// Translate a `ResumeDecision` into the starting `TurnState` and run the
 /// FSM to completion.
 pub async fn enter_turn(decision: ResumeDecision, ctx: TurnCtx, deps: TurnDeps) -> TurnOutcome {
-    let initial = match decision {
-        ResumeDecision::FreshTurn => TurnState::Init {
+    let initial = match decision.point {
+        ResumePoint::FreshTurn => TurnState::Init {
             ctx,
-            resume: ResumeDecision::FreshTurn,
+            resume: ResumeDecision {
+                point: ResumePoint::FreshTurn,
+                last_event_seq: decision.last_event_seq,
+            },
         },
-        ResumeDecision::ResumeFromToolDispatching {
-            pending,
-            completed,
-            surface_snapshot,
-        } => TurnState::ToolDispatching {
-            ctx,
-            pending: pending.into(),
-            completed,
-            surface: surface_snapshot,
-        },
-        ResumeDecision::ResumeFromModelCompleted {
-            output,
-            surface_snapshot,
-        } => TurnState::ModelCompleted {
-            ctx,
-            output,
-            surface: surface_snapshot,
-        },
+        // Sprint 3 P3.2 transitional: non-FreshTurn variants land in P3.4.
+        // Sprint 2 callers always produce FreshTurn (replay() is still a stub),
+        // so this branch is unreachable in practice. Log + fall back to fresh
+        // (no panic — clippy::panic is denied).
+        non_fresh => {
+            tracing::error!(
+                ?non_fresh,
+                "non-FreshTurn ResumePoint observed in P3.2 transitional state; \
+                 P3.4 will implement actual handling. Falling back to fresh turn."
+            );
+            TurnState::Init {
+                ctx,
+                resume: ResumeDecision {
+                    point: ResumePoint::FreshTurn,
+                    last_event_seq: decision.last_event_seq,
+                },
+            }
+        }
     };
     run(initial, &deps).await
 }
