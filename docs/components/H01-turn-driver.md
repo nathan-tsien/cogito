@@ -79,7 +79,7 @@ Init → ContextManaged → PromptBuilt → ModelCalling → ModelCompleted
 
 ## Resume entry path
 
-When `SessionActor::actor_main` resolves a non-`FreshTurn` resume decision, it calls `enter_turn(turn_entry, ctx, deps)` where `turn_entry` is an internal `TurnEntry` enum translating a `ResumePoint` (which carries actor-level concerns like `turn_id`) into the FSM-level shape the FSM consumes:
+When `SessionActor::actor_main` resolves a non-`FreshTurn` resume decision (Sprint 3 P3.4+), it will call `enter_turn(turn_entry, ctx, deps)` where `turn_entry` is an internal `TurnEntry` enum translating a `ResumePoint` (which carries actor-level concerns like `turn_id`) into the FSM-level shape the FSM consumes:
 
 ```rust
 pub(crate) enum TurnEntry {

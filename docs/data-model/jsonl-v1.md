@@ -45,10 +45,14 @@
 | `turn_id` | ULID string \| `null` | ✓ | `null` for session-level events (e.g. `session_started`). |
 | `seq` | uint64 | ✓ | Monotonic per session, starts at 0. Used by Resume Coordinator. |
 | `ts` | RFC 3339 timestamp (UTC) | ✓ | Wall-clock at write time. Use for display only; causality is `seq`. |
-| `type` | string | ✓ | One of the 9 payload variants below (snake_case). |
+| `type` | string | ✓ | One of the payload variants below (snake_case); 10 shipped as of Sprint 2, with `model_call_completed` pending Sprint 3 P2.2. |
 | `data` | object | ✓ | Variant-specific payload; see "Payload variants" below. |
 
-## Payload variants (9)
+## Payload variants (10 shipped; 1 planned)
+
+The original 9 variants (`session_started` through `turn_failed`) shipped in Sprint 1.
+Sprint 2 added `model_call_started` (documented below). Sprint 3 P2.2 will add
+`model_call_completed` (see its section below — marked pending).
 
 ### `session_started`
 
@@ -77,6 +81,29 @@ metadata (see `SessionMeta` schema in `docs/schemas/conversation-event-v1.json`)
 One per wire-protocol content_block_stop for an assistant text block.
 The recorder does NOT persist individual streaming deltas — they appear
 only on the live `StreamEvent` channel.
+
+### `model_call_started`
+
+Recorded by H01 Turn Driver at the `PromptBuilt → ModelCalling` transition boundary,
+immediately before the gateway stream opens. Documents which model is being called
+for this turn.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `model` | string | Model identifier (e.g., `"claude-opus-4-7"`, `"gpt-5"`). Source of truth: the value resolved by H10 strategy selection. |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":4,"ts":"2026-05-20T10:00:00Z","type":"model_call_started","data":{"model":"claude-opus-4-7"}}
+```
+
+Always followed by exactly one `model_call_completed` event (Sprint 3 P2.2 — see next
+section) in the same turn, unless the actor crashed mid-call.
+
+Added: Sprint 2.
 
 ### `model_call_completed`
 
@@ -171,5 +198,5 @@ deserialization.
 
 ## Canonical example
 
-A worked sample of all 9 variants in one session is at
+A worked sample of the original 9 variants in one session is at
 `crates/testing/cogito-test-fixtures/fixtures/sessions/sample-v1.jsonl`.

@@ -60,9 +60,9 @@ Driver, panic isolation, and chaos-tested resume.
 
 - [ ] `EventPayload::ModelCallCompleted { stop_reason, usage }` variant added; schema artifact regenerated; fixture updated (per spec §4 Q1)
 - [ ] H03 Resume Coordinator decision table fully implemented (`harness::resume::replay()` covers all 9 decision-table rows from spec §5)
-- [ ] `ResumeDecision` shape: `{ point: ResumePoint, last_event_seq: Option<u64> }`; 6 `ResumePoint` variants (per spec §4 §Q2 后续修正)
+- [ ] `ResumeDecision` shape: `{ point: ResumePoint, last_event_seq: Option<u64> }`; 6 `ResumePoint` variants (per spec §4 Q2 (revised in Q2 follow-up))
 - [ ] `Runtime::open_session(SessionMode::Resume)` walks the full recovery path (read store → replay → seq init → apply_resume_point)
-- [ ] EventId串回完成：Sprint 2 留下的 `recorded_event_id: "unknown"` stub 清理；所有 `record_*` 方法返 `Result<EventId, StoreError>`
+- [ ] EventId threading complete: Sprint 2 `recorded_event_id: "unknown"` stub cleaned up; all `record_*` methods return `Result<EventId, StoreError>`
 - [ ] Chaos test (`crates/cogito-core/tests/resume_chaos.rs`) injects crashes at every event boundary (Y path) + 8 curated panic points (X path) for 4 scenarios
 - [ ] All 4 oracles (prefix immutable / terminal equivalent / tool mapping equivalent / final text equivalent) pass for all crash points
 - [ ] Resume-from-paused-job scenario validated via `MockJobManager` (real `cogito-jobs` lands Sprint 4)
