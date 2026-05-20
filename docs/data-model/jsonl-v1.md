@@ -78,6 +78,27 @@ One per wire-protocol content_block_stop for an assistant text block.
 The recorder does NOT persist individual streaming deltas — they appear
 only on the live `StreamEvent` channel.
 
+### `model_call_completed`
+
+*Sprint 3 P2.2 — not yet shipped.* Sealing event for one model call. Will be written by H06 Stream Demultiplexer when the gateway stream emits `MessageCompleted` (Anthropic `message_delta` with stop_reason; OpenAI `finish_reason`). Always follows a preceding `model_call_started` event in the same turn; `seq` is strictly larger.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `stop_reason` | string enum | `"end_turn"` / `"tool_use"` / `"max_tokens"` / `"stop_sequence"` (matches `StopReason` enum in `cogito-protocol::gateway`) |
+| `usage` | object | `{ "input_tokens": u32, "output_tokens": u32 }` (further fields may be added under `#[non_exhaustive]`) |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":7,"ts":"2026-05-20T10:00:00Z","type":"model_call_completed","data":{"stop_reason":"tool_use","usage":{"input_tokens":120,"output_tokens":45}}}
+```
+
+**H03 use**: distinguishes "model call done" from "model call in flight" without re-issuing the gateway request. Without this event, H03 cannot tell whether to fast-path to `Completed` (when `stop_reason = end_turn` and no tool blocks present) or to dispatch tools — re-calling the model would re-bill tokens. See Sprint 3 spec §4 Q1.
+
+Added: Sprint 3 P2.2 (planned for 2026-05-20+). No `SCHEMA_VERSION` bump (additive, b-档 compatible per ADR-0007 §"Additive variant precedent").
+
 ### `tool_use_recorded`
 
 ```json
