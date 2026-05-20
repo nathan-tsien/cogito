@@ -9,7 +9,7 @@ use cogito_protocol::stream::StreamEvent;
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use super::types::{NewMessage, SessionCommand, SessionId, ShutdownOutcome};
+use super::types::{SessionCommand, SessionId, ShutdownOutcome, TurnTrigger};
 
 /// Shared state between a `SessionHandle` and the per-session loop task it
 /// fronts. Held by `Arc` on the caller side so multiple handles to the
@@ -49,8 +49,13 @@ impl SessionHandle {
         Self { shared }
     }
 
-    /// Send a new user message; the actor will spawn a `TurnDriver`.
+    /// Send a new user text message; the actor will spawn a `TurnDriver`.
     /// Awaits (mailbox backpressure) if the actor is overwhelmed.
+    ///
+    /// Convenience wrapper around `SessionHandle::submit` — equivalent
+    /// to `submit(TurnTrigger::UserText(text.into()))`. Retained because
+    /// user-typed text is the dominant path and callers should not have
+    /// to spell out the enum for it. See ADR-0016 §2.
     ///
     /// # Errors
     ///
@@ -58,7 +63,7 @@ impl SessionHandle {
     pub async fn send_user(&self, text: impl Into<String>) -> Result<(), SessionError> {
         self.shared
             .mailbox_tx
-            .send(SessionCommand::Input(NewMessage { text: text.into() }))
+            .send(SessionCommand::Trigger(TurnTrigger::UserText(text.into())))
             .await
             .map_err(|_| SessionError::SessionClosed {
                 session_id: self.shared.session_id,
