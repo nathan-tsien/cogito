@@ -55,7 +55,7 @@ impl Runtime {
         _mode: OpenMode,
     ) -> Result<SessionHandle, RuntimeError> {
         if self.sessions.contains_key(&id) {
-            return Err(RuntimeError::SessionAlreadyOpen(id));
+            return Err(RuntimeError::SessionAlreadyOpen { id });
         }
 
         // Channels.
@@ -220,8 +220,11 @@ pub enum RuntimeError {
     #[error("no current tokio runtime: {0}")]
     NoTokioRuntime(String),
     /// The session id was already open in this `Runtime` (in-memory registry).
-    #[error("session already open: {0}")]
-    SessionAlreadyOpen(SessionId),
+    #[error("session {id:?} already open in runtime")]
+    SessionAlreadyOpen {
+        /// The session id that is already open.
+        id: SessionId,
+    },
     /// The session id already exists in the backing store (`OpenMode::New` collision).
     #[error("session {id:?} already exists in store")]
     SessionAlreadyExists {
