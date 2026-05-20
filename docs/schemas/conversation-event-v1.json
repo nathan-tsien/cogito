@@ -398,6 +398,47 @@
           ]
         }
       }
+    },
+    {
+      "description": "Recorded by H06 Stream Demultiplexer when the model response stream emits `MessageCompleted` (Anthropic `message_delta` with `stop_reason` / `OpenAI` `finish_reason`). Sealing event for one model call. `turn_id` is on the envelope.\n\nAdded in Sprint 3 (2026-05-20) as the first additive variant under ADR-0007's additive variant precedent. No `SCHEMA_VERSION` bump.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "stop_reason",
+            "usage"
+          ],
+          "properties": {
+            "stop_reason": {
+              "description": "Stop reason as reported by the provider.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/StopReason"
+                }
+              ]
+            },
+            "usage": {
+              "description": "Token usage for this call.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Usage"
+                }
+              ]
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "model_call_completed"
+          ]
+        }
+      }
     }
   ],
   "required": [
@@ -658,6 +699,39 @@
           ]
         }
       }
+    },
+    "StopReason": {
+      "description": "Why the model stopped emitting. Set as the last field on `ModelOutput`.\n\nMarked `#[non_exhaustive]` because v0.x adapters may introduce new reasons (e.g. `Refusal` from policy-aware providers); reserving the variant set lets future additions stay additive.",
+      "oneOf": [
+        {
+          "description": "Model signaled normal turn end.",
+          "type": "string",
+          "enum": [
+            "end_turn"
+          ]
+        },
+        {
+          "description": "Model emitted one or more `tool_use` blocks and yielded for results.",
+          "type": "string",
+          "enum": [
+            "tool_use"
+          ]
+        },
+        {
+          "description": "Output reached `ModelParams.max_tokens`.",
+          "type": "string",
+          "enum": [
+            "max_tokens"
+          ]
+        },
+        {
+          "description": "One of `ModelParams.stop_sequences` matched.",
+          "type": "string",
+          "enum": [
+            "stop_sequence"
+          ]
+        }
+      ]
     },
     "ToolErrorKind": {
       "description": "Classification of why a tool call failed. The model only ever sees `ToolResult::Error`; this kind helps H09 hooks and H10 strategy decide whether to retry or surface to the user.\n\nMarked `#[non_exhaustive]` so v0.2+ multimedia / MCP / subagent tools can introduce new failure shapes (e.g. `StorageUnavailable`, `McpServerDisconnected`) without breaking downstream `match` arms.",
@@ -951,6 +1025,28 @@
           }
         }
       ]
+    },
+    "Usage": {
+      "description": "Token usage reported by the provider for one model call.",
+      "type": "object",
+      "required": [
+        "input_tokens",
+        "output_tokens"
+      ],
+      "properties": {
+        "input_tokens": {
+          "description": "Tokens consumed by the input (system + history + tool schemas).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "output_tokens": {
+          "description": "Tokens produced as output.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
     }
   }
 }
