@@ -85,6 +85,21 @@ H06 never sees partial JSON or per-block running text — it only sees sealed
 - **Property**: arbitrary valid streams produce no duplicate events, no dropped events, no out-of-order tool_use sequences.
 - **Integration**: `cogito-mock-model` produces scripted streams; end-to-end test verifies event log matches expectation.
 
+## Recorder invocation timing
+
+H06's `demux` loop owns the side-effect contract between the gateway stream and `StepRecorder`:
+
+| Model stream event | Recorder call | Persisted event |
+|---|---|---|
+| `TextDelta { chunk }` | `on_text_delta` (buffer) | (none; flushed at block boundary) |
+| `TextBlockCompleted` | `on_text_block_complete` (flush) | `AssistantMessageAppended` |
+| `ToolUseCompleted` | `record_tool_use` | `ToolUseRecorded` |
+| **`MessageCompleted { stop_reason, usage }`** | **`record_model_call_completed` (Sprint 3 P2.2 — not yet shipped)** | **`ModelCallCompleted` (Sprint 3 P2.2)** |
+
+The `MessageCompleted` → `record_model_call_completed` call **must complete before `demux` returns the `ModelOutput`**. This guarantees H03 sees the sealing event before any subsequent transition (H07/H08) writes tool dispatch events — preserving the invariant "events written in causal order".
+
+→ Sprint 3 decision: spec `2026-05-20-sprint-3-resume-coordinator-design.md` §4 Q1 落库时机 + §5.4 EventId 串回.
+
 ## References
 
 - ARCHITECTURE.md §"Turn state machine" (ModelCalling → ModelCompleted)
