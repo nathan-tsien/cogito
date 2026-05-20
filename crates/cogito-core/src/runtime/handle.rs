@@ -49,10 +49,28 @@ impl SessionHandle {
         Self { shared }
     }
 
+    /// Submit a [`TurnTrigger`]. The session loop spawns a `TurnDriver`
+    /// if no turn is in flight. **Canonical entry point** for any new
+    /// trigger source — `send_user` is a convenience shim that calls
+    /// `submit(TurnTrigger::UserText(text.into()))`. See ADR-0016 §2.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SessionError::SessionClosed` if the actor has exited.
+    pub async fn submit(&self, trigger: TurnTrigger) -> Result<(), SessionError> {
+        self.shared
+            .mailbox_tx
+            .send(SessionCommand::Trigger(trigger))
+            .await
+            .map_err(|_| SessionError::SessionClosed {
+                session_id: self.shared.session_id,
+            })
+    }
+
     /// Send a new user text message; the actor will spawn a `TurnDriver`.
     /// Awaits (mailbox backpressure) if the actor is overwhelmed.
     ///
-    /// Convenience wrapper around `SessionHandle::submit` — equivalent
+    /// Convenience wrapper around [`SessionHandle::submit`] — equivalent
     /// to `submit(TurnTrigger::UserText(text.into()))`. Retained because
     /// user-typed text is the dominant path and callers should not have
     /// to spell out the enum for it. See ADR-0016 §2.
@@ -61,13 +79,7 @@ impl SessionHandle {
     ///
     /// Returns `SessionError::SessionClosed` if the actor has exited.
     pub async fn send_user(&self, text: impl Into<String>) -> Result<(), SessionError> {
-        self.shared
-            .mailbox_tx
-            .send(SessionCommand::Trigger(TurnTrigger::UserText(text.into())))
-            .await
-            .map_err(|_| SessionError::SessionClosed {
-                session_id: self.shared.session_id,
-            })
+        self.submit(TurnTrigger::UserText(text.into())).await
     }
 
     /// Subscribe to the real-time event stream. Multiple subscribers are
