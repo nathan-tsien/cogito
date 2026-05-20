@@ -263,6 +263,24 @@ impl StepRecorder {
             .await
     }
 
+    /// Record the sealing event for a model call. Called by H06 demux loop
+    /// when `ModelEvent::MessageCompleted` is observed. Must complete before
+    /// `demux` returns the sealed `ModelOutput` so that H03 can distinguish
+    /// "model call done" from "model call in flight" without re-issuing the
+    /// gateway request.
+    pub async fn record_model_call_completed(
+        &mut self,
+        turn_id: TurnId,
+        stop_reason: cogito_protocol::gateway::StopReason,
+        usage: cogito_protocol::gateway::Usage,
+    ) -> Result<EventId, StoreError> {
+        self.append(
+            Some(turn_id),
+            EventPayload::ModelCallCompleted { stop_reason, usage },
+        )
+        .await
+    }
+
     /// Record turn failure and broadcast [`StreamEvent::TurnFailed`] with
     /// a human-readable rendering of the reason.
     ///
