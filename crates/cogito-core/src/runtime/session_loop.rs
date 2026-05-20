@@ -135,7 +135,7 @@ impl SessionState {
 /// 1. `turn_result_rx` — receives `(TurnId, TurnOutcome)` from the spawned
 ///    `TurnDriver` wrapper task.  Drains first so completed turns are always
 ///    recorded before the next command is processed.
-/// 2. `mailbox_rx` — caller commands (`Input`, `Shutdown`, etc.).
+/// 2. `mailbox_rx` — caller commands (`Trigger`, `Shutdown`, etc.).
 /// 3. `job_completion_rx` — async job callbacks (Sprint 4); forwarded to the
 ///    mailbox for FIFO ordering.
 ///
@@ -213,7 +213,7 @@ pub(super) async fn run_session(
 /// Translate a `ResumePoint` into actor-level startup actions. See the
 /// per-variant matrix in the Sprint 3 P4.4 plan:
 ///
-/// - `FreshTurn` — no-op (actor will idle until next Input).
+/// - `FreshTurn` — no-op (actor will idle until next `submit` / `Trigger`).
 /// - `RestartCurrentTurn` — v0.1 downgrade to `FreshTurn` with a `tracing::warn`
 ///   (full implementation requires recovering `user_input` from
 ///   `initial_events` and is post-Sprint-3 work).
