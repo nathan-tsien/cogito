@@ -41,8 +41,10 @@ and sequence diagrams live in the design spec:
 
 ### 1. Per-session actor task model
 
-Each session runs in a dedicated long-lived tokio task (`SessionActor`). The
-actor owns a mailbox (`mpsc<SessionCommand>`, capacity 64), a broadcast channel
+Each session runs in a dedicated long-lived tokio task — conceptually the
+"session actor", implemented as the free function
+`runtime::session_loop::run_session` invoked under `tokio::spawn`. The task
+owns a mailbox (`mpsc<SessionCommand>`, capacity 64), a broadcast channel
 (`broadcast<StreamEvent>`, capacity 256), a persist channel
 (`mpsc<PersistCommand>`, capacity 256), and an in-flight turn handle. A
 separate store-writer subtask drains the persist channel and performs all

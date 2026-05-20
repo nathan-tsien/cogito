@@ -23,7 +23,7 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] ADR-0006 (Runtime + H01 execution model) ratified
 - [x] Workspace topology fixed per ADR-0004: dropped `cogito-conversation`, added `cogito-store-jsonl`, stripped Hands/Boundary/Session deps from `cogito-core`
 - [x] Protocol types landed: `ExecutionClass`, `StreamEvent`, `JobCompletionEvent`, `JobManager::on_complete`, `TurnOutcome`, `TurnFailureReason` (12+ serde-roundtrip tests passing)
-- [x] Runtime module scaffolded (stubs): `Runtime`, `RuntimeBuilder`, `SessionHandle`, per-session actor task (`runtime::actor::actor_main` + `SessionShared`), `store_writer`
+- [x] Runtime module scaffolded (stubs): `Runtime`, `RuntimeBuilder`, `SessionHandle`, per-session loop task (`runtime::session_loop::run_session` + `SessionShared`), `store_writer`
 - [x] CI runs `just ci` (fmt + clippy + layer-check + test) + cargo-deny job
 - [x] Toolchain aligned to MSRV 1.85 (edition 2024 requirement)
 
@@ -53,7 +53,7 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] H09 Hook Pipeline (no-op insertion points; real hooks in Sprint 6)
 - [x] H10 Strategy Selector (`HarnessStrategy::default_with_model` factory; YAML registry in Sprint 5)
 - [x] `MockModelGateway` for integration tests
-- [x] `runtime::actor::actor_main` Topology I + `Runtime::open_session` + `SessionHandle::{send_user, cancel_turn, shutdown}`
+- [x] `runtime::session_loop::run_session` Topology I + `Runtime::open_session` + `SessionHandle::{send_user, cancel_turn, shutdown}`
 - [x] CLI `cogito chat` works end-to-end against Anthropic OR vLLM/SGLang with `read_file`
 
 #### Sprint 3 · Resume Coordinator (2 days)
@@ -72,10 +72,10 @@ Driver, panic isolation, and chaos-tested resume.
 
 The following items were intentionally scoped down for v0.1 with explicit TODO markers in code:
 
-- **`RestartCurrentTurn` downgrades to `FreshTurn` + warn** in `apply_resume_point` (`actor.rs`). Full `RestartCurrentTurn` requires recovering `user_input` from the persisted log; deferred to post-Sprint-3.
+- **`RestartCurrentTurn` downgrades to `FreshTurn` + warn** in `apply_resume_point` (`session_loop.rs`). Full `RestartCurrentTurn` requires recovering `user_input` from the persisted log; deferred to post-Sprint-3.
 - **`ResumePausedJob` and `ResumeAfterJobCompletion` return `ShutdownOutcome::JobManagerUnavailable`** in `apply_resume_point`. v0.1 has no `JobManager` injection into Runtime — Sprint 4 will wire that in and activate these paths.
 - **Chaos test covers 2 scenarios (`no_tool_short_turn`, `single_tool_happy_path`) × wired resume boundaries.** The `paused_async_job` scenario is unrunnable in v0.1; `tool_returns_error` was deferred. The test uses `PanicAt` (X-path-like) for crash injection because `NotifyAt + clean shutdown` writes a terminal event (defeating the chaos invariant); both proven to work via the existing infrastructure.
-- **Latent: cancel-token disconnect** between `ActorState` and `SessionShared`. `SessionHandle::cancel_turn()` fires the original token; the actor's `spawn_turn_driver` mints a new token per turn. Tracked via `TODO(cancel-token-disconnect)` in `actor.rs`. Pre-existing; not exercised by chaos tests.
+- **Latent: cancel-token disconnect** between `SessionState` and `SessionShared`. `SessionHandle::cancel_turn()` fires the original token; the session loop's `spawn_turn_driver` mints a new token per turn. Tracked via `TODO(cancel-token-disconnect)` in `session_loop.rs`. Pre-existing; not exercised by chaos tests.
 
 These narrowings preserve the Sprint 3 invariants on the wired paths and document the remaining work clearly for the next sprint.
 

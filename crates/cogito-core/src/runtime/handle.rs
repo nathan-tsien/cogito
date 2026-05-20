@@ -11,9 +11,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::types::{NewMessage, SessionCommand, SessionId, ShutdownOutcome};
 
-/// Shared state between a `SessionHandle` and the `SessionActor` task it
+/// Shared state between a `SessionHandle` and the per-session loop task it
 /// fronts. Held by `Arc` on the caller side so multiple handles to the
-/// same session route through the same actor.
+/// same session route through the same task.
 pub(super) struct SessionShared {
     /// Identifier of the session this handle fronts.
     pub(super) session_id: SessionId,
@@ -36,7 +36,7 @@ pub(super) struct SessionShared {
 }
 
 /// Caller-facing handle to a session. Clone freely; all clones funnel into
-/// the same `SessionActor` task.
+/// the same per-session loop task.
 #[derive(Clone)]
 pub struct SessionHandle {
     pub(super) shared: Arc<SessionShared>,

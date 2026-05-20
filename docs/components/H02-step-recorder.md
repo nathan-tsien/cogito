@@ -154,7 +154,7 @@ lifecycle is:
    `AssistantMessageAppended` carrying the full accumulated text and
    clears the buffer.
 
-On crash mid-block: the recorder dies with the SessionActor (no
+On crash mid-block: the recorder dies with the per-session loop task (no
 cross-turn state per ADR-0006 §3). The accumulated text is lost.
 Resume restarts the turn from `ModelCalling`, the model re-streams,
 and no partial assistant message ends up in the persisted log.

@@ -1,5 +1,5 @@
-//! Turn terminal-state values. The Runtime layer returns these from
-//! `SessionActor` after each turn completes. Caller observes via
+//! Turn terminal-state values. The Runtime layer returns these from the
+//! per-session loop after each turn completes. Caller observes via
 //! `SessionHandle` or the `StreamEvent` stream.
 
 use serde::{Deserialize, Serialize};

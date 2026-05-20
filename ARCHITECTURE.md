@@ -170,11 +170,11 @@ End-to-end recovery sequence for a single session after process restart:
 │  R1 check in-memory registry (prevent concurrent open of same session) │
 │  R2 store.range(session_id, ..).await   ← pull all events              │
 │  R3 events.is_empty()? → Err(ResumeFailed: no such session)            │
-│  R4 spawn SessionActor::spawn(initial_events = events)                 │
+│  R4 tokio::spawn(session_loop::run_session(state, ..., initial_events))│
 └──────────────────┬─────────────────────────────────────────────────────┘
                    │
                    ▼
-┌─ SessionActor::actor_main ─────────────────────────────────────────────┐
+┌─ runtime::session_loop::run_session (the "session actor" task body) ───┐
 │  A1 schema check (fail-fast)                                           │
 │  A2 let decision = harness::resume::replay(&initial_events)?           │
 │  A3 state.event_seq.store(decision.last_event_seq + 1)                 │
@@ -194,7 +194,7 @@ End-to-end recovery sequence for a single session after process restart:
 
 **Key invariants** (correctness requirements, not preferences):
 
-- **Step R2 completes entirely in the Runtime layer**, before the actor starts. Once `actor_main` begins, it never goes back to the store to pull history. This guarantees that the `events → state` mapping in `actor_main` is a deterministic pure function (unit-testable in isolation).
+- **Step R2 completes entirely in the Runtime layer**, before the per-session loop task starts. Once `run_session` begins, it never goes back to the store to pull history. This guarantees that the `events → state` mapping in `run_session` is a deterministic pure function (unit-testable in isolation).
 - **Step A3 must precede step A5**: any write that occurs before the sequence generator is initialized may produce an event with `seq < last_event_seq`, violating the ADR-0002 append-only invariant.
 - **`ResumePausedJob` branch does not spawn a `TurnDriver`**. The turn deliberately paused waiting for an external job, not for the model; spawning a `TurnDriver` immediately would cause it to terminate at once, leaving the actor to register `on_complete` on the next cycle — a bug incubator.
 - **`ResumeAfterJobCompletion` is a distinct branch** (not a sub-case of `ResumeFromToolDispatching`): the former derives its completed payload from a `JobCompletedRecorded` event; the latter derives from a `ToolResultRecorded` event — the data sources are different.
@@ -286,7 +286,7 @@ requirements, not engineering preferences:
                     └────────────┬───────────────┘
                                  │ open_session
                                  ▼
- ┌───────────────── SessionActor (one task per session) ──────────────┐
+ ┌───── runtime::session_loop::run_session (one task per session) ─────┐
  │                                                                     │
  │      mailbox (mpsc<SessionCommand>, cap 64)                         │
  │       Input / Shutdown / Cancel / JobCompleted                      │
@@ -318,7 +318,7 @@ requirements, not engineering preferences:
 - **Backpressure is first-class**: channel capacities (64 / 256 / 256) are explicit SLO knobs. Slow consumers observe `Lagged(n)` and self-diagnose; there is no silent unbounded growth.
 - **Cancellation is verifiable**: every await point is guarded by `select!`, RAII guards drop normally — contrasted with `task.abort()`, which leaves half-written state.
 - **Scaling unit is clear**: one process = N actors; multiple processes = sticky `session_id` routing. cogito does not coordinate across actors within a process (that is the consumer's deployment concern); scaling out actors adds almost zero coordination overhead.
-- **Resume is local**: a single-session crash only requires rebuilding one actor (Sprint 3 H03 + `actor_main` flow). A shared-state design would require reconstructing cross-session lock state — a fundamentally different complexity class.
+- **Resume is local**: a single-session crash only requires rebuilding one per-session loop task (Sprint 3 H03 + `run_session` flow). A shared-state design would require reconstructing cross-session lock state — a fundamentally different complexity class.
 
 ### Trade-offs
 

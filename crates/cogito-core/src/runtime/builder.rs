@@ -13,16 +13,16 @@ use tokio::runtime::Handle as TokioHandle;
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use super::actor::{ActorDeps, ActorState, record_session_started};
 use super::handle::{SessionHandle, SessionShared};
+use super::session_loop::{SessionDeps, SessionState, record_session_started};
 use super::types::{OpenMode, SessionId};
 use crate::harness::step_recorder::StepRecorder;
 
 /// The DI container and session registry. One `Runtime` per cogito-using
-/// process is the typical pattern; opening N sessions spawns N actor tasks
-/// on the injected tokio runtime.
+/// process is the typical pattern; opening N sessions spawns N session-loop
+/// tasks (one tokio task per session) on the injected tokio runtime.
 pub struct Runtime {
-    /// Tokio runtime handle that all `SessionActor` tasks are spawned onto.
+    /// Tokio runtime handle that all per-session loop tasks are spawned onto.
     handle: TokioHandle,
     /// Active sessions keyed by `SessionId`.
     sessions: DashMap<SessionId, SessionHandle>,
@@ -134,15 +134,15 @@ impl Runtime {
         )));
 
         // Write SessionStarted exactly once per session, gated on the store
-        // existence check. Kept here (not in actor_main) so that the actor
+        // existence check. Kept here (not in run_session) so that the session
         // loop stays stateless with respect to session lifecycle: every event
-        // the actor writes is correlated with a turn, not the session itself.
-        // See actor_main's startup-sequence doc.
+        // the loop writes is correlated with a turn, not the session itself.
+        // See run_session's startup-sequence doc.
         if !session_exists {
             record_session_started(&recorder, id, &self.strategy).await;
         }
 
-        let state = ActorState {
+        let state = SessionState {
             session_id: id,
             strategy: self.strategy.clone(),
             in_flight: None,
@@ -155,23 +155,23 @@ impl Runtime {
             store: Arc::clone(&self.store),
         };
 
-        let deps = ActorDeps {
+        let deps = SessionDeps {
             model: Arc::clone(&self.model),
             tools: Arc::clone(&self.tools),
         };
 
-        let mailbox_tx_for_actor = mailbox_tx.clone();
-        // P4.4: capture the actor's `ShutdownOutcome` so non-Clean exits
+        let mailbox_tx_for_loop = mailbox_tx.clone();
+        // P4.4: capture the loop's `ShutdownOutcome` so non-Clean exits
         // (resume-failed, JobManager-unavailable) surface in the log even
-        // though `open_session` has already returned the handle. The actor
+        // though `open_session` has already returned the handle. The loop
         // task is fire-and-forget; future sprints may add a startup-result
         // channel for synchronous error surfacing.
         let session_id_for_log = id;
         self.handle.spawn(async move {
-            let outcome = super::actor::actor_main(
+            let outcome = super::session_loop::run_session(
                 state,
                 mailbox_rx,
-                mailbox_tx_for_actor,
+                mailbox_tx_for_loop,
                 deps,
                 initial_events,
             )

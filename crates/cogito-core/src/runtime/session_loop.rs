@@ -1,4 +1,13 @@
-//! `SessionActor` — the long-lived per-session tokio task.
+//! Per-session loop — the long-lived tokio task that drives one session.
+//!
+//! Conceptually this is the "session actor": it owns the session's private
+//! state, accepts commands through a mailbox, and is the single mutator of
+//! its own state (see ADR-0006 §"Actor model — why and how"). The public
+//! entry point is the free function [`run_session`], which keeps the API
+//! surface free of the "Actor" terminology while preserving the underlying
+//! invariants. Internal docs still refer to the "actor" / "actor task"
+//! where that vocabulary clarifies the design (private state, message-
+//! driven interaction, single mutable owner, cooperative termination).
 //!
 //! Implements Topology I: a `tokio::select!` loop that polls three mpsc
 //! channels — the turn-result channel, the mailbox, and the job-completion
@@ -7,8 +16,8 @@
 //! borrow checker cleanly.
 //!
 //! When a `TurnDriver` task finishes, it sends its `(TurnId, TurnOutcome)`
-//! through a bounded `mpsc` channel back to the actor rather than having the
-//! actor join the task handle directly.  This sidesteps the well-known borrow
+//! through a bounded `mpsc` channel back to the loop rather than having the
+//! loop join the task handle directly.  This sidesteps the well-known borrow
 //! conflict that arises when trying to `select!` on both a `JoinHandle` and
 //! another channel that are both behind `&mut self`.
 
@@ -59,7 +68,7 @@ pub(super) enum InFlight {
 }
 
 /// All state owned by the actor task. One instance per live session.
-pub(super) struct ActorState {
+pub(super) struct SessionState {
     /// Session identifier threaded into every recorder call.
     pub(super) session_id: SessionId,
     /// Strategy governs prompt composition and tool surface for every turn.
@@ -86,21 +95,23 @@ pub(super) struct ActorState {
 }
 
 /// External dependencies injected at spawn time.
-pub(super) struct ActorDeps {
+pub(super) struct SessionDeps {
     /// Model gateway.
     pub model: Arc<dyn ModelGateway>,
     /// Tool provider.
     pub tools: Arc<dyn ToolProvider>,
 }
 
-impl ActorState {
+impl SessionState {
     /// True iff a `TurnDriver` task is currently executing.
     pub(super) fn has_active_turn(&self) -> bool {
         matches!(self.in_flight, Some(InFlight::Active { .. }))
     }
 }
 
-/// Main actor loop. Runs until `Shutdown` is received or the mailbox closes.
+/// Main session loop. Runs until `Shutdown` is received or the mailbox
+/// closes. This is the "actor task" body — see the module-level docs for
+/// the actor-model invariants it upholds.
 ///
 /// # Startup sequence (Sprint 3 P4.4, per spec §5.2)
 ///
@@ -133,11 +144,11 @@ impl ActorState {
 /// `ShutdownOutcome::Clean` on a normal exit (mailbox closed or `Shutdown`
 /// received); a non-Clean variant if the startup sequence failed before the
 /// loop began. The spawn site in `builder.rs` logs the outcome.
-pub(super) async fn actor_main(
-    mut state: ActorState,
+pub(super) async fn run_session(
+    mut state: SessionState,
     mut mailbox_rx: mpsc::Receiver<SessionCommand>,
     mailbox_tx: mpsc::Sender<SessionCommand>,
-    deps: ActorDeps,
+    deps: SessionDeps,
     initial_events: Vec<cogito_protocol::ConversationEvent>,
 ) -> ShutdownOutcome {
     // 1. Schema check (must come before replay so we never feed a
@@ -214,9 +225,9 @@ pub(super) async fn actor_main(
 ///   `ShutdownOutcome::JobManagerUnavailable`; `JobManager` injection is a
 ///   Sprint 4 deliverable.
 fn apply_resume_point(
-    state: &mut ActorState,
+    state: &mut SessionState,
     point: ResumePoint,
-    deps: &ActorDeps,
+    deps: &SessionDeps,
 ) -> Result<(), ShutdownOutcome> {
     match point {
         ResumePoint::FreshTurn => Ok(()),
@@ -281,13 +292,18 @@ fn apply_resume_point(
 /// (whose caller records `TurnStarted` itself) and resume (whose
 /// `TurnStarted` is already in the persisted log). Callers that need to
 /// record `TurnStarted` must do so before invoking this helper.
-fn spawn_turn_driver(state: &mut ActorState, turn_id: TurnId, entry: TurnEntry, deps: &ActorDeps) {
+fn spawn_turn_driver(
+    state: &mut SessionState,
+    turn_id: TurnId,
+    entry: TurnEntry,
+    deps: &SessionDeps,
+) {
     // TODO(cancel-token-disconnect): SessionShared.current_cancel_token holds
     // a sibling token cloned from the *initial* token at session-open time,
-    // not a shared Arc<Mutex<...>> with ActorState. Replacing the inner token
+    // not a shared Arc<Mutex<...>> with SessionState. Replacing the inner token
     // here means SessionHandle::cancel_turn() fires the original sibling and
     // does not reach this newly minted token. Fix by sharing one
-    // Arc<Mutex<CancellationToken>> across ActorState and SessionShared so
+    // Arc<Mutex<CancellationToken>> across SessionState and SessionShared so
     // mutations are visible to both. Tracked separately; current chaos tests
     // do not exercise mid-turn cancellation past the first turn.
     let new_token = CancellationToken::new();
@@ -337,10 +353,10 @@ fn spawn_turn_driver(state: &mut ActorState, turn_id: TurnId, entry: TurnEntry, 
 /// mailbox loop (which still owns the sender directly) and for future
 /// commands that need to enqueue follow-ups; it is not used here today.
 async fn handle_command(
-    state: &mut ActorState,
+    state: &mut SessionState,
     cmd: SessionCommand,
     mailbox_tx: &mpsc::Sender<SessionCommand>,
-    deps: &ActorDeps,
+    deps: &SessionDeps,
 ) -> Option<ShutdownOutcome> {
     let _ = mailbox_tx; // reserved for future enqueue-follow-up commands
     match cmd {
@@ -375,7 +391,7 @@ async fn handle_command(
 /// already in flight. Always uses `TurnEntry::FreshLikeInit` — resume
 /// dispatch happens once at actor startup via `apply_resume_point`, not
 /// here.
-async fn try_start_turn(state: &mut ActorState, msg: NewMessage, deps: &ActorDeps) {
+async fn try_start_turn(state: &mut SessionState, msg: NewMessage, deps: &SessionDeps) {
     if state.has_active_turn() {
         return;
     }
@@ -408,7 +424,7 @@ async fn try_start_turn(state: &mut ActorState, msg: NewMessage, deps: &ActorDep
 }
 
 /// Record the terminal event after a turn finishes.
-async fn on_turn_complete(state: &mut ActorState, turn_id: TurnId, outcome: TurnOutcome) {
+async fn on_turn_complete(state: &mut SessionState, turn_id: TurnId, outcome: TurnOutcome) {
     state.in_flight = None;
     let mut rec = state.recorder.lock().await;
     let result: Result<(), _> = match outcome {
@@ -445,7 +461,7 @@ async fn on_turn_complete(state: &mut ActorState, turn_id: TurnId, outcome: Turn
 }
 
 /// Cancel the running turn and wait (up to `deadline`) for it to finish.
-async fn drain_shutdown(state: &mut ActorState, deadline: Duration) -> ShutdownOutcome {
+async fn drain_shutdown(state: &mut SessionState, deadline: Duration) -> ShutdownOutcome {
     let started = Instant::now();
     // Signal the TurnDriver to stop cooperatively.
     state.current_cancel_token.lock().cancel();

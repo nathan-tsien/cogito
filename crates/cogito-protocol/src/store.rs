@@ -16,8 +16,8 @@ use crate::ids::SessionId;
 ///
 /// Implementations live in separate crates (`cogito-store-jsonl`,
 /// `cogito-store-postgres` v0.4). The Runtime holds **one**
-/// `Arc<dyn ConversationStore>` shared by all `SessionActor`s; every
-/// method takes the session identifier explicitly.
+/// `Arc<dyn ConversationStore>` shared by all per-session loop tasks;
+/// every method takes the session identifier explicitly.
 ///
 /// Durability semantics are backend-defined; see each backend's crate
 /// docs.

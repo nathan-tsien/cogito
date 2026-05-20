@@ -1,6 +1,6 @@
 # H03 · Resume Coordinator
 
-> **Status**: ✅ Implemented · Sprint 3 · `crates/cogito-core/src/harness/resume.rs` (pure `replay()` + 6-variant `ResumePoint`); resume dispatch wired in `runtime::actor::actor_main`; chaos test in `crates/cogito-core/tests/resume_chaos.rs`
+> **Status**: ✅ Implemented · Sprint 3 · `crates/cogito-core/src/harness/resume.rs` (pure `replay()` + 6-variant `ResumePoint`); resume dispatch wired in `runtime::session_loop::run_session`; chaos test in `crates/cogito-core/tests/resume_chaos.rs`
 
 ## Role in Harness
 
@@ -205,7 +205,7 @@ output reconstructed from the same in-call slice; otherwise return
 an "events → high-level value" transformation. `enter_turn` receives the
 result without needing to re-scan.
 
-The session loop (`runtime::actor::actor_main`) calls `replay` early in its
+The session loop (`runtime::session_loop::run_session`) calls `replay` early in its
 startup sequence — after schema validation, before initializing the seq
 counter — and then branches on the resulting `ResumePoint`:
 
@@ -260,7 +260,7 @@ violating ADR-0002 immutability.
 **Calls (out)**: None. Pure function.
 
 **Called by**: H01 Turn Driver, once on entry. Specifically, invoked from
-`runtime::actor::actor_main` after schema validation and before the
+`runtime::session_loop::run_session` after schema validation and before the
 per-session seq counter is initialized (see Algorithm sketch above).
 
 ## Open design questions

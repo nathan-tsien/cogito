@@ -1,11 +1,11 @@
-//! P4.4 — `actor_main` startup sequence + `apply_resume_point`.
+//! P4.4 — `run_session` startup sequence + `apply_resume_point`.
 //!
 //! End-to-end tests covering the resume-on-startup contract:
 //!
-//! 1. `resume_from_model_completed_fast_paths_to_turn_completed` — the actor
-//!    must call H03 `replay()` on startup and dispatch the resulting
-//!    `ResumeFromModelCompleted` into the FSM, which fast-paths to
-//!    `TurnCompleted` without re-calling the model.
+//! 1. `resume_from_model_completed_fast_paths_to_turn_completed` — the
+//!    session loop must call H03 `replay()` on startup and dispatch the
+//!    resulting `ResumeFromModelCompleted` into the FSM, which fast-paths
+//!    to `TurnCompleted` without re-calling the model.
 //!
 //! 2. `resume_with_completed_session_idles_then_serves_new_input` — when the
 //!    log ends in `TurnCompleted`/`TurnFailed`, replay yields `FreshTurn` and
