@@ -13,7 +13,7 @@ use cogito_protocol::ids::EventId;
 use cogito_protocol::tool::ToolResult;
 use cogito_protocol::turn::TurnOutcome;
 
-use crate::harness::resume::{ResumeDecision, ResumePoint, ResumePendingCall};
+use crate::harness::resume::{ResumeDecision, ResumePendingCall, ResumePoint};
 
 /// Harness-internal translation of `ResumePoint` into the FSM-level shape
 /// `enter_turn` consumes. Three variants because `FreshTurn` and
@@ -65,7 +65,11 @@ pub async fn enter_turn(entry: TurnEntry, ctx: TurnCtx, deps: TurnDeps) -> TurnO
         },
         TurnEntry::FromModelCompleted { output } => {
             let surface = crate::harness::tool_surface::surface(&ctx.strategy, deps.tools.as_ref());
-            TurnState::ModelCompleted { ctx, output, surface }
+            TurnState::ModelCompleted {
+                ctx,
+                output,
+                surface,
+            }
         }
         TurnEntry::FromToolDispatching { pending, completed } => {
             let surface = crate::harness::tool_surface::surface(&ctx.strategy, deps.tools.as_ref());
@@ -92,7 +96,10 @@ pub async fn enter_turn(entry: TurnEntry, ctx: TurnCtx, deps: TurnDeps) -> TurnO
                         Ok(id) => id,
                         Err(_) => EventId::recorder_failure_placeholder(),
                     };
-                    TurnState::Failed { reason, recorded_event_id: event_id }
+                    TurnState::Failed {
+                        reason,
+                        recorded_event_id: event_id,
+                    }
                 }
             }
         }
@@ -108,7 +115,12 @@ fn resolve_pending(
 ) -> Result<Vec<crate::harness::tool_resolver::ToolInvocation>, String> {
     let mut out = Vec::with_capacity(pending.len());
     for p in pending {
-        match crate::harness::tool_resolver::resolve(&p.call_id, &p.tool_name, p.args.clone(), surface) {
+        match crate::harness::tool_resolver::resolve(
+            &p.call_id,
+            &p.tool_name,
+            p.args.clone(),
+            surface,
+        ) {
             crate::harness::tool_resolver::ResolvedCall::Ok(inv) => out.push(inv),
             crate::harness::tool_resolver::ResolvedCall::Error(result) => {
                 // Spec §4.3: persisted tool args fail current schema validation
