@@ -4,7 +4,9 @@
 //! fails to open, transitions to `Failed`.
 
 use cogito_protocol::gateway::ModelInput;
+use cogito_protocol::ids::EventId;
 use cogito_protocol::tool::ToolDescriptor;
+use cogito_protocol::turn::TurnFailureReason;
 
 use crate::harness::turn_driver::deps::TurnDeps;
 use crate::harness::turn_driver::state::{TurnCtx, TurnState};
@@ -32,10 +34,25 @@ pub async fn transit(
             stream,
             surface,
         },
-        Err(e) => TurnState::Failed {
-            reason: cogito_protocol::turn::TurnFailureReason::ModelGatewayFailed {
+        Err(e) => {
+            let reason = TurnFailureReason::ModelGatewayFailed {
                 message: e.to_string(),
-            },
-        },
+            };
+            let recorded_event_id = match deps
+                .step
+                .lock()
+                .await
+                .record_turn_failed(ctx.turn_id, reason.clone())
+                .await
+            {
+                Ok(id) => id,
+                // Recorder failed while recording the failure itself.
+                Err(_) => EventId::recorder_failure_placeholder(),
+            };
+            TurnState::Failed {
+                reason,
+                recorded_event_id,
+            }
+        }
     }
 }

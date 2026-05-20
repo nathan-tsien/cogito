@@ -13,16 +13,16 @@ use tokio::runtime::Handle as TokioHandle;
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use super::actor::{ActorDeps, ActorState, record_session_started};
 use super::handle::{SessionHandle, SessionShared};
+use super::session_loop::{SessionDeps, SessionState, record_session_started};
 use super::types::{OpenMode, SessionId};
 use crate::harness::step_recorder::StepRecorder;
 
 /// The DI container and session registry. One `Runtime` per cogito-using
-/// process is the typical pattern; opening N sessions spawns N actor tasks
-/// on the injected tokio runtime.
+/// process is the typical pattern; opening N sessions spawns N session-loop
+/// tasks (one tokio task per session) on the injected tokio runtime.
 pub struct Runtime {
-    /// Tokio runtime handle that all `SessionActor` tasks are spawned onto.
+    /// Tokio runtime handle that all per-session loop tasks are spawned onto.
     handle: TokioHandle,
     /// Active sessions keyed by `SessionId`.
     sessions: DashMap<SessionId, SessionHandle>,
@@ -40,22 +40,73 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Open or attach a session. See [`OpenMode`] for the three semantics.
+    /// Open or resume a session. See [`OpenMode`] for the three semantics.
     ///
-    /// v0.1 only implements `OpenMode::New`. `Resume` and `Attach` will be
-    /// wired through H03 in Sprint 3.
+    /// All three modes are dispatched as of Sprint 3 P4.3:
+    ///
+    /// - `OpenMode::New` — asserts the session does not exist in the store.
+    /// - `OpenMode::Resume` — asserts the session exists in the store.
+    /// - `OpenMode::Attach` — tolerant: accepts any store state including empty.
     ///
     /// # Errors
     ///
-    /// Returns `RuntimeError::SessionAlreadyOpen` if `id` is already in the
-    /// registry.
+    /// - `RuntimeError::SessionAlreadyOpen` — `id` is already in the in-memory registry.
+    /// - `RuntimeError::SessionAlreadyExists` — `OpenMode::New` but store has events for `id`.
+    /// - `RuntimeError::ResumeFailed` — `OpenMode::Resume` but store has no events for `id`.
+    /// - `RuntimeError::StoreError` — backend I/O or serde failure while reading the store.
     pub async fn open_session(
         self: &Arc<Self>,
         id: SessionId,
-        _mode: OpenMode,
+        mode: OpenMode,
     ) -> Result<SessionHandle, RuntimeError> {
+        use futures::TryStreamExt as _;
+
         if self.sessions.contains_key(&id) {
-            return Err(RuntimeError::SessionAlreadyOpen(id));
+            return Err(RuntimeError::SessionAlreadyOpen { id });
+        }
+
+        // Read latest_seq once; it serves two purposes:
+        //   1. existence check — `Some(_)` means the session has events in the store.
+        //      (We use latest_seq, not replay(id, 0), because replay yields events
+        //      with seq > 0 strictly and would miss a session that only has the
+        //      seq=0 SessionStarted event.)
+        //   2. seq_start for StepRecorder — for Resume/Attach against an existing
+        //      session, new events must start at latest_seq + 1 to avoid colliding
+        //      with persisted events.
+        let latest_seq = self
+            .store
+            .latest_seq(id)
+            .await
+            .map_err(|e| RuntimeError::StoreError(e.to_string()))?;
+        let session_exists = latest_seq.is_some();
+
+        // Collect events with seq > 0 for downstream consumption by P4.4's H03 replay.
+        // SessionStarted (seq=0) is excluded here; P4.4 reconstructs context from seq>=1
+        // events via H03 apply_resume_point.
+        let initial_events: Vec<cogito_protocol::ConversationEvent> = self
+            .store
+            .replay(id, 0)
+            .try_collect()
+            .await
+            .map_err(|e| RuntimeError::StoreError(e.to_string()))?;
+
+        match mode {
+            OpenMode::New => {
+                if session_exists {
+                    return Err(RuntimeError::SessionAlreadyExists { id });
+                }
+            }
+            OpenMode::Resume => {
+                if !session_exists {
+                    return Err(RuntimeError::ResumeFailed {
+                        id,
+                        reason: "no such session in store".into(),
+                    });
+                }
+            }
+            OpenMode::Attach => {
+                // Tolerant: accept any store state (empty or non-empty).
+            }
         }
 
         // Channels.
@@ -70,18 +121,28 @@ impl Runtime {
         // Per-session cancel token; starts as a fresh token.
         let cancel = Arc::new(parking_lot::Mutex::new(CancellationToken::new()));
 
-        // Step recorder shared between actor and TurnDeps.
+        // Step recorder shared between actor and TurnDeps. For a fresh session
+        // latest_seq is None → seq_start=0. For Resume/Attach against an
+        // existing session, seq_start=latest_seq+1 so new events do not collide
+        // with persisted ones.
+        let seq_start = latest_seq.map_or(0, |s| s + 1);
         let recorder = Arc::new(Mutex::new(StepRecorder::new(
             Arc::clone(&self.store),
             broadcast_tx.clone(),
             id,
-            0, // seq_start = 0 for a fresh session (Resume will pass latest_seq+1)
+            seq_start,
         )));
 
-        // Write SessionStarted before the actor task starts.
-        record_session_started(&recorder, id, &self.strategy).await;
+        // Write SessionStarted exactly once per session, gated on the store
+        // existence check. Kept here (not in run_session) so that the session
+        // loop stays stateless with respect to session lifecycle: every event
+        // the loop writes is correlated with a turn, not the session itself.
+        // See run_session's startup-sequence doc.
+        if !session_exists {
+            record_session_started(&recorder, id, &self.strategy).await;
+        }
 
-        let state = ActorState {
+        let state = SessionState {
             session_id: id,
             strategy: self.strategy.clone(),
             in_flight: None,
@@ -94,18 +155,35 @@ impl Runtime {
             store: Arc::clone(&self.store),
         };
 
-        let deps = ActorDeps {
+        let deps = SessionDeps {
             model: Arc::clone(&self.model),
             tools: Arc::clone(&self.tools),
         };
 
-        let mailbox_tx_for_actor = mailbox_tx.clone();
-        self.handle.spawn(super::actor::actor_main(
-            state,
-            mailbox_rx,
-            mailbox_tx_for_actor,
-            deps,
-        ));
+        let mailbox_tx_for_loop = mailbox_tx.clone();
+        // P4.4: capture the loop's `ShutdownOutcome` so non-Clean exits
+        // (resume-failed, JobManager-unavailable) surface in the log even
+        // though `open_session` has already returned the handle. The loop
+        // task is fire-and-forget; future sprints may add a startup-result
+        // channel for synchronous error surfacing.
+        let session_id_for_log = id;
+        self.handle.spawn(async move {
+            let outcome = super::session_loop::run_session(
+                state,
+                mailbox_rx,
+                mailbox_tx_for_loop,
+                deps,
+                initial_events,
+            )
+            .await;
+            if !matches!(outcome, super::types::ShutdownOutcome::Clean { .. }) {
+                tracing::error!(
+                    session_id = %session_id_for_log,
+                    ?outcome,
+                    "actor exited with non-Clean outcome"
+                );
+            }
+        });
 
         let shared = Arc::new(SessionShared {
             session_id: id,
@@ -219,13 +297,30 @@ pub enum RuntimeError {
     /// `Handle::try_current()` failed at build time.
     #[error("no current tokio runtime: {0}")]
     NoTokioRuntime(String),
-    /// The session id was already open in this `Runtime`.
-    #[error("session already open: {0}")]
-    SessionAlreadyOpen(SessionId),
+    /// The session id was already open in this `Runtime` (in-memory registry).
+    #[error("session {id:?} already open in runtime")]
+    SessionAlreadyOpen {
+        /// The session id that is already open.
+        id: SessionId,
+    },
+    /// The session id already exists in the backing store (`OpenMode::New` collision).
+    #[error("session {id:?} already exists in store")]
+    SessionAlreadyExists {
+        /// The session id that collided.
+        id: SessionId,
+    },
     /// Resume-phase failure for `OpenMode::Resume` or `OpenMode::Attach`.
-    #[error("resume failed: {0}")]
-    ResumeFailed(String),
+    #[error("resume failed for session {id:?}: {reason}")]
+    ResumeFailed {
+        /// The session id for which resume was attempted.
+        id: SessionId,
+        /// Human-readable description of why the resume failed.
+        reason: String,
+    },
     /// A required dependency was not set on the builder.
     #[error("missing required dependency: {0}")]
     MissingDependency(&'static str),
+    /// Backend store I/O or serde failure during `open_session`.
+    #[error("store error during open: {0}")]
+    StoreError(String),
 }

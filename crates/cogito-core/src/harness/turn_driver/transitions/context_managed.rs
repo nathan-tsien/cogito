@@ -6,6 +6,9 @@
 
 use futures::StreamExt;
 
+use cogito_protocol::ids::EventId;
+use cogito_protocol::turn::TurnFailureReason;
+
 use crate::harness::hooks::HookDecision;
 use crate::harness::prompt::compose;
 use crate::harness::tool_surface::surface;
@@ -72,11 +75,26 @@ pub async fn transit(ctx: TurnCtx, deps: &TurnDeps) -> TurnState {
             input: model_input,
             surface: tool_surface,
         },
-        HookDecision::Reject { reason } => TurnState::Failed {
-            reason: cogito_protocol::turn::TurnFailureReason::HookRejected {
+        HookDecision::Reject { reason } => {
+            let failure_reason = TurnFailureReason::HookRejected {
                 hook_name: "pre_prompt".into(),
                 message: reason,
-            },
-        },
+            };
+            let recorded_event_id = match deps
+                .step
+                .lock()
+                .await
+                .record_turn_failed(ctx.turn_id, failure_reason.clone())
+                .await
+            {
+                Ok(id) => id,
+                // Recorder failed while recording the failure itself.
+                Err(_) => EventId::recorder_failure_placeholder(),
+            };
+            TurnState::Failed {
+                reason: failure_reason,
+                recorded_event_id,
+            }
+        }
     }
 }

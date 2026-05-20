@@ -1,6 +1,6 @@
 //! `TurnDeps` — protocol-level trait objects injected into every FSM
-//! transition. Constructed by `SessionActor::try_start_turn` (or by the
-//! test harness) and borrowed by all transition functions.
+//! transition. Constructed by `runtime::session_loop::try_start_turn` (or
+//! by the test harness) and borrowed by all transition functions.
 
 use std::sync::Arc;
 

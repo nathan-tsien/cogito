@@ -409,6 +409,7 @@ dependencies = [
  "tokio-test",
  "tokio-util",
  "tracing",
+ "ulid",
  "uuid",
 ]
 
@@ -542,11 +543,14 @@ name = "cogito-test-fixtures"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "cogito-protocol",
+ "cogito-store-jsonl",
  "futures",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "ulid",
  "uuid",

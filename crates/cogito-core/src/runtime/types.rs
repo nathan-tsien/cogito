@@ -15,25 +15,35 @@ pub enum OpenMode {
     /// Session must not exist in the store. Writes a `SessionStarted` event.
     New,
     /// Session must exist; replay through H03 establishes resume point.
-    /// Returns `Err(RuntimeError::ResumeFailed)` with a clear "no such
-    /// session" message on missing log — distinct from `Attach`, which
-    /// returns a typed `NotFound`-style error. `Resume` is the
-    /// "I know this session exists" form: missing log is a caller bug.
+    /// Returns `Err(RuntimeError::ResumeFailed { id, reason })` with a
+    /// clear "no such session in store" reason when the log is empty.
+    /// `Resume` is the "I know this session exists" form — missing log
+    /// is a caller bug.
     Resume,
-    /// Like `Resume` but returns `Err(ResumeError::NotFound)` instead of
-    /// panicking on a missing log.
+    /// Like `Resume` but tolerant of a missing log: replay treats an
+    /// empty store as a fresh session rather than an error.
     Attach,
 }
 
 /// Outcome of an attempted `SessionHandle::shutdown`.
 #[derive(Debug)]
-pub struct ShutdownOutcome {
-    /// True if the actor drained cleanly without forced abort.
-    pub clean: bool,
-    /// If a turn was in-flight when shutdown started, a human-readable
-    /// description of the last known state (for caller-side logging only —
-    /// the persisted event log is the authority).
-    pub in_flight_cancelled: Option<String>,
+#[non_exhaustive]
+pub enum ShutdownOutcome {
+    /// Actor drained the mailbox and exited cleanly. `in_flight_cancelled`
+    /// is `Some(reason)` if a turn was still running at the shutdown deadline
+    /// and had to be force-cancelled; `None` if the turn finished on its own.
+    Clean {
+        /// Human-readable description of the force-cancelled turn, or `None`
+        /// if no turn was in-flight at shutdown time.
+        in_flight_cancelled: Option<String>,
+    },
+    /// Resume failed before the mailbox loop started (schema mismatch or
+    /// malformed event log).
+    ResumeFailed(String),
+    /// `JobManager` couldn't honor `on_complete` callback during `PausedOnJob`
+    /// recovery (e.g. job id unknown to the manager). Runtime configuration
+    /// failure, not a turn failure — no event is written to the log.
+    JobManagerUnavailable(String),
 }
 
 /// Commands the caller (and the actor's own internal subsystems) may send

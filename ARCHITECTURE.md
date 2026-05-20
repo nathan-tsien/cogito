@@ -156,6 +156,51 @@ implementation lands with the Context Management initiative (ADR-0008,
 pending). See `docs/components/H01-turn-driver.md` §"Init → ContextManaged
 → PromptBuilt sequence" for the canonical H10/H11/H04/H05/H09 walkthrough.
 
+### Resume entry path
+
+End-to-end recovery sequence for a single session after process restart:
+
+```
+┌─ Caller (CLI / consumer) ──────────────────────────────────────────────┐
+│   runtime.open_session(id, SessionMode::Resume).await                  │
+└──────────────────┬─────────────────────────────────────────────────────┘
+                   │
+                   ▼
+┌─ Runtime::open_session ────────────────────────────────────────────────┐
+│  R1 check in-memory registry (prevent concurrent open of same session) │
+│  R2 store.range(session_id, ..).await   ← pull all events              │
+│  R3 events.is_empty()? → Err(ResumeFailed: no such session)            │
+│  R4 tokio::spawn(session_loop::run_session(state, ..., initial_events))│
+└──────────────────┬─────────────────────────────────────────────────────┘
+                   │
+                   ▼
+┌─ runtime::session_loop::run_session (the "session actor" task body) ───┐
+│  A1 schema check (fail-fast)                                           │
+│  A2 let decision = harness::resume::replay(&initial_events)?           │
+│  A3 state.event_seq.store(decision.last_event_seq + 1)                 │
+│  A4 if New session: write SessionStarted                               │
+│  A5 apply_resume_point(decision.point):                                │
+│     - FreshTurn                → in_flight=Idle                        │
+│     - RestartCurrentTurn       → spawn TurnDriver (Init-like)          │
+│     - ResumeFromModelCompleted → spawn TurnDriver (ModelCompleted)     │
+│     - ResumeFromToolDispatching→ spawn TurnDriver (ToolDispatching)    │
+│     - ResumePausedJob          → in_flight=PausedOnJob;                │
+│                                  job_manager.on_complete(sink)         │
+│     - ResumeAfterJobCompletion → inject result → spawn TurnDriver      │
+│                                  (ToolDispatching)                     │
+│  A6 enter mailbox main loop                                            │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key invariants** (correctness requirements, not preferences):
+
+- **Step R2 completes entirely in the Runtime layer**, before the per-session loop task starts. Once `run_session` begins, it never goes back to the store to pull history. This guarantees that the `events → state` mapping in `run_session` is a deterministic pure function (unit-testable in isolation).
+- **Step A3 must precede step A5**: any write that occurs before the sequence generator is initialized may produce an event with `seq < last_event_seq`, violating the ADR-0002 append-only invariant.
+- **`ResumePausedJob` branch does not spawn a `TurnDriver`**. The turn deliberately paused waiting for an external job, not for the model; spawning a `TurnDriver` immediately would cause it to terminate at once, leaving the actor to register `on_complete` on the next cycle — a bug incubator.
+- **`ResumeAfterJobCompletion` is a distinct branch** (not a sub-case of `ResumeFromToolDispatching`): the former derives its completed payload from a `JobCompletedRecorded` event; the latter derives from a `ToolResultRecorded` event — the data sources are different.
+
+> Full algorithm: `docs/components/H03-resume-coordinator.md`. Decision rationale: spec 2026-05-20-sprint-3-resume-coordinator-design.md §3 + §4.
+
 ## Brain / Hands / Session boundaries
 
 The 11-component design describes Brain's internal structure. The **crate
@@ -195,6 +240,94 @@ Runtime   ← Surface
 (Arrows point from imported to importer.) **Brain importing a Hand
 directly is a build error.** When Brain needs a new capability, add a
 trait to Protocol — do not relax the rule.
+
+## Actor model — why and how
+
+### Why an actor model?
+
+cogito is an embedded library (ADR-0005 §1); a single process must serve
+≥1000 concurrent sessions (ADR-0005 §3 SLO). This constraint directly
+eliminates the Codex-style `Arc<Session> + Mutex<ActiveTurn>` shared-state
+approach — once a mutex is poisoned inside one session, every code path
+accessing the same mutex stalls, violating the "single-session failure
+isolation" requirement.
+
+Five concrete constraints drive the design toward an actor model:
+
+- **Failure isolation**: a single-session panic must not affect other sessions.
+- **Caller-injected tokio `Handle`**: cogito does not call `Runtime::new()`; it accepts an external `Handle`.
+- **Cooperative cancellation**: Ctrl-C terminates the current turn, not the session.
+- **Dual event streams**: the durable stream (backpressure) and the broadcast stream (low-latency, lossy) have contradictory delivery contracts that cannot share one channel.
+- **Async job wake-up**: the actor must respond to mailbox messages while in `PausedOnJob` state.
+
+All five constraints point to the same solution: one actor task per session.
+
+### Four core invariants
+
+cogito's actor model is defined by four invariants. These are correctness
+requirements, not engineering preferences:
+
+1. **Private state**: each session's runtime state is owned exclusively by **one** task. No cross-actor `Arc<Mutex<_>>`.
+2. **Message-driven**: all interaction with an actor goes through channels — mailbox (commands), broadcast (events), persist (durable writes), job sink (async wake-up). A direct function call into actor internals is a design bug.
+3. **Single mutable owner**: the actor task is the sole mutator of its private state. Subtasks (`TurnDriver`, `store_writer`) receive value copies or explicit handles through channels.
+4. **Cooperative termination**: cancellation goes through `CancellationToken` + `select!`, never `task.abort()`. Every await point has a chance to drop RAII guards and flush pending events.
+
+### Topology
+
+```
+                  Caller (CLI / consumer service)
+                                │
+                                ▼  Arc<Runtime>
+                    ┌───────────────────────────┐
+                    │         Runtime            │
+                    │  · session_registry        │
+                    │  · DI: store / model / ... │
+                    │  · panic catch boundary    │
+                    └────────────┬───────────────┘
+                                 │ open_session
+                                 ▼
+ ┌───── runtime::session_loop::run_session (one task per session) ─────┐
+ │                                                                     │
+ │      mailbox (mpsc<SessionCommand>, cap 64)                         │
+ │       Input / Shutdown / Cancel / JobCompleted                      │
+ │              │                                                      │
+ │              ▼ FIFO drain                                           │
+ │       ┌───────────────┐                                             │
+ │       │  actor_loop    │── private state (in_flight, seq, ...)      │
+ │       └──┬──────┬──────┘                                            │
+ │          │      │  events_out (broadcast<StreamEvent>, cap 256)     │
+ │          │      └────────────────────────────────────►              │
+ │          │             0..N live subscribers (lossy)                │
+ │   spawn  │                                                          │
+ │   per-   │      persist_tx (mpsc<PersistCommand>, cap 256)          │
+ │   turn   │             │                                            │
+ │          ▼             ▼                                            │
+ │   TurnDriver task    store_writer subtask (serial fsync)            │
+ │   (FSM run loop)              │                                     │
+ │                               ▼                                     │
+ │                       ConversationStore (JSONL / Postgres / ...)    │
+ │                                                                     │
+ │      job_completion_rx (mpsc<JobCompletionEvent>, cap 32)           │
+ │       ◄── JobManager.on_complete(job_id, sink) callbacks            │
+ └─────────────────────────────────────────────────────────────────────┘
+```
+
+### Advantages in cogito's context
+
+- **Failure isolation falls to the scheduler layer**: tokio unwinds a panicking task independently; other sessions are completely unaffected. This is a prerequisite for the ADR-0005 §3 SLO of ≥1000 concurrent sessions.
+- **Backpressure is first-class**: channel capacities (64 / 256 / 256) are explicit SLO knobs. Slow consumers observe `Lagged(n)` and self-diagnose; there is no silent unbounded growth.
+- **Cancellation is verifiable**: every await point is guarded by `select!`, RAII guards drop normally — contrasted with `task.abort()`, which leaves half-written state.
+- **Scaling unit is clear**: one process = N actors; multiple processes = sticky `session_id` routing. cogito does not coordinate across actors within a process (that is the consumer's deployment concern); scaling out actors adds almost zero coordination overhead.
+- **Resume is local**: a single-session crash only requires rebuilding one per-session loop task (Sprint 3 H03 + `run_session` flow). A shared-state design would require reconstructing cross-session lock state — a fundamentally different complexity class.
+
+### Trade-offs
+
+- **Per-session baseline memory**: tokio task stack + 3–4 channels + private state ≈ 10–30 KiB (idle, not running a turn). This is a known cost, not a surprise.
+- **Mailbox FIFO vs. cancel priority**: `cancel_turn` cannot queue behind a large backlog — ADR-0006 §3 solves this with a direct `CancellationToken` signal that bypasses the mailbox.
+- **Boilerplate**: managing 4 channel types + drain protocol is roughly 30% more LoC than `Arc<Mutex>`. The correctness guarantees justify this.
+- **Cross-actor debugging requires structured tracing**: each actor needs its own span; otherwise mailbox-ordered log lines are misleading. This is a mandatory operational discipline, not optional.
+
+> Cross-refs: ADR-0006 §1 (decision), §3 (cancellation), §4 (channels), §5 (job wake-up); spec 2026-05-20-sprint-3-resume-coordinator-design.md §7.
 
 ## Hands layer internal structure
 

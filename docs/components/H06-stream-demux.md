@@ -1,6 +1,6 @@
 # H06 · Stream Demultiplexer
 
-> **Status**: 🚧 Not implemented · Sprint 2
+> **Status**: ✅ Implemented · Sprint 2 (Anthropic + OpenAI streams; recorder wiring) · Sprint 3 added the `ModelCallCompleted` recorder call. `crates/cogito-core/src/harness/stream_demux.rs`
 
 ## Role in Harness
 
@@ -59,12 +59,23 @@ H06 never sees partial JSON or per-block running text — it only sees sealed
    via `StreamEvent::TextDelta` but **not** persisted directly; persistence
    happens at `TextBlockCompleted`.
 4. **`ToolUseCompleted` is recorded immediately.** When H06 receives a
-   `ToolUseCompleted`, it calls `recorder.record(ToolUseEmitted { ... })`
+   `ToolUseCompleted`, it calls `recorder.record_tool_use(...)`
    immediately — no batching applies to non-text events.
-5. **`ModelCallCompleted` is recorded by H01**, not by H06. H06 returns
-   `ModelOutput`; H01 calls `record(ModelCallCompleted { ... })` as part of
-   the transition to `ModelCompleted`.
-6. **No interpretation.** H06 does not parse tool args against schemas,
+5. **`ToolUseRecorded` is written BEFORE `ModelCallCompleted`** (load-bearing
+   for H03). Because invariant 4 fires per `ToolUseCompleted` and the
+   sealing `MessageCompleted` always arrives last in the model stream,
+   every `ToolUseRecorded` produced by a turn sits in the event log
+   between its `ModelCallStarted` and its `ModelCallCompleted`. H03's
+   resume scan relies on this — see
+   `docs/components/H03-resume-coordinator.md` §"Resume decision table"
+   Phase 2b. Changing this order would silently break
+   `ResumeFromToolDispatching`.
+6. **`ModelCallCompleted` is recorded by H06** at `MessageCompleted` time
+   (Sprint 3 P2.2), not by H01. H06 returns `ModelOutput` after the call
+   to `record_model_call_completed` has resolved. `ToolResultRecorded`
+   events appear strictly **after** `ModelCallCompleted`, emitted by the
+   actor as each dispatched tool returns.
+7. **No interpretation.** H06 does not parse tool args against schemas,
    doesn't validate names — that's H07. It only consumes the normalized
    `ModelEvent` stream and writes the appropriate H02 events.
 
@@ -84,6 +95,22 @@ H06 never sees partial JSON or per-block running text — it only sees sealed
 - **Unit**: synthetic `ModelEvent` streams with interleavings of text + tool_use + stop_reason; verify recorded event sequence.
 - **Property**: arbitrary valid streams produce no duplicate events, no dropped events, no out-of-order tool_use sequences.
 - **Integration**: `cogito-mock-model` produces scripted streams; end-to-end test verifies event log matches expectation.
+
+## Recorder invocation timing
+
+H06's `demux` loop owns the side-effect contract between the gateway stream and `StepRecorder`:
+
+| Model stream event | Recorder call | Persisted event | Position in log |
+|---|---|---|---|
+| `TextDelta { chunk }` | `on_text_delta` (buffer) | (none; flushed at block boundary) | — |
+| `TextBlockCompleted` | `on_text_block_complete` (flush) | `AssistantMessageAppended` | between `ModelCallStarted` and `ModelCallCompleted` |
+| `ToolUseCompleted` | `record_tool_use` | `ToolUseRecorded` | between `ModelCallStarted` and `ModelCallCompleted` |
+| `MessageCompleted { stop_reason, usage }` | `record_model_call_completed` | `ModelCallCompleted` | sealing event for the model call |
+| (post-stream, H08 emits) | `record_tool_result` | `ToolResultRecorded` | strictly **after** `ModelCallCompleted` |
+
+The `MessageCompleted` → `record_model_call_completed` call **must complete before `demux` returns the `ModelOutput`**. This guarantees H03 sees the sealing event before any subsequent transition (H07/H08) writes tool dispatch events — preserving the invariant "events written in causal order".
+
+→ Sprint 3 decision: spec `2026-05-20-sprint-3-resume-coordinator-design.md` §4 Q1 落库时机 + §5.4 EventId 串回.
 
 ## References
 

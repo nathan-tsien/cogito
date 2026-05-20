@@ -10,7 +10,7 @@ use cogito_protocol::tool::{ToolDescriptor, ToolErrorKind, ToolResult};
 
 use crate::harness::dispatcher::{DispatchOutcome, dispatch};
 use crate::harness::hooks::HookDecision;
-use crate::harness::resume::ResumeDecision;
+use crate::harness::resume::{ResumeDecision, ResumePoint};
 use crate::harness::tool_resolver::ToolInvocation;
 use crate::harness::turn_driver::deps::TurnDeps;
 use crate::harness::turn_driver::state::{TurnCtx, TurnState};
@@ -84,6 +84,9 @@ pub async fn transit(
     // iterations share it. Sprint 3 may mint a fresh turn_id per inner loop.
     TurnState::Init {
         ctx,
-        resume: ResumeDecision::FreshTurn,
+        resume: ResumeDecision {
+            point: ResumePoint::FreshTurn,
+            last_event_seq: None,
+        },
     }
 }

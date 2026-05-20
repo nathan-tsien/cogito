@@ -4,7 +4,9 @@
 //! (or `Failed` on a gateway error).
 
 use cogito_protocol::gateway::{ModelError, ModelEvent};
+use cogito_protocol::ids::EventId;
 use cogito_protocol::tool::ToolDescriptor;
+use cogito_protocol::turn::TurnFailureReason;
 use futures::stream::BoxStream;
 
 use crate::harness::stream_demux::demux;
@@ -34,10 +36,25 @@ pub async fn transit(
             output,
             surface,
         },
-        Err(e) => TurnState::Failed {
-            reason: cogito_protocol::turn::TurnFailureReason::ModelGatewayFailed {
+        Err(e) => {
+            let reason = TurnFailureReason::ModelGatewayFailed {
                 message: e.to_string(),
-            },
-        },
+            };
+            let recorded_event_id = match deps
+                .step
+                .lock()
+                .await
+                .record_turn_failed(ctx.turn_id, reason.clone())
+                .await
+            {
+                Ok(id) => id,
+                // Recorder failed while recording the failure itself.
+                Err(_) => EventId::recorder_failure_placeholder(),
+            };
+            TurnState::Failed {
+                reason,
+                recorded_event_id,
+            }
+        }
     }
 }

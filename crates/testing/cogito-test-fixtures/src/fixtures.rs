@@ -179,6 +179,18 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
         ),
         // Sprint 2: exercise the new context-management transition events.
         envelope(9, Some(turn), EventPayload::ContextManageEntered {}),
+        // Sprint 3: exercise the new model-call sealing event.
+        envelope(
+            10,
+            Some(turn),
+            EventPayload::ModelCallCompleted {
+                stop_reason: cogito_protocol::gateway::StopReason::ToolUse,
+                usage: cogito_protocol::gateway::Usage {
+                    input_tokens: 120,
+                    output_tokens: 45,
+                },
+            },
+        ),
     ]
 }
 

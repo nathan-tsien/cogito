@@ -1,5 +1,5 @@
-//! Turn terminal-state values. The Runtime layer returns these from
-//! `SessionActor` after each turn completes. Caller observes via
+//! Turn terminal-state values. The Runtime layer returns these from the
+//! per-session loop after each turn completes. Caller observes via
 //! `SessionHandle` or the `StreamEvent` stream.
 
 use serde::{Deserialize, Serialize};
@@ -70,6 +70,14 @@ pub enum TurnFailureReason {
         /// Name of the hook that rejected the turn.
         hook_name: String,
         /// Human-readable rejection message.
+        message: String,
+    },
+    /// Resume re-validation failed — the persisted log references tools
+    /// or schemas that are no longer compatible with the running build.
+    /// See `cogito-core::harness::resume::ResumeError` for the protocol-side
+    /// equivalent.
+    ResumeFailed {
+        /// Human-readable description of the resume failure.
         message: String,
     },
 }

@@ -41,14 +41,25 @@ and sequence diagrams live in the design spec:
 
 ### 1. Per-session actor task model
 
-Each session runs in a dedicated long-lived tokio task (`SessionActor`). The
-actor owns a mailbox (`mpsc<SessionCommand>`, capacity 64), a broadcast channel
+Each session runs in a dedicated long-lived tokio task — conceptually the
+"session actor", implemented as the free function
+`runtime::session_loop::run_session` invoked under `tokio::spawn`. The task
+owns a mailbox (`mpsc<SessionCommand>`, capacity 64), a broadcast channel
 (`broadcast<StreamEvent>`, capacity 256), a persist channel
 (`mpsc<PersistCommand>`, capacity 256), and an in-flight turn handle. A
 separate store-writer subtask drains the persist channel and performs all
 `ConversationStore` I/O. When a turn starts, the actor spawns a short-lived
 `TurnDriver` task; when the turn reaches a terminal state the task ends and is
 joined.
+
+The actor model rests on four invariants that are mandatory for correctness, not stylistic preferences:
+
+1. **Private state**: each session's runtime state (`in_flight` cursor, `seq` generator, `PausedOnJob` marker) is owned by **one** task. No cross-actor `Arc<Mutex<_>>`.
+2. **Message-driven**: all interaction with an actor goes through channels — mailbox (commands), broadcast (live events), persist (durable events), job sink (async wake-up). Function calls reaching into an actor's internal state = design bug.
+3. **Single mutable owner**: the actor task is the only mutator of its private state. Subtasks (TurnDriver, store_writer) receive value copies or explicit handles via channels — never mutable references.
+4. **Cooperative termination**: cancellation flows through `CancellationToken` + `select!`, never `task.abort()`. Every await point gets a chance to drop RAII guards and flush pending events.
+
+For the rationale of why these four are load-bearing in cogito's context (≥1000 concurrent sessions, embedded library posture, dual event streams), see **ARCHITECTURE.md §"Actor model — why and how"**.
 
 **Rejected**: Codex-style `Arc<Session> + Mutex<ActiveTurn>` shared-state
 concurrency. A poisoned mutex in one session propagates to all callers of that
@@ -372,3 +383,9 @@ to "add OpenAI Responses API adapter + multi-strategy selection".
 
 See `docs/superpowers/specs/2026-05-19-sprint-2-minimal-loop-design.md`
 for the full Sprint 2 design discussion.
+
+### 2026-05-20 — Four actor-model invariants sunk into §1 (Sprint 3)
+
+**Change**: Decision body §1 expanded with the four actor-model invariants (private state, message-driven, single mutable owner, cooperative termination). Cross-refs added to ARCHITECTURE.md §"Actor model — why and how" and spec `2026-05-20-sprint-3-resume-coordinator-design.md` §7.
+
+**Rationale**: Make implicit invariants explicit in the ADR Decision body so future readers do not need to derive them from the topology paragraph alone. Sinks decision-trace content from the sprint spec into the durable ADR.

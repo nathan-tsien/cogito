@@ -71,7 +71,10 @@ impl StepRecorder {
     /// Record the session-open event. Called once per session, before any
     /// turn starts. Does not emit a [`StreamEvent`] — session-level state
     /// is observable via the persisted log only.
-    pub async fn record_session_started(&mut self, meta: SessionMeta) -> Result<(), StoreError> {
+    pub async fn record_session_started(
+        &mut self,
+        meta: SessionMeta,
+    ) -> Result<EventId, StoreError> {
         self.append(None, EventPayload::SessionStarted { meta })
             .await
     }
@@ -82,7 +85,7 @@ impl StepRecorder {
         &mut self,
         turn_id: TurnId,
         user_input: Vec<ContentBlock>,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnStarted);
         self.append(Some(turn_id), EventPayload::TurnStarted { user_input })
             .await
@@ -106,15 +109,21 @@ impl StepRecorder {
 
     /// Persist the accumulated text block, if any. No-op when no
     /// `on_text_delta` calls have arrived since the last flush.
-    pub async fn on_text_block_complete(&mut self) -> Result<(), StoreError> {
+    ///
+    /// Returns `Ok(None)` when there was no buffered text to flush (no-op
+    /// path), or `Ok(Some(event_id))` when a `AssistantMessageAppended`
+    /// event was persisted.
+    pub async fn on_text_block_complete(&mut self) -> Result<Option<EventId>, StoreError> {
         let Some(buf) = self.current_text_block.take() else {
-            return Ok(());
+            return Ok(None);
         };
-        self.append(
-            Some(buf.turn_id),
-            EventPayload::AssistantMessageAppended { text: buf.text },
-        )
-        .await
+        let event_id = self
+            .append(
+                Some(buf.turn_id),
+                EventPayload::AssistantMessageAppended { text: buf.text },
+            )
+            .await?;
+        Ok(Some(event_id))
     }
 
     /// Record a `tool_use` content block and broadcast
@@ -125,7 +134,7 @@ impl StepRecorder {
         call_id: String,
         tool_name: String,
         args: serde_json::Value,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::ToolDispatchStarted {
             call_id: call_id.clone(),
             tool_name: tool_name.clone(),
@@ -149,7 +158,7 @@ impl StepRecorder {
         turn_id: TurnId,
         call_id: String,
         result: ToolResult,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
         let ok = matches!(result, ToolResult::Output(_));
         let _ = self.events_tx.send(StreamEvent::ToolDispatchEnded {
             call_id: call_id.clone(),
@@ -168,7 +177,7 @@ impl StepRecorder {
         &mut self,
         turn_id: TurnId,
         job_id: JobId,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnPaused);
         self.append(Some(turn_id), EventPayload::TurnPaused { job_id })
             .await
@@ -186,7 +195,7 @@ impl StepRecorder {
         turn_id: TurnId,
         job_id: JobId,
         outcome: JobOutcome,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnResumed);
         self.append(
             Some(turn_id),
@@ -201,7 +210,7 @@ impl StepRecorder {
         &mut self,
         turn_id: TurnId,
         outcome: TurnOutcome,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnCompleted);
         self.append(Some(turn_id), EventPayload::TurnCompleted { outcome })
             .await
@@ -211,7 +220,7 @@ impl StepRecorder {
     pub async fn record_context_manage_entered(
         &mut self,
         turn_id: TurnId,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
         self.append(Some(turn_id), EventPayload::ContextManageEntered {})
             .await
     }
@@ -220,7 +229,7 @@ impl StepRecorder {
     pub async fn record_context_manage_completed(
         &mut self,
         turn_id: TurnId,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
         self.append(Some(turn_id), EventPayload::ContextManageCompleted {})
             .await
     }
@@ -232,7 +241,7 @@ impl StepRecorder {
         turn_id: TurnId,
         model: String,
         surface_size: u32,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
         self.append(
             Some(turn_id),
             EventPayload::PromptComposed {
@@ -249,9 +258,27 @@ impl StepRecorder {
         &mut self,
         turn_id: TurnId,
         model: String,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
         self.append(Some(turn_id), EventPayload::ModelCallStarted { model })
             .await
+    }
+
+    /// Record the sealing event for a model call. Called by H06 demux loop
+    /// when `ModelEvent::MessageCompleted` is observed. Must complete before
+    /// `demux` returns the sealed `ModelOutput` so that H03 can distinguish
+    /// "model call done" from "model call in flight" without re-issuing the
+    /// gateway request.
+    pub async fn record_model_call_completed(
+        &mut self,
+        turn_id: TurnId,
+        stop_reason: cogito_protocol::gateway::StopReason,
+        usage: cogito_protocol::gateway::Usage,
+    ) -> Result<EventId, StoreError> {
+        self.append(
+            Some(turn_id),
+            EventPayload::ModelCallCompleted { stop_reason, usage },
+        )
+        .await
     }
 
     /// Record turn failure and broadcast [`StreamEvent::TurnFailed`] with
@@ -265,7 +292,7 @@ impl StepRecorder {
         &mut self,
         turn_id: TurnId,
         reason: TurnFailureReason,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnFailed {
             reason: format!("{reason:?}"),
         });
@@ -274,15 +301,17 @@ impl StepRecorder {
     }
 
     /// Build the envelope, persist via the store, and advance the
-    /// session-local sequence counter.
+    /// session-local sequence counter. Returns the [`EventId`] minted for
+    /// this event so callers can carry it forward (e.g. into `TurnState::Failed`).
     async fn append(
         &mut self,
         turn_id: Option<TurnId>,
         payload: EventPayload,
-    ) -> Result<(), StoreError> {
+    ) -> Result<EventId, StoreError> {
+        let event_id = EventId::new();
         let event = ConversationEvent {
             schema_version: SCHEMA_VERSION,
-            event_id: EventId::new(),
+            event_id,
             session_id: self.session_id,
             turn_id,
             seq: self.seq_counter,
@@ -291,7 +320,7 @@ impl StepRecorder {
         };
         self.store.append(&event).await?;
         self.seq_counter = self.seq_counter.saturating_add(1);
-        Ok(())
+        Ok(event_id)
     }
 }
 
@@ -369,6 +398,29 @@ mod tests {
         let mut rec = StepRecorder::new(Arc::clone(&store), tx, sid, 0);
         rec.on_text_block_complete().await?;
         assert_eq!(store.latest_seq(sid).await?, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn record_methods_return_event_id() -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempfile::tempdir()?;
+        let store = fresh_store_in(tmp.path());
+        let (tx, _rx) = broadcast::channel(64);
+        let sid = SessionId::new();
+        let mut rec = StepRecorder::new(Arc::clone(&store), tx, sid, 0);
+
+        let event_id_1 = rec
+            .record_session_started(SessionMeta {
+                cogito_version: "0.1.0".into(),
+                ..Default::default()
+            })
+            .await?;
+        let turn_id = TurnId::new();
+        let event_id_2 = rec
+            .record_turn_started(turn_id, vec![ContentBlock::Text { text: "go".into() }])
+            .await?;
+
+        assert_ne!(event_id_1, event_id_2, "EventIds must be unique");
         Ok(())
     }
 

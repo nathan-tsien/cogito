@@ -77,6 +77,38 @@ Init → ContextManaged → PromptBuilt → ModelCalling → ModelCompleted
 > `ContextManaged` as a pass-through (no work); the real H11 work lands with
 > the Context Management initiative (ADR-0008, pending).
 
+## Resume entry path
+
+When `runtime::session_loop::run_session` resolves a non-`FreshTurn` resume decision (Sprint 3 P3.4+), it calls `enter_turn(turn_entry, ctx, deps)` where `turn_entry` is an internal `TurnEntry` enum translating a `ResumePoint` (which carries session-loop concerns like `turn_id`) into the FSM-level shape the FSM consumes:
+
+```rust
+pub(crate) enum TurnEntry {
+    /// FSM enters Init. H04 rebuilds prompt from event log; H10 re-selects strategy.
+    /// Maps from ResumePoint::RestartCurrentTurn.
+    FreshLikeInit,
+    /// FSM enters ModelCompleted with rebuilt output; fast-paths to Completed
+    /// (no model re-call). Maps from ResumePoint::ResumeFromModelCompleted.
+    FromModelCompleted { output: ModelOutput },
+    /// FSM enters ToolDispatching with pending/completed pre-populated. H07
+    /// re-validates pending against current schemas; H10+H05 rebuild surface.
+    /// Maps from ResumePoint::ResumeFromToolDispatching AND
+    /// ResumePoint::ResumeAfterJobCompletion (latter injects job outcome as
+    /// the final completed entry before entering).
+    FromToolDispatching {
+        pending: Vec<ResumePendingCall>,
+        completed: Vec<(String, ToolResult)>,
+    },
+}
+```
+
+`ResumePoint::FreshTurn` does not produce a `TurnEntry` — the actor idles in `mailbox` until the next `Input` triggers a fresh turn. `ResumePoint::ResumePausedJob` likewise does not spawn a TurnDriver; the actor enters `InFlight::PausedOnJob` directly and re-registers the `on_complete` callback.
+
+`TurnEntry` lives inside `cogito-core::harness::turn_driver` and is **harness-internal** — it never crosses the protocol boundary. The protocol-visible recovery interface is `ResumePoint` (in `cogito-core::harness::resume`).
+
+**Status: Sprint 3 P3.4 will introduce `TurnEntry` and rewrite `enter_turn`.** Until then, `enter_turn` only handles fresh turns.
+
+→ Sprint 3 decision: spec `2026-05-20-sprint-3-resume-coordinator-design.md` §5.3.
+
 ## Init → ContextManaged → PromptBuilt sequence (canonical)
 
 This is the **five-component collaboration** that produces a ready-to-stream `ModelInput`. Reviewers and implementers MUST consult this when touching H04, H05, H09, H10, or H11.
@@ -224,7 +256,7 @@ Keeping them straight when reading code:
 |---|---|---|
 | Design concept | "H01 Turn Driver" (Title Case) | The 11-component-Brain abstraction; this doc. Not a Rust entity. |
 | Rust implementation | `cogito_core::harness::turn_driver` module (snake_case) | The module that realizes H01. Contains `TurnState`, `TurnCtx`, `TurnDeps`, `run()`, `enter_turn()`, and the `transitions/*` submodules. |
-| tokio runtime entity | "TurnDriver task" | A per-turn `tokio::spawn`-ed task that runs `enter_turn(...)`. Its `JoinHandle` is held by `SessionActor::InFlight::Active`. One task = one turn. |
+| tokio runtime entity | "TurnDriver task" | A per-turn `tokio::spawn`-ed task that runs `enter_turn(...)`. The per-session loop tracks it via `SessionState::InFlight::Active` (with the turn-result `mpsc` sender to signal completion). One task = one turn. |
 
 A reader saying "the TurnDriver crashed" almost always means the task;
 a reader saying "TurnDriver decides X" almost always means the
@@ -267,7 +299,7 @@ stays inside the relevant variant.
 ### Call graph
 
 ```
-SessionActor::on_command(Input { text })         [runtime/actor.rs]
+session_loop::handle_command(Input { text })     [runtime/session_loop.rs]
   │
   ├── ctx     = TurnCtx { session_id, turn_id, exec_ctx, strategy }
   ├── deps    = TurnDeps { step, model, tools, broadcast, ... }
@@ -297,9 +329,9 @@ turn_driver::enter_turn(decision, ctx, deps)     [harness/turn_driver/mod.rs]
               };
             }
 
-  ──── task completes; SessionActor's select! wakes on turn_join ────
+  ──── task completes; the session loop's select! wakes on turn_result ────
 
-SessionActor::on_turn_complete(TurnOutcome)      [back in runtime/actor.rs]
+session_loop::on_turn_complete(TurnOutcome)      [back in runtime/session_loop.rs]
 ```
 
 ### Loop topology
@@ -311,7 +343,7 @@ Multi-turn tool loops are an **inner** loop within the FSM — after
 results appended. A paused turn ends the current task; it is later
 resumed by *another* TurnDriver task that starts at
 `TurnState::ToolDispatching` (carrying the now-completed job's result).
-The `SessionActor` coordinates that handoff via mailbox-injected
+The per-session loop coordinates that handoff via mailbox-injected
 `JobCompleted`.
 
 ### References

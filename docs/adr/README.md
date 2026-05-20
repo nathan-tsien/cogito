@@ -15,6 +15,7 @@ recording an architectural decision and its context.
 - 0008 — Context Management (`H11 Context Manage` mechanism; **pending** — initiative kicks off post-Sprint 2; see ROADMAP "Spike · Context Management")
 - 0009–0014 — Reserved for v0.2 / v0.3 / v0.4 ADRs (StorageSystem, multimedia, Subagent, Sandbox lifecycle, Credential isolation, TenantContext) — renumbered from the previous 0007–0012 slot allocation by PR #6
 - 0015 — Reserved for v0.6 Storage HTTP wire protocol — renumbered from 0013
+- [0016](./0016-turn-trigger-abstraction.md) — Turn-trigger abstraction (`TurnTrigger` enum, `SessionHandle::submit`, additive event-log evolution path)
 
 ## Template
 

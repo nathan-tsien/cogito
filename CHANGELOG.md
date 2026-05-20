@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `deps.rs` (`TurnDeps`),
   `transitions/{init, context_managed, prompt_built, model_calling, model_completed, tool_dispatching}.rs`,
   `mod.rs` (`run` + `enter_turn`).
-- `cogito-core::runtime::actor::actor_main` — Topology I (per spec §Q4) with a
+- `cogito-core::runtime::session_loop::run_session` — Topology I (per spec §Q4) with a
   biased `tokio::select!` over turn-result mpsc / mailbox / job-completion. Turn
   result delivery via mpsc instead of `JoinHandle` polling (avoids two `&mut state`
   borrows in the select macro).

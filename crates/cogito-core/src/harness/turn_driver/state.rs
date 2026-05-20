@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use cogito_protocol::ExecCtx;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::gateway::{ModelError, ModelEvent, ModelOutput};
-use cogito_protocol::ids::{SessionId, TurnId};
+use cogito_protocol::ids::{EventId, SessionId, TurnId};
 use cogito_protocol::job::JobId;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::tool::{ToolDescriptor, ToolResult};
@@ -113,6 +113,10 @@ pub enum TurnState {
     Failed {
         /// Structured reason for the failure.
         reason: TurnFailureReason,
+        /// `EventId` of the `TurnFailed` event persisted by `record_turn_failed`.
+        /// An `EventId::recorder_failure_placeholder()` sentinel means the
+        /// recorder itself failed while trying to record the failure.
+        recorded_event_id: EventId,
     },
 }
 
@@ -126,18 +130,22 @@ impl TurnState {
         match self {
             TurnState::Completed { .. } => TurnOutcome::Completed,
             TurnState::Paused { job_id } => TurnOutcome::Paused { job_id },
-            TurnState::Failed { reason } => TurnOutcome::Failed {
+            TurnState::Failed {
                 reason,
-                // Sprint 2 limitation: the event_id of the TurnFailed
-                // event is not plumbed back through record_turn_failed yet.
-                // Sprint 3 will thread the real EventId.
-                recorded_event_id: "unknown".into(),
+                recorded_event_id,
+            } => TurnOutcome::Failed {
+                reason,
+                // TurnOutcome keeps recorded_event_id as String for
+                // protocol/serde compatibility. Convert at the FSM boundary.
+                recorded_event_id: recorded_event_id.to_string(),
             },
             _ => TurnOutcome::Failed {
                 reason: TurnFailureReason::TurnPanicked {
                     location: "into_outcome called on non-terminal state".into(),
                 },
-                recorded_event_id: "unknown".into(),
+                // Recorder was never reached (non-terminal state handed to
+                // into_outcome — a programming error path).
+                recorded_event_id: EventId::recorder_failure_placeholder().to_string(),
             },
         }
     }
