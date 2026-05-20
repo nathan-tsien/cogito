@@ -77,6 +77,38 @@ Init → ContextManaged → PromptBuilt → ModelCalling → ModelCompleted
 > `ContextManaged` as a pass-through (no work); the real H11 work lands with
 > the Context Management initiative (ADR-0008, pending).
 
+## Resume entry path
+
+When `SessionActor::actor_main` resolves a non-`FreshTurn` resume decision, it calls `enter_turn(turn_entry, ctx, deps)` where `turn_entry` is an internal `TurnEntry` enum translating a `ResumePoint` (which carries actor-level concerns like `turn_id`) into the FSM-level shape the FSM consumes:
+
+```rust
+pub(crate) enum TurnEntry {
+    /// FSM enters Init. H04 rebuilds prompt from event log; H10 re-selects strategy.
+    /// Maps from ResumePoint::RestartCurrentTurn.
+    FreshLikeInit,
+    /// FSM enters ModelCompleted with rebuilt output; fast-paths to Completed
+    /// (no model re-call). Maps from ResumePoint::ResumeFromModelCompleted.
+    FromModelCompleted { output: ModelOutput },
+    /// FSM enters ToolDispatching with pending/completed pre-populated. H07
+    /// re-validates pending against current schemas; H10+H05 rebuild surface.
+    /// Maps from ResumePoint::ResumeFromToolDispatching AND
+    /// ResumePoint::ResumeAfterJobCompletion (latter injects job outcome as
+    /// the final completed entry before entering).
+    FromToolDispatching {
+        pending: Vec<ResumePendingCall>,
+        completed: Vec<(String, ToolResult)>,
+    },
+}
+```
+
+`ResumePoint::FreshTurn` does not produce a `TurnEntry` — the actor idles in `mailbox` until the next `Input` triggers a fresh turn. `ResumePoint::ResumePausedJob` likewise does not spawn a TurnDriver; the actor enters `InFlight::PausedOnJob` directly and re-registers the `on_complete` callback.
+
+`TurnEntry` lives inside `cogito-core::harness::turn_driver` and is **harness-internal** — it never crosses the protocol boundary. The protocol-visible recovery interface is `ResumePoint` (in `cogito-core::harness::resume`).
+
+**Status: Sprint 3 P3.4 will introduce `TurnEntry` and rewrite `enter_turn`.** Until then, `enter_turn` only handles fresh turns.
+
+→ Sprint 3 decision: spec `2026-05-20-sprint-3-resume-coordinator-design.md` §5.3.
+
 ## Init → ContextManaged → PromptBuilt sequence (canonical)
 
 This is the **five-component collaboration** that produces a ready-to-stream `ModelInput`. Reviewers and implementers MUST consult this when touching H04, H05, H09, H10, or H11.
