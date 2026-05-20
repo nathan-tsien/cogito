@@ -331,9 +331,18 @@ fn resume_from_turn_started(
             last_event_seq,
         }),
         (Some(started), Some(completed)) => {
+            // H06 stream_demux writes `ToolUseRecorded` during stream consumption
+            // (when each `ToolUseCompleted` model event arrives) and writes
+            // `ModelCallCompleted` only at the final `MessageCompleted` event.
+            // So in the log: `ToolUseRecorded` events appear BETWEEN
+            // `ModelCallStarted` and `ModelCallCompleted`, while
+            // `ToolResultRecorded` events appear AFTER `ModelCallCompleted`
+            // (written by the actor when each dispatched tool returns).
+            //
+            // Scan the two regions separately:
+            let within_call = &turn_slice[started + 1..=completed];
             let after_mcc = &turn_slice[completed + 1..];
 
-            let mut pending: Vec<ResumePendingCall> = Vec::new();
             let mut tool_results: Vec<(String, ToolResult)> = Vec::new();
             let mut completed_ids: Vec<String> = Vec::new();
 
@@ -344,7 +353,8 @@ fn resume_from_turn_started(
                 }
             }
 
-            for e in after_mcc {
+            let mut pending: Vec<ResumePendingCall> = Vec::new();
+            for e in within_call {
                 if let EventPayload::ToolUseRecorded {
                     call_id,
                     tool_name,
@@ -449,11 +459,17 @@ fn find_paused_call_context(
     events: &[ConversationEvent],
     paused_idx: usize,
 ) -> Result<PausedCallContext, ResumeError> {
-    let mcc_idx = events[..paused_idx]
+    // Scan from the latest TurnStarted within this turn up to TurnPaused.
+    // `ToolUseRecorded` is written during streaming (BEFORE the sealing
+    // `ModelCallCompleted`); `ToolResultRecorded` is written during dispatch
+    // (AFTER `ModelCallCompleted`). Anchoring on `ModelCallCompleted` would
+    // miss the tool-use events entirely, so the scan covers the whole
+    // turn-after-start region.
+    let turn_start_idx = events[..paused_idx]
         .iter()
-        .rposition(|e| matches!(e.payload, EventPayload::ModelCallCompleted { .. }));
-    let start = mcc_idx.map_or(0, |i| i + 1);
-    let dispatch_slice = &events[start..paused_idx];
+        .rposition(|e| matches!(e.payload, EventPayload::TurnStarted { .. }))
+        .map_or(0, |i| i + 1);
+    let dispatch_slice = &events[turn_start_idx..paused_idx];
 
     let mut completed: Vec<(String, ToolResult)> = Vec::new();
     let mut completed_ids: Vec<String> = Vec::new();
@@ -667,6 +683,10 @@ mod tests {
 
     #[test]
     fn tool_use_recorded_no_results_returns_resume_from_tool_dispatching() {
+        // Event order matches H06 stream_demux: ToolUseRecorded events are
+        // written during stream consumption, BEFORE the sealing
+        // ModelCallCompleted event. Resume scans `[started+1..=completed]`
+        // for tool uses and `[completed+1..]` for tool results.
         let t = TurnId::new();
         let events = vec![
             evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
@@ -677,18 +697,18 @@ mod tests {
             ),
             evt(
                 2,
-                EventPayload::ModelCallCompleted {
-                    stop_reason: StopReason::ToolUse,
-                    usage: Usage::default(),
+                EventPayload::ToolUseRecorded {
+                    call_id: "c1".into(),
+                    tool_name: "read_file".into(),
+                    args: serde_json::json!({"p": "/x"}),
                 },
                 Some(t),
             ),
             evt(
                 3,
-                EventPayload::ToolUseRecorded {
-                    call_id: "c1".into(),
-                    tool_name: "read_file".into(),
-                    args: serde_json::json!({"p": "/x"}),
+                EventPayload::ModelCallCompleted {
+                    stop_reason: StopReason::ToolUse,
+                    usage: Usage::default(),
                 },
                 Some(t),
             ),
@@ -711,6 +731,8 @@ mod tests {
 
     #[test]
     fn partial_tool_results_returns_resume_from_tool_dispatching_with_split() {
+        // Both ToolUseRecorded events go before ModelCallCompleted
+        // (matching H06 ordering); ToolResultRecorded goes after.
         let t = TurnId::new();
         let events = vec![
             evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
@@ -721,14 +743,6 @@ mod tests {
             ),
             evt(
                 2,
-                EventPayload::ModelCallCompleted {
-                    stop_reason: StopReason::ToolUse,
-                    usage: Usage::default(),
-                },
-                Some(t),
-            ),
-            evt(
-                3,
                 EventPayload::ToolUseRecorded {
                     call_id: "c1".into(),
                     tool_name: "tool_a".into(),
@@ -737,11 +751,19 @@ mod tests {
                 Some(t),
             ),
             evt(
-                4,
+                3,
                 EventPayload::ToolUseRecorded {
                     call_id: "c2".into(),
                     tool_name: "tool_b".into(),
                     args: serde_json::json!({}),
+                },
+                Some(t),
+            ),
+            evt(
+                4,
+                EventPayload::ModelCallCompleted {
+                    stop_reason: StopReason::ToolUse,
+                    usage: Usage::default(),
                 },
                 Some(t),
             ),
@@ -799,18 +821,18 @@ mod tests {
             ),
             evt(
                 2,
-                EventPayload::ModelCallCompleted {
-                    stop_reason: StopReason::ToolUse,
-                    usage: Usage::default(),
+                EventPayload::ToolUseRecorded {
+                    call_id: "c_async".into(),
+                    tool_name: "long_tool".into(),
+                    args: serde_json::json!({}),
                 },
                 Some(t),
             ),
             evt(
                 3,
-                EventPayload::ToolUseRecorded {
-                    call_id: "c_async".into(),
-                    tool_name: "long_tool".into(),
-                    args: serde_json::json!({}),
+                EventPayload::ModelCallCompleted {
+                    stop_reason: StopReason::ToolUse,
+                    usage: Usage::default(),
                 },
                 Some(t),
             ),
@@ -931,14 +953,6 @@ mod tests {
             ),
             evt(
                 2,
-                EventPayload::ModelCallCompleted {
-                    stop_reason: StopReason::ToolUse,
-                    usage: Usage::default(),
-                },
-                Some(t),
-            ),
-            evt(
-                3,
                 EventPayload::ToolUseRecorded {
                     call_id: "c1".into(),
                     tool_name: "tool_a".into(),
@@ -947,11 +961,19 @@ mod tests {
                 Some(t),
             ),
             evt(
-                4,
+                3,
                 EventPayload::ToolUseRecorded {
                     call_id: "c2".into(),
                     tool_name: "tool_b".into(),
                     args: serde_json::json!({}),
+                },
+                Some(t),
+            ),
+            evt(
+                4,
+                EventPayload::ModelCallCompleted {
+                    stop_reason: StopReason::ToolUse,
+                    usage: Usage::default(),
                 },
                 Some(t),
             ),
