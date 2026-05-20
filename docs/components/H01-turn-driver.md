@@ -198,7 +198,7 @@ H01 transitions: PromptBuilt → ModelCalling   (H02 records; ModelGateway::stre
 ## Interface (design level)
 
 - `Turn::run(req: TurnRequest) -> TurnOutcome`
-- `TurnRequest { session_id, input: NewMessage(text) | ResumeAfter(job_id) }`
+- `TurnRequest { session_id, input: TurnTrigger | ResumeAfter(job_id) }` (see ADR-0016)
 - `TurnOutcome { Completed | Paused { reason } | Failed { error_kind, message } }`
 - Implementation is async; one in-flight turn per session at a time (enforced by Runtime, not by H01).
 
