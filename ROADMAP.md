@@ -57,13 +57,20 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] CLI `cogito chat` works end-to-end against Anthropic OR vLLM/SGLang with `read_file`
 
 #### Sprint 3 · Resume Coordinator (2 days)
-- [ ] H03 Resume Coordinator with decision table fully implemented
-- [ ] Chaos test (`crates/cogito-core/tests/resume_chaos.rs`) injects crashes at every state transition
-- [ ] Resume correctness 100% under chaos test
-- [ ] Resume-from-paused-job scenario validated
+
+- [ ] `EventPayload::ModelCallCompleted { stop_reason, usage }` variant added; schema artifact regenerated; fixture updated (per spec §4 Q1)
+- [ ] H03 Resume Coordinator decision table fully implemented (`harness::resume::replay()` covers all 9 decision-table rows from spec §5)
+- [ ] `ResumeDecision` shape: `{ point: ResumePoint, last_event_seq: Option<u64> }`; 6 `ResumePoint` variants (per spec §4 §Q2 后续修正)
+- [ ] `Runtime::open_session(SessionMode::Resume)` walks the full recovery path (read store → replay → seq init → apply_resume_point)
+- [ ] EventId串回完成：Sprint 2 留下的 `recorded_event_id: "unknown"` stub 清理；所有 `record_*` 方法返 `Result<EventId, StoreError>`
+- [ ] Chaos test (`crates/cogito-core/tests/resume_chaos.rs`) injects crashes at every event boundary (Y path) + 8 curated panic points (X path) for 4 scenarios
+- [ ] All 4 oracles (prefix immutable / terminal equivalent / tool mapping equivalent / final text equivalent) pass for all crash points
+- [ ] Resume-from-paused-job scenario validated via `MockJobManager` (real `cogito-jobs` lands Sprint 4)
+- [ ] Chaos test total CI time < 10s (verified by `just ci` timing)
 
 #### Sprint 4 · Async Jobs (2 days)
 - [ ] `cogito-jobs` implements `JobManager` (tokio task + JSONL job log persistence)
+- [ ] `cogito-jobs` provides cross-process job state persistence (mirrors event log structure; required by Sprint 3 ResumePausedJob path — see Sprint 3 spec §5.6)
 - [ ] H08 Tool Dispatcher async path (handles `InvokeOutcome::Async(JobId)`)
 - [ ] One real long task tool (`run_tests` or similar)
 - [ ] Loop pauses on async, resumes on completion
