@@ -221,7 +221,7 @@ async fn resume_with_completed_session_idles_then_serves_new_input()
 
     let runtime = Runtime::builder()
         .store(Arc::clone(&store) as Arc<dyn cogito_protocol::store::ConversationStore>)
-        .model(mock)
+        .model(Arc::clone(&mock) as Arc<dyn cogito_protocol::gateway::ModelGateway>)
         .tools(tools)
         .strategy(HarnessStrategy::default_with_model("mock"))
         .build()?;
@@ -246,6 +246,16 @@ async fn resume_with_completed_session_idles_then_serves_new_input()
     assert!(
         got_completed,
         "TurnCompleted not observed within 5s after resume"
+    );
+
+    // The mock script must have been consumed by the fresh turn — otherwise
+    // TurnCompleted fired through some unintended path (e.g. the resumed
+    // FreshTurn idle didn't actually idle and the turn closed without a model
+    // call).
+    assert_eq!(
+        mock.remaining(),
+        0,
+        "model should have been called exactly once for the fresh Input"
     );
 
     let out = handle.shutdown(Duration::from_secs(5)).await?;

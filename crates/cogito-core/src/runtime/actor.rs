@@ -282,6 +282,14 @@ fn apply_resume_point(
 /// `TurnStarted` is already in the persisted log). Callers that need to
 /// record `TurnStarted` must do so before invoking this helper.
 fn spawn_turn_driver(state: &mut ActorState, turn_id: TurnId, entry: TurnEntry, deps: &ActorDeps) {
+    // TODO(cancel-token-disconnect): SessionShared.current_cancel_token holds
+    // a sibling token cloned from the *initial* token at session-open time,
+    // not a shared Arc<Mutex<...>> with ActorState. Replacing the inner token
+    // here means SessionHandle::cancel_turn() fires the original sibling and
+    // does not reach this newly minted token. Fix by sharing one
+    // Arc<Mutex<CancellationToken>> across ActorState and SessionShared so
+    // mutations are visible to both. Tracked separately; current chaos tests
+    // do not exercise mid-turn cancellation past the first turn.
     let new_token = CancellationToken::new();
     *state.current_cancel_token.lock() = new_token.clone();
 
@@ -311,6 +319,11 @@ fn spawn_turn_driver(state: &mut ActorState, turn_id: TurnId, entry: TurnEntry, 
         // Ignore send errors — the actor may have already shut down.
         let _ = result_tx.send((turn_id, outcome)).await;
     });
+    // NOTE: for resumed turns this records the resume wall time, not the
+    // original TurnStarted timestamp from the persisted log. The field is
+    // currently used only for observability (and is `#[allow(dead_code)]`),
+    // but consumers that surface turn durations across resumes should pull
+    // the canonical start time from the event log, not from this field.
     state.in_flight = Some(InFlight::Active {
         turn_id,
         started_at: Instant::now(),

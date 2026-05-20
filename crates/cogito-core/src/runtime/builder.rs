@@ -133,9 +133,11 @@ impl Runtime {
             seq_start,
         )));
 
-        // Only write SessionStarted for fresh sessions (no prior events in the store).
-        // P4.4 will move this into actor_main per spec §5.2 step ④, but for P4.3
-        // the guard here is sufficient to prevent a duplicate SessionStarted on resume.
+        // Write SessionStarted exactly once per session, gated on the store
+        // existence check. Kept here (not in actor_main) so that the actor
+        // loop stays stateless with respect to session lifecycle: every event
+        // the actor writes is correlated with a turn, not the session itself.
+        // See actor_main's startup-sequence doc.
         if !session_exists {
             record_session_started(&recorder, id, &self.strategy).await;
         }
