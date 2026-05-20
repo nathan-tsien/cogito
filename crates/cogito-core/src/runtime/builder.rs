@@ -40,22 +40,69 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Open or attach a session. See [`OpenMode`] for the three semantics.
+    /// Open or resume a session. See [`OpenMode`] for the three semantics.
     ///
-    /// v0.1 only implements `OpenMode::New`. `Resume` and `Attach` will be
-    /// wired through H03 in Sprint 3.
+    /// All three modes are dispatched as of Sprint 3 P4.3:
+    ///
+    /// - `OpenMode::New` — asserts the session does not exist in the store.
+    /// - `OpenMode::Resume` — asserts the session exists in the store.
+    /// - `OpenMode::Attach` — tolerant: accepts any store state including empty.
     ///
     /// # Errors
     ///
-    /// Returns `RuntimeError::SessionAlreadyOpen` if `id` is already in the
-    /// registry.
+    /// - `RuntimeError::SessionAlreadyOpen` — `id` is already in the in-memory registry.
+    /// - `RuntimeError::SessionAlreadyExists` — `OpenMode::New` but store has events for `id`.
+    /// - `RuntimeError::ResumeFailed` — `OpenMode::Resume` but store has no events for `id`.
+    /// - `RuntimeError::StoreError` — backend I/O or serde failure while reading the store.
     pub async fn open_session(
         self: &Arc<Self>,
         id: SessionId,
-        _mode: OpenMode,
+        mode: OpenMode,
     ) -> Result<SessionHandle, RuntimeError> {
+        use futures::TryStreamExt as _;
+
         if self.sessions.contains_key(&id) {
             return Err(RuntimeError::SessionAlreadyOpen { id });
+        }
+
+        // Check whether events exist for this session using latest_seq.
+        // Note: replay(id, 0) yields events with seq > 0 (strictly), excluding the
+        // SessionStarted event at seq=0. We use latest_seq for the existence check
+        // so we correctly detect a session that only has a SessionStarted (seq=0).
+        let session_exists = self
+            .store
+            .latest_seq(id)
+            .await
+            .map_err(|e| RuntimeError::StoreError(e.to_string()))?
+            .is_some();
+
+        // Collect events with seq > 0 for downstream consumption by P4.4's H03 replay.
+        // SessionStarted (seq=0) is excluded here; P4.4 reconstructs context from seq>=1
+        // events via H03 apply_resume_point.
+        let initial_events: Vec<cogito_protocol::ConversationEvent> = self
+            .store
+            .replay(id, 0)
+            .try_collect()
+            .await
+            .map_err(|e| RuntimeError::StoreError(e.to_string()))?;
+
+        match mode {
+            OpenMode::New => {
+                if session_exists {
+                    return Err(RuntimeError::SessionAlreadyExists { id });
+                }
+            }
+            OpenMode::Resume => {
+                if !session_exists {
+                    return Err(RuntimeError::ResumeFailed {
+                        id,
+                        reason: "no such session in store".into(),
+                    });
+                }
+            }
+            OpenMode::Attach => {
+                // Tolerant: accept any store state (empty or non-empty).
+            }
         }
 
         // Channels.
@@ -78,8 +125,12 @@ impl Runtime {
             0, // seq_start = 0 for a fresh session (Resume will pass latest_seq+1)
         )));
 
-        // Write SessionStarted before the actor task starts.
-        record_session_started(&recorder, id, &self.strategy).await;
+        // Only write SessionStarted for fresh sessions (no prior events in the store).
+        // P4.4 will move this into actor_main per spec §5.2 step ④, but for P4.3
+        // the guard here is sufficient to prevent a duplicate SessionStarted on resume.
+        if !session_exists {
+            record_session_started(&recorder, id, &self.strategy).await;
+        }
 
         let state = ActorState {
             session_id: id,
@@ -105,6 +156,7 @@ impl Runtime {
             mailbox_rx,
             mailbox_tx_for_actor,
             deps,
+            initial_events, // P4.4 will consume this to drive H03 replay() and apply_resume_point.
         ));
 
         let shared = Arc::new(SessionShared {
@@ -242,4 +294,7 @@ pub enum RuntimeError {
     /// A required dependency was not set on the builder.
     #[error("missing required dependency: {0}")]
     MissingDependency(&'static str),
+    /// Backend store I/O or serde failure during `open_session`.
+    #[error("store error during open: {0}")]
+    StoreError(String),
 }

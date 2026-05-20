@@ -111,6 +111,9 @@ pub(super) async fn actor_main(
     mut mailbox_rx: mpsc::Receiver<SessionCommand>,
     mailbox_tx: mpsc::Sender<SessionCommand>,
     deps: ActorDeps,
+    // P4.4 will consume this to drive H03 replay() and apply_resume_point.
+    // For P4.3 it is threaded through but not yet used.
+    _initial_events: Vec<cogito_protocol::ConversationEvent>,
 ) {
     loop {
         tokio::select! {
