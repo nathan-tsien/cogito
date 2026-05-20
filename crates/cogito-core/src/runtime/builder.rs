@@ -65,16 +65,20 @@ impl Runtime {
             return Err(RuntimeError::SessionAlreadyOpen { id });
         }
 
-        // Check whether events exist for this session using latest_seq.
-        // Note: replay(id, 0) yields events with seq > 0 (strictly), excluding the
-        // SessionStarted event at seq=0. We use latest_seq for the existence check
-        // so we correctly detect a session that only has a SessionStarted (seq=0).
-        let session_exists = self
+        // Read latest_seq once; it serves two purposes:
+        //   1. existence check — `Some(_)` means the session has events in the store.
+        //      (We use latest_seq, not replay(id, 0), because replay yields events
+        //      with seq > 0 strictly and would miss a session that only has the
+        //      seq=0 SessionStarted event.)
+        //   2. seq_start for StepRecorder — for Resume/Attach against an existing
+        //      session, new events must start at latest_seq + 1 to avoid colliding
+        //      with persisted events.
+        let latest_seq = self
             .store
             .latest_seq(id)
             .await
-            .map_err(|e| RuntimeError::StoreError(e.to_string()))?
-            .is_some();
+            .map_err(|e| RuntimeError::StoreError(e.to_string()))?;
+        let session_exists = latest_seq.is_some();
 
         // Collect events with seq > 0 for downstream consumption by P4.4's H03 replay.
         // SessionStarted (seq=0) is excluded here; P4.4 reconstructs context from seq>=1
@@ -117,12 +121,16 @@ impl Runtime {
         // Per-session cancel token; starts as a fresh token.
         let cancel = Arc::new(parking_lot::Mutex::new(CancellationToken::new()));
 
-        // Step recorder shared between actor and TurnDeps.
+        // Step recorder shared between actor and TurnDeps. For a fresh session
+        // latest_seq is None → seq_start=0. For Resume/Attach against an
+        // existing session, seq_start=latest_seq+1 so new events do not collide
+        // with persisted ones.
+        let seq_start = latest_seq.map_or(0, |s| s + 1);
         let recorder = Arc::new(Mutex::new(StepRecorder::new(
             Arc::clone(&self.store),
             broadcast_tx.clone(),
             id,
-            0, // seq_start = 0 for a fresh session (Resume will pass latest_seq+1)
+            seq_start,
         )));
 
         // Only write SessionStarted for fresh sessions (no prior events in the store).
