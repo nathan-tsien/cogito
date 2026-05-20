@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::gateway::ModelOutput;
+use cogito_protocol::ids::EventId;
 use cogito_protocol::tool::ToolDescriptor;
 use cogito_protocol::turn::TurnFailureReason;
 
@@ -94,19 +95,21 @@ pub async fn transit(
                  tool call failed argument validation — the model is not following tool schemas"
             );
             tracing::error!("{msg}");
-            let _ = deps
+            let reason = TurnFailureReason::ModelGatewayFailed { message: msg };
+            let recorded_event_id = match deps
                 .step
                 .lock()
                 .await
-                .record_turn_failed(
-                    ctx.turn_id,
-                    TurnFailureReason::ModelGatewayFailed {
-                        message: msg.clone(),
-                    },
-                )
-                .await;
+                .record_turn_failed(ctx.turn_id, reason.clone())
+                .await
+            {
+                Ok(id) => id,
+                // Recorder failed while recording the failure itself.
+                Err(_) => EventId::recorder_failure_placeholder(),
+            };
             return TurnState::Failed {
-                reason: TurnFailureReason::ModelGatewayFailed { message: msg },
+                reason,
+                recorded_event_id,
             };
         }
     } else {

@@ -98,9 +98,43 @@ id_newtype!(EventId, "Globally unique event identifier.");
 id_newtype!(SessionId, "Conversation session identifier.");
 id_newtype!(TurnId, "Per-session turn identifier.");
 
+impl EventId {
+    /// Sentinel value returned when the recorder fails while trying to
+    /// record a `TurnFailed` event — the actor cannot record its own
+    /// failure. Encoded as the all-zeros ULID so it is distinguishable
+    /// from any real `EventId::new()` (which is monotonically generated).
+    ///
+    /// Callers receive this value only on the unrecoverable "recorder
+    /// errored while recording the FSM's terminal Failed transition"
+    /// path. Downstream consumers should detect it via
+    /// [`Self::is_recorder_failure_placeholder`].
+    #[must_use]
+    pub fn recorder_failure_placeholder() -> Self {
+        Self::from(Ulid::nil())
+    }
+
+    /// Returns true iff this `EventId` is the recorder-failure sentinel.
+    /// See [`Self::recorder_failure_placeholder`].
+    #[must_use]
+    pub fn is_recorder_failure_placeholder(&self) -> bool {
+        self.as_ulid() == Ulid::nil()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{EventId, SessionId, TurnId};
+
+    #[test]
+    fn recorder_failure_placeholder_is_distinguishable() {
+        let real = EventId::new();
+        let sentinel = EventId::recorder_failure_placeholder();
+        assert_ne!(real, sentinel);
+        assert!(!real.is_recorder_failure_placeholder());
+        assert!(sentinel.is_recorder_failure_placeholder());
+        // Two sentinels are equal — they represent the same conceptual value.
+        assert_eq!(sentinel, EventId::recorder_failure_placeholder());
+    }
 
     #[test]
     fn event_id_roundtrips_through_json() -> serde_json::Result<()> {

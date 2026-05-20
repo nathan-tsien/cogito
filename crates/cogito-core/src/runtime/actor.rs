@@ -241,27 +241,28 @@ async fn try_start_turn(state: &mut ActorState, msg: NewMessage, deps: &ActorDep
 async fn on_turn_complete(state: &mut ActorState, turn_id: TurnId, outcome: TurnOutcome) {
     state.in_flight = None;
     let mut rec = state.recorder.lock().await;
-    let result = match outcome {
-        TurnOutcome::Completed => {
-            rec.record_turn_completed(turn_id, TurnOutcome::Completed)
-                .await
-        }
-        TurnOutcome::Paused { job_id } => rec.record_turn_paused(turn_id, job_id).await,
-        TurnOutcome::Cancelled => {
-            rec.record_turn_failed(turn_id, TurnFailureReason::TurnTimedOut)
-                .await
-        }
-        TurnOutcome::Failed { reason, .. } => rec.record_turn_failed(turn_id, reason).await,
+    let result: Result<(), _> = match outcome {
+        TurnOutcome::Completed => rec
+            .record_turn_completed(turn_id, TurnOutcome::Completed)
+            .await
+            .map(|_| ()),
+        TurnOutcome::Paused { job_id } => rec.record_turn_paused(turn_id, job_id).await.map(|_| ()),
+        TurnOutcome::Cancelled => rec
+            .record_turn_failed(turn_id, TurnFailureReason::TurnTimedOut)
+            .await
+            .map(|_| ()),
+        // FSM transition already recorded the TurnFailed event.
+        TurnOutcome::Failed { .. } => Ok(()),
         // Non-exhaustive guard for future variants added in later sprints.
-        _ => {
-            rec.record_turn_failed(
+        _ => rec
+            .record_turn_failed(
                 turn_id,
                 TurnFailureReason::TurnPanicked {
                     location: "unhandled TurnOutcome variant".into(),
                 },
             )
             .await
-        }
+            .map(|_| ()),
     };
     if let Err(e) = result {
         tracing::error!(
