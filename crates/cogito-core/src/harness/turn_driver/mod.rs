@@ -8,41 +8,119 @@ pub mod transitions;
 pub use deps::TurnDeps;
 pub use state::{TurnCtx, TurnState};
 
+use cogito_protocol::gateway::ModelOutput;
+use cogito_protocol::ids::EventId;
+use cogito_protocol::tool::ToolResult;
 use cogito_protocol::turn::TurnOutcome;
 
-use crate::harness::resume::{ResumeDecision, ResumePoint};
+use crate::harness::resume::{ResumeDecision, ResumePoint, ResumePendingCall};
 
-/// Translate a `ResumeDecision` into the starting `TurnState` and run the
-/// FSM to completion.
-pub async fn enter_turn(decision: ResumeDecision, ctx: TurnCtx, deps: TurnDeps) -> TurnOutcome {
-    let initial = match decision.point {
-        ResumePoint::FreshTurn => TurnState::Init {
+/// Harness-internal translation of `ResumePoint` into the FSM-level shape
+/// `enter_turn` consumes. Three variants because `FreshTurn` and
+/// `ResumePausedJob` are actor-level (handled before `enter_turn` is called):
+/// `FreshTurn` means the actor idles until the next user `Input`, and
+/// `ResumePausedJob` puts the actor into `InFlight::PausedOnJob` directly
+/// without entering the FSM.
+///
+/// Kept `pub` so integration tests (e.g. `turn_driver_text_only`) can call
+/// `enter_turn` directly. Callers outside `cogito-core` should treat this as
+/// an unstable internal detail.
+#[derive(Debug)]
+pub enum TurnEntry {
+    /// FSM enters `Init`. Maps from `ResumePoint::FreshTurn` and
+    /// `ResumePoint::RestartCurrentTurn` (the latter re-runs H04 to rebuild
+    /// prompt from the event log).
+    FreshLikeInit,
+    /// FSM enters `ModelCompleted` with rebuilt output; fast-paths to
+    /// `Completed` (no model re-call). Maps from
+    /// `ResumePoint::ResumeFromModelCompleted`.
+    FromModelCompleted {
+        /// Reconstructed model output (content + `stop_reason` + usage).
+        output: ModelOutput,
+    },
+    /// FSM enters `ToolDispatching` with pending/completed pre-populated.
+    /// `enter_turn` re-validates `pending` via H07 (`tool_resolver::resolve`)
+    /// and rebuilds the tool surface via H10+H05. Maps from
+    /// `ResumePoint::ResumeFromToolDispatching` and (will eventually map from)
+    /// `ResumePoint::ResumeAfterJobCompletion` once P4 wires the job
+    /// outcome into the completed prefix.
+    FromToolDispatching {
+        /// Tool calls that need re-resolution + dispatch.
+        pending: Vec<ResumePendingCall>,
+        /// `(call_id, result)` pairs already completed before the crash.
+        completed: Vec<(String, ToolResult)>,
+    },
+}
+
+/// Translate a `TurnEntry` into the starting `TurnState` and run the FSM
+/// to completion.
+pub async fn enter_turn(entry: TurnEntry, ctx: TurnCtx, deps: TurnDeps) -> TurnOutcome {
+    let initial = match entry {
+        TurnEntry::FreshLikeInit => TurnState::Init {
             ctx,
             resume: ResumeDecision {
                 point: ResumePoint::FreshTurn,
-                last_event_seq: decision.last_event_seq,
+                last_event_seq: None,
             },
         },
-        // Sprint 3 P3.2 transitional: non-FreshTurn variants land in P3.4.
-        // Sprint 2 callers always produce FreshTurn (replay() is still a stub),
-        // so this branch is unreachable in practice. Log + fall back to fresh
-        // (no panic — clippy::panic is denied).
-        non_fresh => {
-            tracing::error!(
-                ?non_fresh,
-                "non-FreshTurn ResumePoint observed in P3.2 transitional state; \
-                 P3.4 will implement actual handling. Falling back to fresh turn."
-            );
-            TurnState::Init {
-                ctx,
-                resume: ResumeDecision {
-                    point: ResumePoint::FreshTurn,
-                    last_event_seq: decision.last_event_seq,
+        TurnEntry::FromModelCompleted { output } => {
+            let surface = crate::harness::tool_surface::surface(&ctx.strategy, deps.tools.as_ref());
+            TurnState::ModelCompleted { ctx, output, surface }
+        }
+        TurnEntry::FromToolDispatching { pending, completed } => {
+            let surface = crate::harness::tool_surface::surface(&ctx.strategy, deps.tools.as_ref());
+            // Re-validate every pending call through H07 against the current
+            // tool surface. Any failure → fail the turn cleanly (don't half-resume).
+            match resolve_pending(&pending, &surface) {
+                Ok(invocations) => TurnState::ToolDispatching {
+                    ctx,
+                    pending: invocations.into(),
+                    completed,
+                    surface,
                 },
+                Err(message) => {
+                    // Record the failure event before constructing Failed state.
+                    // Mirror the P2.5 pattern: capture EventId from the recorder.
+                    let reason = cogito_protocol::turn::TurnFailureReason::ResumeFailed { message };
+                    let event_id = match deps
+                        .step
+                        .lock()
+                        .await
+                        .record_turn_failed(ctx.turn_id, reason.clone())
+                        .await
+                    {
+                        Ok(id) => id,
+                        Err(_) => EventId::recorder_failure_placeholder(),
+                    };
+                    TurnState::Failed { reason, recorded_event_id: event_id }
+                }
             }
         }
     };
     run(initial, &deps).await
+}
+
+/// Re-validate persisted pending tool calls through H07. Returns an error
+/// string on the first failure (tool unavailable, schema drift, etc).
+fn resolve_pending(
+    pending: &[ResumePendingCall],
+    surface: &[cogito_protocol::tool::ToolDescriptor],
+) -> Result<Vec<crate::harness::tool_resolver::ToolInvocation>, String> {
+    let mut out = Vec::with_capacity(pending.len());
+    for p in pending {
+        match crate::harness::tool_resolver::resolve(&p.call_id, &p.tool_name, p.args.clone(), surface) {
+            crate::harness::tool_resolver::ResolvedCall::Ok(inv) => out.push(inv),
+            crate::harness::tool_resolver::ResolvedCall::Error(result) => {
+                // Spec §4.3: persisted tool args fail current schema validation
+                // → resume MUST fail (don't silently dispatch the bad call).
+                return Err(format!(
+                    "tool re-validation failed for call_id={call_id}: {result:?}",
+                    call_id = p.call_id,
+                ));
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Drive the FSM loop to a terminal state and return the outcome.

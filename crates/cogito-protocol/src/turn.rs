@@ -72,4 +72,12 @@ pub enum TurnFailureReason {
         /// Human-readable rejection message.
         message: String,
     },
+    /// Resume re-validation failed — the persisted log references tools
+    /// or schemas that are no longer compatible with the running build.
+    /// See `cogito-core::harness::resume::ResumeError` for the protocol-side
+    /// equivalent.
+    ResumeFailed {
+        /// Human-readable description of the resume failure.
+        message: String,
+    },
 }

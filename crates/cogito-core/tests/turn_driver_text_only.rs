@@ -8,10 +8,9 @@
 use std::sync::Arc;
 
 use cogito_core::harness::hooks::HookPipeline;
-use cogito_core::harness::resume::{ResumeDecision, ResumePoint};
 use cogito_core::harness::step_recorder::StepRecorder;
 use cogito_core::harness::turn_driver::deps::TurnDeps;
-use cogito_core::harness::turn_driver::enter_turn;
+use cogito_core::harness::turn_driver::{TurnEntry, enter_turn};
 use cogito_core::harness::turn_driver::state::TurnCtx;
 use cogito_mock_model::MockModelGateway;
 use cogito_protocol::ExecCtx;
@@ -82,7 +81,7 @@ async fn text_only_turn_reaches_completed() -> Result<(), Box<dyn std::error::Er
         consecutive_tool_errors: 0,
     };
 
-    let outcome = enter_turn(ResumeDecision { point: ResumePoint::FreshTurn, last_event_seq: None }, ctx, deps).await;
+    let outcome = enter_turn(TurnEntry::FreshLikeInit, ctx, deps).await;
     assert!(
         matches!(outcome, TurnOutcome::Completed),
         "expected Completed, got {outcome:?}"

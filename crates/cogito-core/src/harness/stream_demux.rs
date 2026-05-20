@@ -121,11 +121,10 @@ mod tests {
     use crate::harness::step_recorder::StepRecorder;
 
     #[tokio::test]
-    async fn demux_writes_model_call_completed_at_message_completed(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn demux_writes_model_call_completed_at_message_completed()
+    -> Result<(), Box<dyn std::error::Error>> {
         let tmp = tempfile::tempdir()?;
-        let store: Arc<dyn ConversationStore> =
-            Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+        let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
         let (tx, _rx) = broadcast::channel(64);
         let session_id = SessionId::new();
         let turn_id = TurnId::new();

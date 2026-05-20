@@ -33,7 +33,7 @@ use super::types::{NewMessage, SessionCommand, ShutdownOutcome};
 use crate::harness::hooks::HookPipeline;
 use crate::harness::resume::{ResumeDecision, ResumePoint, replay};
 use crate::harness::step_recorder::StepRecorder;
-use crate::harness::turn_driver::{TurnCtx, TurnDeps, enter_turn};
+use crate::harness::turn_driver::{TurnCtx, TurnDeps, TurnEntry, enter_turn};
 
 /// In-flight state for the actor.
 pub(super) enum InFlight {
@@ -229,7 +229,22 @@ async fn try_start_turn(state: &mut ActorState, msg: NewMessage, deps: &ActorDep
     });
 
     tokio::spawn(async move {
-        let outcome = enter_turn(decision, ctx, turn_deps).await;
+        let entry = match decision.point {
+            ResumePoint::FreshTurn => TurnEntry::FreshLikeInit,
+            // P4.4 will implement the rest via apply_resume_point. For now the
+            // empty-slice replay always returns FreshTurn, so the other arms
+            // are unreachable; log + fall back to FreshLikeInit if a future
+            // P4 commit lands callers that exercise them.
+            non_fresh => {
+                tracing::error!(
+                    ?non_fresh,
+                    "actor.rs P3.4-transitional: non-FreshTurn ResumePoint observed; \
+                     P4.4 will add full TurnEntry translation. Falling back to FreshLikeInit."
+                );
+                TurnEntry::FreshLikeInit
+            }
+        };
+        let outcome = enter_turn(entry, ctx, turn_deps).await;
         // Ignore send errors — the actor may have already shut down.
         let _ = result_tx.send((turn_id, outcome)).await;
     });
