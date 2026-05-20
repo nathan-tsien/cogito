@@ -159,13 +159,29 @@ impl Runtime {
         };
 
         let mailbox_tx_for_actor = mailbox_tx.clone();
-        self.handle.spawn(super::actor::actor_main(
-            state,
-            mailbox_rx,
-            mailbox_tx_for_actor,
-            deps,
-            initial_events, // P4.4 will consume this to drive H03 replay() and apply_resume_point.
-        ));
+        // P4.4: capture the actor's `ShutdownOutcome` so non-Clean exits
+        // (resume-failed, JobManager-unavailable) surface in the log even
+        // though `open_session` has already returned the handle. The actor
+        // task is fire-and-forget; future sprints may add a startup-result
+        // channel for synchronous error surfacing.
+        let session_id_for_log = id;
+        self.handle.spawn(async move {
+            let outcome = super::actor::actor_main(
+                state,
+                mailbox_rx,
+                mailbox_tx_for_actor,
+                deps,
+                initial_events,
+            )
+            .await;
+            if !matches!(outcome, super::types::ShutdownOutcome::Clean { .. }) {
+                tracing::error!(
+                    session_id = %session_id_for_log,
+                    ?outcome,
+                    "actor exited with non-Clean outcome"
+                );
+            }
+        });
 
         let shared = Arc::new(SessionShared {
             session_id: id,

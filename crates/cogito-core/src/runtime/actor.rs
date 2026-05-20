@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::types::{NewMessage, SessionCommand, ShutdownOutcome};
 use crate::harness::hooks::HookPipeline;
-use crate::harness::resume::{ResumeDecision, ResumePoint, replay};
+use crate::harness::resume::{ResumePoint, replay};
 use crate::harness::step_recorder::StepRecorder;
 use crate::harness::turn_driver::{TurnCtx, TurnDeps, TurnEntry, enter_turn};
 
@@ -49,6 +49,9 @@ pub(super) enum InFlight {
     /// Turn paused awaiting a background job (Sprint 4).
     #[allow(dead_code)] // Sprint 4 will construct this variant
     PausedOnJob {
+        /// The turn that was paused.
+        #[allow(dead_code)]
+        turn_id: TurnId,
         /// The background job this session is waiting on.
         #[allow(dead_code)]
         job_id: JobId,
@@ -99,6 +102,24 @@ impl ActorState {
 
 /// Main actor loop. Runs until `Shutdown` is received or the mailbox closes.
 ///
+/// # Startup sequence (Sprint 3 P4.4, per spec §5.2)
+///
+/// 1. Schema check: any event with `schema_version > SCHEMA_VERSION` aborts
+///    startup with `ShutdownOutcome::ResumeFailed`.
+/// 2. Call H03 `replay()` over the persisted log to compute a `ResumePoint`.
+/// 3. Dispatch via `apply_resume_point` — for `FreshTurn` this is a no-op
+///    and the actor enters the mailbox loop idle; for resume variants it
+///    spawns a `TurnDriver` into the correct FSM state.
+/// 4. Enter the mailbox loop (below).
+///
+/// Steps that the plan calls out but are already handled elsewhere:
+/// - Seq init lives in `RuntimeBuilder::open_session` at the `StepRecorder`
+///   construction site.
+/// - `SessionStarted` recording is gated in `open_session` (only on a
+///   fresh-store session).
+///
+/// # Mailbox loop
+///
 /// Three arms in priority order (biased):
 /// 1. `turn_result_rx` — receives `(TurnId, TurnOutcome)` from the spawned
 ///    `TurnDriver` wrapper task.  Drains first so completed turns are always
@@ -106,15 +127,47 @@ impl ActorState {
 /// 2. `mailbox_rx` — caller commands (`Input`, `Shutdown`, etc.).
 /// 3. `job_completion_rx` — async job callbacks (Sprint 4); forwarded to the
 ///    mailbox for FIFO ordering.
+///
+/// # Return value
+///
+/// `ShutdownOutcome::Clean` on a normal exit (mailbox closed or `Shutdown`
+/// received); a non-Clean variant if the startup sequence failed before the
+/// loop began. The spawn site in `builder.rs` logs the outcome.
 pub(super) async fn actor_main(
     mut state: ActorState,
     mut mailbox_rx: mpsc::Receiver<SessionCommand>,
     mailbox_tx: mpsc::Sender<SessionCommand>,
     deps: ActorDeps,
-    // P4.4 will consume this to drive H03 replay() and apply_resume_point.
-    // For P4.3 it is threaded through but not yet used.
-    _initial_events: Vec<cogito_protocol::ConversationEvent>,
-) {
+    initial_events: Vec<cogito_protocol::ConversationEvent>,
+) -> ShutdownOutcome {
+    // ① Schema check (must come before replay so we never feed a
+    //    newer-schema log into the resume coordinator).
+    if let Some(evt) = initial_events
+        .iter()
+        .find(|e| e.schema_version > cogito_protocol::SCHEMA_VERSION)
+    {
+        return ShutdownOutcome::ResumeFailed(format!(
+            "unsupported schema_version={} (this build supports up to {})",
+            evt.schema_version,
+            cogito_protocol::SCHEMA_VERSION
+        ));
+    }
+
+    // ② Compute the resume decision (pure H03 projection).
+    let decision = match replay(&initial_events) {
+        Ok(d) => d,
+        Err(e) => return ShutdownOutcome::ResumeFailed(e.to_string()),
+    };
+
+    // ③ Seq init: already handled in builder.rs at StepRecorder construction.
+    // ④ SessionStarted: already gated in builder.rs::open_session.
+
+    // ⑤ Dispatch the resume point. Errors here are startup-fatal.
+    if let Err(outcome) = apply_resume_point(&mut state, decision.point, &deps) {
+        return outcome;
+    }
+
+    // ⑥ Mailbox loop.
     loop {
         tokio::select! {
             biased;
@@ -127,9 +180,9 @@ pub(super) async fn actor_main(
             // Arm 2: caller commands.
             cmd = mailbox_rx.recv() => {
                 let Some(cmd) = cmd else { break; };
-                let should_break = handle_command(&mut state, cmd, &mailbox_tx, &deps).await;
-                if should_break {
-                    break;
+                let outcome_opt = handle_command(&mut state, cmd, &mailbox_tx, &deps).await;
+                if let Some(outcome) = outcome_opt {
+                    return outcome;
                 }
             }
 
@@ -140,46 +193,181 @@ pub(super) async fn actor_main(
             }
         }
     }
+    // Mailbox channel closed without a Shutdown command — treat as Clean.
+    ShutdownOutcome::Clean {
+        in_flight_cancelled: None,
+    }
 }
 
-/// Dispatch one `SessionCommand`. Returns `true` if the loop should exit.
+/// Translate a `ResumePoint` into actor-level startup actions. See the
+/// per-variant matrix in the Sprint 3 P4.4 plan:
+///
+/// - `FreshTurn` — no-op (actor will idle until next Input).
+/// - `RestartCurrentTurn` — v0.1 downgrade to `FreshTurn` with a `tracing::warn`
+///   (full implementation requires recovering `user_input` from
+///   `initial_events` and is post-Sprint-3 work).
+/// - `ResumeFromModelCompleted` — spawn `TurnDriver` with
+///   `TurnEntry::FromModelCompleted`.
+/// - `ResumeFromToolDispatching` — spawn `TurnDriver` with
+///   `TurnEntry::FromToolDispatching`.
+/// - `ResumePausedJob` / `ResumeAfterJobCompletion` — v0.1 returns
+///   `ShutdownOutcome::JobManagerUnavailable`; `JobManager` injection is a
+///   Sprint 4 deliverable.
+fn apply_resume_point(
+    state: &mut ActorState,
+    point: ResumePoint,
+    deps: &ActorDeps,
+) -> Result<(), ShutdownOutcome> {
+    match point {
+        ResumePoint::FreshTurn => Ok(()),
+
+        ResumePoint::RestartCurrentTurn { turn_id } => {
+            // TODO(post-Sprint-3): recover user_input from initial_events
+            // (EventPayload::TurnStarted { user_input } at the latest
+            // TurnStarted boundary) and call
+            // spawn_turn_driver(state, turn_id, TurnEntry::FreshLikeInit, deps).
+            // For v0.1, downgrade to fresh-idle: warn loudly so operators see
+            // the recovery gap, then let the actor wait for a new Input.
+            tracing::warn!(
+                session_id = %state.session_id,
+                %turn_id,
+                "RestartCurrentTurn requested but user_input recovery is not yet wired \
+                 (post-Sprint-3 work); downgrading to FreshTurn"
+            );
+            Ok(())
+        }
+
+        ResumePoint::ResumeFromModelCompleted {
+            turn_id,
+            rebuilt_output,
+        } => {
+            spawn_turn_driver(
+                state,
+                turn_id,
+                TurnEntry::FromModelCompleted {
+                    output: rebuilt_output,
+                },
+                deps,
+            );
+            Ok(())
+        }
+
+        ResumePoint::ResumeFromToolDispatching {
+            turn_id,
+            pending,
+            completed,
+        } => {
+            spawn_turn_driver(
+                state,
+                turn_id,
+                TurnEntry::FromToolDispatching { pending, completed },
+                deps,
+            );
+            Ok(())
+        }
+
+        ResumePoint::ResumePausedJob { .. } | ResumePoint::ResumeAfterJobCompletion { .. } => {
+            Err(ShutdownOutcome::JobManagerUnavailable(
+                "Sprint 4 deliverable - v0.1 has no JobManager injection".into(),
+            ))
+        }
+    }
+}
+
+/// Spawn the `TurnDriver` task for an existing `turn_id` and entry shape, set
+/// `state.in_flight = Active`, and reset the per-turn cancel token.
+///
+/// **Does not** record a `TurnStarted` event — used by both fresh-start
+/// (whose caller records `TurnStarted` itself) and resume (whose
+/// `TurnStarted` is already in the persisted log). Callers that need to
+/// record `TurnStarted` must do so before invoking this helper.
+fn spawn_turn_driver(state: &mut ActorState, turn_id: TurnId, entry: TurnEntry, deps: &ActorDeps) {
+    let new_token = CancellationToken::new();
+    *state.current_cancel_token.lock() = new_token.clone();
+
+    let exec_ctx = ExecCtx {
+        session_id: state.session_id,
+        turn_id,
+        deadline: None,
+        cancel: new_token,
+    };
+    let ctx = TurnCtx {
+        session_id: state.session_id,
+        turn_id,
+        exec_ctx,
+        strategy: state.strategy.clone(),
+        consecutive_tool_errors: 0,
+    };
+    let turn_deps = TurnDeps {
+        step: Arc::clone(&state.recorder),
+        store: Arc::clone(&state.store),
+        model: Arc::clone(&deps.model),
+        tools: Arc::clone(&deps.tools),
+        hooks: HookPipeline::new(),
+    };
+    let result_tx = state.turn_result_tx.clone();
+    tokio::spawn(async move {
+        let outcome = enter_turn(entry, ctx, turn_deps).await;
+        // Ignore send errors — the actor may have already shut down.
+        let _ = result_tx.send((turn_id, outcome)).await;
+    });
+    state.in_flight = Some(InFlight::Active {
+        turn_id,
+        started_at: Instant::now(),
+    });
+}
+
+/// Dispatch one `SessionCommand`. Returns `Some(outcome)` if the loop should
+/// exit with that `ShutdownOutcome`, or `None` to keep looping.
+///
+/// `mailbox_tx` is retained for `JobCompleted` re-injection on Arm 3 of the
+/// mailbox loop (which still owns the sender directly) and for future
+/// commands that need to enqueue follow-ups; it is not used here today.
 async fn handle_command(
     state: &mut ActorState,
     cmd: SessionCommand,
     mailbox_tx: &mpsc::Sender<SessionCommand>,
     deps: &ActorDeps,
-) -> bool {
+) -> Option<ShutdownOutcome> {
+    let _ = mailbox_tx; // reserved for future enqueue-follow-up commands
     match cmd {
         SessionCommand::Input(msg) => {
             try_start_turn(state, msg, deps).await;
+            None
         }
         SessionCommand::JobCompleted { .. } => {
             // Sprint 4: resume a paused turn.
+            None
         }
         SessionCommand::InternalCancel { ack } => {
             // The cancel token is fired by the handle before sending this
             // command; just acknowledge receipt.
             let _ = ack.send(());
+            None
         }
         SessionCommand::Shutdown { deadline, ack } => {
             let outcome = drain_shutdown(state, deadline).await;
             let _ = ack.send(outcome);
-            return true;
+            // Caller-requested shutdown is always a "clean" actor exit from
+            // the spawn site's perspective; the detailed `ShutdownOutcome`
+            // was already delivered to the caller via the oneshot ack above.
+            Some(ShutdownOutcome::Clean {
+                in_flight_cancelled: None,
+            })
         }
     }
-    let _ = mailbox_tx; // retained for future use
-    false
 }
 
-/// Attempt to start a new turn. No-op if one is already in flight.
+/// Attempt to start a fresh turn from a caller `Input`. No-op if one is
+/// already in flight. Always uses `TurnEntry::FreshLikeInit` — resume
+/// dispatch happens once at actor startup via `apply_resume_point`, not
+/// here.
 async fn try_start_turn(state: &mut ActorState, msg: NewMessage, deps: &ActorDeps) {
     if state.has_active_turn() {
         return;
     }
 
     let turn_id = TurnId::new();
-    let new_token = CancellationToken::new();
-    *state.current_cancel_token.lock() = new_token.clone();
 
     // Write-before-transition: record TurnStarted before spawning the task.
     {
@@ -203,59 +391,7 @@ async fn try_start_turn(state: &mut ActorState, msg: NewMessage, deps: &ActorDep
         }
     }
 
-    let exec_ctx = ExecCtx {
-        session_id: state.session_id,
-        turn_id,
-        deadline: None,
-        cancel: new_token,
-    };
-    let ctx = TurnCtx {
-        session_id: state.session_id,
-        turn_id,
-        exec_ctx,
-        strategy: state.strategy.clone(),
-        consecutive_tool_errors: 0,
-    };
-    let turn_deps = TurnDeps {
-        step: Arc::clone(&state.recorder),
-        store: Arc::clone(&state.store),
-        model: Arc::clone(&deps.model),
-        tools: Arc::clone(&deps.tools),
-        hooks: HookPipeline::new(),
-    };
-
-    // Clone the sender so the wrapper task can deliver the outcome back.
-    let result_tx = state.turn_result_tx.clone();
-    let decision = replay(&[]).unwrap_or(ResumeDecision {
-        point: ResumePoint::FreshTurn,
-        last_event_seq: None,
-    });
-
-    tokio::spawn(async move {
-        let entry = match decision.point {
-            ResumePoint::FreshTurn => TurnEntry::FreshLikeInit,
-            // P4.4 will implement the rest via apply_resume_point. For now the
-            // empty-slice replay always returns FreshTurn, so the other arms
-            // are unreachable; log + fall back to FreshLikeInit if a future
-            // P4 commit lands callers that exercise them.
-            non_fresh => {
-                tracing::error!(
-                    ?non_fresh,
-                    "actor.rs P3.4-transitional: non-FreshTurn ResumePoint observed; \
-                     P4.4 will add full TurnEntry translation. Falling back to FreshLikeInit."
-                );
-                TurnEntry::FreshLikeInit
-            }
-        };
-        let outcome = enter_turn(entry, ctx, turn_deps).await;
-        // Ignore send errors — the actor may have already shut down.
-        let _ = result_tx.send((turn_id, outcome)).await;
-    });
-
-    state.in_flight = Some(InFlight::Active {
-        turn_id,
-        started_at: Instant::now(),
-    });
+    spawn_turn_driver(state, turn_id, TurnEntry::FreshLikeInit, deps);
 }
 
 /// Record the terminal event after a turn finishes.
