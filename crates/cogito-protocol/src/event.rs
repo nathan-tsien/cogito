@@ -158,6 +158,20 @@ pub enum EventPayload {
         /// Provider model identifier.
         model: String,
     },
+
+    /// Recorded by H06 Stream Demultiplexer when the model response
+    /// stream emits `MessageCompleted` (Anthropic `message_delta` with
+    /// `stop_reason` / `OpenAI` `finish_reason`). Sealing event for one
+    /// model call. `turn_id` is on the envelope.
+    ///
+    /// Added in Sprint 3 (2026-05-20) as the first additive variant under
+    /// ADR-0007's additive variant precedent. No `SCHEMA_VERSION` bump.
+    ModelCallCompleted {
+        /// Stop reason as reported by the provider.
+        stop_reason: crate::gateway::StopReason,
+        /// Token usage for this call.
+        usage: crate::gateway::Usage,
+    },
 }
 
 #[cfg(test)]
@@ -203,7 +217,10 @@ mod tests {
     }
 
     #[test]
-    fn all_nine_variants_roundtrip() -> serde_json::Result<()> {
+    fn all_fourteen_variants_roundtrip() -> serde_json::Result<()> {
+        // Covers every EventPayload variant. When a new variant is added,
+        // add it here too and rename the test to match the new count.
+        //
         // JobOutcome has no Default impl; use the simplest unit variant
         // (`Cancelled`) as a representative for the JobCompletedRecorded
         // fixture. The full matrix of JobOutcome variants is exercised in
@@ -240,6 +257,22 @@ mod tests {
             },
             EventPayload::TurnFailed {
                 reason: TurnFailureReason::TurnTimedOut,
+            },
+            EventPayload::ContextManageEntered {},
+            EventPayload::ContextManageCompleted {},
+            EventPayload::PromptComposed {
+                model: "claude-3-5-sonnet-20241022".into(),
+                surface_size: 3,
+            },
+            EventPayload::ModelCallStarted {
+                model: "claude-3-5-sonnet-20241022".into(),
+            },
+            EventPayload::ModelCallCompleted {
+                stop_reason: crate::gateway::StopReason::EndTurn,
+                usage: crate::gateway::Usage {
+                    input_tokens: 100,
+                    output_tokens: 50,
+                },
             },
         ];
         for v in variants {
