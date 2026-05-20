@@ -161,7 +161,7 @@ pub enum ResumeError {
 /// `ResumeError::Malformed` if the log is structurally inconsistent
 /// (e.g., `JobCompletedRecorded` with no preceding `TurnPaused`).
 pub fn replay(events: &[ConversationEvent]) -> Result<ResumeDecision, ResumeError> {
-    // ① schema check (must come first)
+    // 1. Schema check (must come first).
     if let Some(e) = events.iter().find(|e| e.schema_version > SCHEMA_VERSION) {
         return Err(ResumeError::UnsupportedSchema(e.schema_version));
     }
@@ -175,7 +175,8 @@ pub fn replay(events: &[ConversationEvent]) -> Result<ResumeDecision, ResumeErro
         });
     }
 
-    // ② detect malformed: JobCompletedRecorded without preceding TurnPaused for same job_id
+    // 2. Detect malformed: JobCompletedRecorded without preceding TurnPaused
+    //    for the same job_id.
     if let Some(last) = events.last() {
         if let EventPayload::JobCompletedRecorded { job_id, .. } = &last.payload {
             let paused_before = events[..events.len() - 1].iter().rev().any(
@@ -189,10 +190,11 @@ pub fn replay(events: &[ConversationEvent]) -> Result<ResumeDecision, ResumeErro
         }
     }
 
-    // ③ detect malformed: nested TurnStarted without intervening TurnCompleted/TurnFailed
+    // 3. Detect malformed: nested TurnStarted without intervening
+    //    TurnCompleted/TurnFailed.
     check_no_nested_turn_started(events)?;
 
-    // ③ find latest turn-boundary event
+    // 4. Find the latest turn-boundary event.
     let boundary_idx = events
         .iter()
         .enumerate()

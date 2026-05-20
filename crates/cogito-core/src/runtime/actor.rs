@@ -140,7 +140,7 @@ pub(super) async fn actor_main(
     deps: ActorDeps,
     initial_events: Vec<cogito_protocol::ConversationEvent>,
 ) -> ShutdownOutcome {
-    // ① Schema check (must come before replay so we never feed a
+    // 1. Schema check (must come before replay so we never feed a
     //    newer-schema log into the resume coordinator).
     if let Some(evt) = initial_events
         .iter()
@@ -153,21 +153,21 @@ pub(super) async fn actor_main(
         ));
     }
 
-    // ② Compute the resume decision (pure H03 projection).
+    // 2. Compute the resume decision (pure H03 projection).
     let decision = match replay(&initial_events) {
         Ok(d) => d,
         Err(e) => return ShutdownOutcome::ResumeFailed(e.to_string()),
     };
 
-    // ③ Seq init: already handled in builder.rs at StepRecorder construction.
-    // ④ SessionStarted: already gated in builder.rs::open_session.
+    // 3. Seq init: already handled in builder.rs at StepRecorder construction.
+    // 4. SessionStarted: already gated in builder.rs::open_session.
 
-    // ⑤ Dispatch the resume point. Errors here are startup-fatal.
+    // 5. Dispatch the resume point. Errors here are startup-fatal.
     if let Err(outcome) = apply_resume_point(&mut state, decision.point, &deps) {
         return outcome;
     }
 
-    // ⑥ Mailbox loop.
+    // 6. Mailbox loop.
     loop {
         tokio::select! {
             biased;

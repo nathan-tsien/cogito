@@ -23,7 +23,7 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] ADR-0006 (Runtime + H01 execution model) ratified
 - [x] Workspace topology fixed per ADR-0004: dropped `cogito-conversation`, added `cogito-store-jsonl`, stripped Hands/Boundary/Session deps from `cogito-core`
 - [x] Protocol types landed: `ExecutionClass`, `StreamEvent`, `JobCompletionEvent`, `JobManager::on_complete`, `TurnOutcome`, `TurnFailureReason` (12+ serde-roundtrip tests passing)
-- [x] Runtime module scaffolded (stubs): `Runtime`, `RuntimeBuilder`, `SessionHandle`, `SessionActor`, `store_writer`
+- [x] Runtime module scaffolded (stubs): `Runtime`, `RuntimeBuilder`, `SessionHandle`, per-session actor task (`runtime::actor::actor_main` + `SessionShared`), `store_writer`
 - [x] CI runs `just ci` (fmt + clippy + layer-check + test) + cargo-deny job
 - [x] Toolchain aligned to MSRV 1.85 (edition 2024 requirement)
 
@@ -53,7 +53,7 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] H09 Hook Pipeline (no-op insertion points; real hooks in Sprint 6)
 - [x] H10 Strategy Selector (`HarnessStrategy::default_with_model` factory; YAML registry in Sprint 5)
 - [x] `MockModelGateway` for integration tests
-- [x] `SessionActor::actor_main` Topology I + `Runtime::open_session` + `SessionHandle::{send_user, cancel_turn, shutdown}`
+- [x] `runtime::actor::actor_main` Topology I + `Runtime::open_session` + `SessionHandle::{send_user, cancel_turn, shutdown}`
 - [x] CLI `cogito chat` works end-to-end against Anthropic OR vLLM/SGLang with `read_file`
 
 #### Sprint 3 · Resume Coordinator (2 days)

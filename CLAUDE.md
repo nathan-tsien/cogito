@@ -92,6 +92,7 @@ Each crate maps to exactly one layer in the Brain / Hands / Session design (ADR-
 - All workspace deps go through `[workspace.dependencies]`; members declare `{ workspace = true }`
 - `RUSTFLAGS=-Dwarnings` via `.cargo/config.toml` — warnings break the build
 - **All code comments (doc comments `///`, module docs `//!`, inline `//`) are written in English.** Chinese is reserved for design docs (`docs/superpowers/specs/`), ADRs, commit messages, and human-facing conversation. Rationale: code is read by future maintainers and AI agents who default to English; mixing languages in source hurts grep and review.
+- **No decorative numerals or markers in comments / prose.** Don't use `①②③…`, `★`, `►`, ✓, ✗, ⚠ etc. as step markers, bullets, or emphasis — neither in source comments nor in user-facing docs (`README.md`, `ARCHITECTURE.md`, `docs/components/`, `docs/adr/`). Use plain `1.` / `2.` for numbered steps and `-` for bullets. Rationale: these glyphs break `grep`, render inconsistently across editors / terminals, and add no information that an ASCII number doesn't. Box-drawing characters (`┌─┐│▼►`) inside fenced ASCII-art diagrams are exempt — they carry layout, not decoration.
 
 ## Testing requirements
 

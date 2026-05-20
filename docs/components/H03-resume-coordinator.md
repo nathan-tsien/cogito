@@ -1,6 +1,6 @@
 # H03 · Resume Coordinator
 
-> **Status**: 🟡 Designed · Sprint 3 (implementation in P3)
+> **Status**: ✅ Implemented · Sprint 3 · `crates/cogito-core/src/harness/resume.rs` (pure `replay()` + 6-variant `ResumePoint`); resume dispatch wired in `runtime::actor::actor_main`; chaos test in `crates/cogito-core/tests/resume_chaos.rs`
 
 ## Role in Harness
 
@@ -135,12 +135,22 @@ Scan forward from `TurnStarted` and locate:
 | `Some(s)` | `Some(c)` | `s > c` | `ResumePoint::RestartCurrentTurn` (new model call in flight) |
 | `Some(s)` | `Some(c)` | `c ≥ s` | Examine tool events after `c` → Phase 2b |
 
-**Phase 2b** — pair `ToolUseRecorded` with `ToolResultRecorded` after `latest_mcc`:
+**Phase 2b** — pair `ToolUseRecorded` (written by H06 inside the model call,
+between `latest_mcs` and `latest_mcc`) with `ToolResultRecorded` (written by
+the actor after each tool returns, all of which appear after `latest_mcc`):
 
-| ToolUseRecorded count | Paired (k) | Unpaired (u) | ResumePoint |
+| ToolUseRecorded count (within call) | Paired (k) | Unpaired (u) | ResumePoint |
 |---|---|---|---|
-| 0 | — | — | `ResumePoint::ResumeFromModelCompleted` (rebuild output; stop_reason must be end_turn) |
+| 0 | — | — | `ResumePoint::ResumeFromModelCompleted` (rebuild output; stop_reason must NOT be `ToolUse`) |
 | ≥1 | k | u | `ResumePoint::ResumeFromToolDispatching { pending: u, completed: k }` |
+
+> **Producer-side ordering**: `ToolUseRecorded` is written **before**
+> `ModelCallCompleted` (H06 emits it on each `ToolUseCompleted` during
+> stream consumption; see `docs/components/H06-stream-demux.md` §
+> "Recorder invocation timing"). `ToolResultRecorded` is written **after**
+> `ModelCallCompleted` (by the actor, once each dispatched tool returns).
+> The pairing algorithm scans those two regions separately — confusing the
+> regions yields a silent dead-code path for `ResumeFromToolDispatching`.
 
 ### Phase 3 — Construct ResumeDecision
 
@@ -179,40 +189,46 @@ and `ModelCallCompleted` indices. If no `ModelCallCompleted` is found (or the
 last `ModelCallStarted` is later than the last `ModelCallCompleted`), the
 model call is incomplete — return `RestartCurrentTurn`.
 
-**Step 3 — Match unpaired tool calls.** Walk events after `latest_mcc`.
-Build two collections: `completed` (each `ToolUseRecorded` that has a
-matching `ToolResultRecorded`) and `pending` (those that do not). If both
-collections are empty and `stop_reason == end_turn`, reconstruct
-`ModelOutput` inline and return `ResumeFromModelCompleted`.
+**Step 3 — Match unpaired tool calls.** `ToolUseRecorded` events sit in the
+slice `(latest_mcs, latest_mcc]` (H06 emits them before
+`ModelCallCompleted`). `ToolResultRecorded` events sit in `(latest_mcc, end]`
+(actor emits them once each dispatched tool returns). Build two
+collections: `completed` from `ToolResultRecorded` after `latest_mcc`, and
+`pending` from `ToolUseRecorded` within the call whose `call_id` does not
+appear in `completed`. If both collections are empty and the rebuilt
+`stop_reason` is NOT `ToolUse`, return `ResumeFromModelCompleted` with the
+output reconstructed from the same in-call slice; otherwise return
+`ResumeFromToolDispatching`.
 
 **Output construction.** All reconstruction of `ModelOutput` (Phase 3
 `rebuilt_output`) happens here. This is the only place in H03 that performs
 an "events → high-level value" transformation. `enter_turn` receives the
 result without needing to re-scan.
 
-`SessionActor::actor_main` calls `replay` at step ⑥ of its startup sequence
-(after schema validation, before initializing the seq counter):
+The session loop (`runtime::actor::actor_main`) calls `replay` early in its
+startup sequence — after schema validation, before initializing the seq
+counter — and then branches on the resulting `ResumePoint`:
 
 ```rust
-// ② H03 computes the decision
+// 1. H03 computes the decision.
 let decision = match harness::resume::replay(&initial_events) {
     Ok(d) => d,
     Err(e) => return ShutdownOutcome::ResumeFailed(e.to_string()),
 };
 
-// ③ seq generator initialized (must precede any write)
+// 2. Seq generator initialized (must precede any write).
 state.event_seq.store(
     decision.last_event_seq.map_or(0, |s| s + 1),
     Ordering::SeqCst,
 );
 
-// ⑤ branch on ResumePoint
+// 3. Branch on ResumePoint.
 apply_resume_point(&mut state, decision.point).await?;
 ```
 
-Step ordering is fixed: schema check → `replay` → seq init → branch. Swapping
-② and ③ would allow a write with `seq < last_event_seq`, violating
-ADR-0002 immutability.
+Step ordering is fixed: schema check → `replay` → seq init → branch.
+Swapping steps 1 and 2 would allow a write with `seq < last_event_seq`,
+violating ADR-0002 immutability.
 
 ## Critical invariants
 
@@ -244,8 +260,8 @@ ADR-0002 immutability.
 **Calls (out)**: None. Pure function.
 
 **Called by**: H01 Turn Driver, once on entry. Specifically, invoked from
-`SessionActor::actor_main` at step ⑥ — after schema validation and before
-the per-session seq counter is initialized (see Algorithm sketch above).
+`runtime::actor::actor_main` after schema validation and before the
+per-session seq counter is initialized (see Algorithm sketch above).
 
 ## Open design questions
 
@@ -254,7 +270,7 @@ block Sprint 3 but remain visible):
 
 - **Mock model determinism** (risk 1, blocking): `cogito-mock-model` must
   return byte-identical `ModelEvent` streams for the same input across
-  repeated calls. Oracles ③ (tool mapping) and ④ (final text) of the chaos
+  repeated calls. Oracles 3 (tool mapping) and 4 (final text) of the chaos
   test are meaningless if the mock is non-deterministic. Verify and, if
   needed, add `ScriptedMockModel` before any chaos test code runs.
 - **Performance at 10k+ events** (risk 4): H03 currently does a full linear
@@ -277,25 +293,25 @@ the default CI gate (same level as fmt / clippy / unit tests).
 Each oracle corresponds to a distinct failure mode:
 
 ```rust
-// ① Prefix immutable — verifies ADR-0002: events written before crash
+// 1. Prefix immutable — verifies ADR-0002: events written before crash
 //    are unchanged in the resumed run (modulo event_id / ts).
 fn assert_prefix_immutable(golden: &[Event], resumed: &[Event], crash_n: u64);
 
-// ② Terminal equivalent — TurnCompleted / TurnFailed / TurnPaused variant
+// 2. Terminal equivalent — TurnCompleted / TurnFailed / TurnPaused variant
 //    matches; Failed compares TurnFailureReason variant.
 fn assert_terminal_equivalent(g_term: &EventPayload, r_term: &EventPayload);
 
-// ③ Tool mapping equivalent — {call_id → (tool_name, args, ToolResult)}
+// 3. Tool mapping equivalent — {call_id → (tool_name, args, ToolResult)}
 //    set equality; independent of mock determinism.
 fn assert_tool_mapping_equivalent(golden: &[Event], resumed: &[Event]);
 
-// ④ Final assistant text equivalent — byte equality; relies on
+// 4. Final assistant text equivalent — byte equality; relies on
 //    ScriptedMockModel determinism.
 fn assert_final_text_equivalent(golden: &[Event], resumed: &[Event]);
 ```
 
-Oracle ① directly validates the ADR-0002 immutability promise. Oracles ③ and
-④ together verify that H07/H08 and H06/H04 reconstruct the correct state on
+Oracle 1 directly validates the ADR-0002 immutability promise. Oracles 3 and
+4 together verify that H07/H08 and H06/H04 reconstruct the correct state on
 resume.
 
 ### Z mechanism — crash injection

@@ -167,35 +167,35 @@ End-to-end recovery sequence for a single session after process restart:
                    │
                    ▼
 ┌─ Runtime::open_session ────────────────────────────────────────────────┐
-│  ① check in-memory registry (prevent concurrent open of same session)  │
-│  ② store.range(session_id, ..).await   ← pull all events               │
-│  ③ events.is_empty()? → Err(ResumeFailed: no such session)             │
-│  ④ spawn SessionActor::spawn(initial_events = events)                  │
+│  R1 check in-memory registry (prevent concurrent open of same session) │
+│  R2 store.range(session_id, ..).await   ← pull all events              │
+│  R3 events.is_empty()? → Err(ResumeFailed: no such session)            │
+│  R4 spawn SessionActor::spawn(initial_events = events)                 │
 └──────────────────┬─────────────────────────────────────────────────────┘
                    │
                    ▼
 ┌─ SessionActor::actor_main ─────────────────────────────────────────────┐
-│  ⑤ schema check (fail-fast)                                            │
-│  ⑥ let decision = harness::resume::replay(&initial_events)?            │
-│  ⑦ state.event_seq.store(decision.last_event_seq + 1)                  │
-│  ⑧ if New session: write SessionStarted                                │
-│  ⑨ apply_resume_point(decision.point):                                 │
-│     - FreshTurn               → in_flight=Idle                         │
-│     - RestartCurrentTurn      → spawn TurnDriver (Init-like)           │
-│     - ResumeFromModelCompleted→ spawn TurnDriver (ModelCompleted)      │
+│  A1 schema check (fail-fast)                                           │
+│  A2 let decision = harness::resume::replay(&initial_events)?           │
+│  A3 state.event_seq.store(decision.last_event_seq + 1)                 │
+│  A4 if New session: write SessionStarted                               │
+│  A5 apply_resume_point(decision.point):                                │
+│     - FreshTurn                → in_flight=Idle                        │
+│     - RestartCurrentTurn       → spawn TurnDriver (Init-like)          │
+│     - ResumeFromModelCompleted → spawn TurnDriver (ModelCompleted)     │
 │     - ResumeFromToolDispatching→ spawn TurnDriver (ToolDispatching)    │
-│     - ResumePausedJob         → in_flight=PausedOnJob;                 │
-│                                 job_manager.on_complete(sink)          │
-│     - ResumeAfterJobCompletion→ inject result → spawn TurnDriver       │
-│                                 (ToolDispatching)                      │
-│  ⑩ enter mailbox main loop                                             │
+│     - ResumePausedJob          → in_flight=PausedOnJob;                │
+│                                  job_manager.on_complete(sink)         │
+│     - ResumeAfterJobCompletion → inject result → spawn TurnDriver      │
+│                                  (ToolDispatching)                     │
+│  A6 enter mailbox main loop                                            │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Key invariants** (correctness requirements, not preferences):
 
-- **Step ② completes entirely in the Runtime layer**, before the actor starts. Once `actor_main` begins, it never goes back to the store to pull history. This guarantees that the `events → state` mapping in `actor_main` is a deterministic pure function (unit-testable in isolation).
-- **Step ⑦ must precede step ⑨**: any write that occurs before the sequence generator is initialized may produce an event with `seq < last_event_seq`, violating the ADR-0002 append-only invariant.
+- **Step R2 completes entirely in the Runtime layer**, before the actor starts. Once `actor_main` begins, it never goes back to the store to pull history. This guarantees that the `events → state` mapping in `actor_main` is a deterministic pure function (unit-testable in isolation).
+- **Step A3 must precede step A5**: any write that occurs before the sequence generator is initialized may produce an event with `seq < last_event_seq`, violating the ADR-0002 append-only invariant.
 - **`ResumePausedJob` branch does not spawn a `TurnDriver`**. The turn deliberately paused waiting for an external job, not for the model; spawning a `TurnDriver` immediately would cause it to terminate at once, leaving the actor to register `on_complete` on the next cycle — a bug incubator.
 - **`ResumeAfterJobCompletion` is a distinct branch** (not a sub-case of `ResumeFromToolDispatching`): the former derives its completed payload from a `JobCompletedRecorded` event; the latter derives from a `ToolResultRecorded` event — the data sources are different.
 
