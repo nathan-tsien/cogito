@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cogito_core::runtime::{OpenMode, Runtime};
+use cogito_core::runtime::{OpenMode, Runtime, ShutdownOutcome};
 use cogito_mock_model::MockModelGateway;
 use cogito_protocol::EventPayload;
 use cogito_protocol::gateway::{ModelEvent, StopReason, Usage};
@@ -80,7 +80,10 @@ async fn open_send_complete_shutdown() -> Result<(), Box<dyn std::error::Error>>
     assert!(got_completed, "TurnCompleted event not received within 5s");
 
     let out = handle.shutdown(Duration::from_secs(5)).await?;
-    assert!(out.clean, "session did not shut down cleanly: {out:?}");
+    assert!(
+        matches!(out, ShutdownOutcome::Clean { .. }),
+        "session did not shut down cleanly: {out:?}"
+    );
     Ok(())
 }
 
@@ -138,7 +141,10 @@ async fn failed_turn_emits_exactly_one_turn_failed_event() -> Result<(), Box<dyn
     assert!(got_failed, "TurnFailed stream event not received within 5s");
 
     let out = handle.shutdown(Duration::from_secs(5)).await?;
-    assert!(out.clean, "session did not shut down cleanly: {out:?}");
+    assert!(
+        matches!(out, ShutdownOutcome::Clean { .. }),
+        "session did not shut down cleanly: {out:?}"
+    );
 
     // Replay the event log and count TurnFailed payloads.  Before the fix,
     // this count was 2; after the fix it must be exactly 1.

@@ -313,14 +313,13 @@ async fn drain_shutdown(state: &mut ActorState, deadline: Duration) -> ShutdownO
         }
     }
 
-    let clean = !state.has_active_turn();
-    ShutdownOutcome {
-        clean,
-        in_flight_cancelled: if clean {
-            None
-        } else {
-            Some("turn still running at shutdown deadline".into())
-        },
+    let in_flight_cancelled = if state.has_active_turn() {
+        Some("turn still running at shutdown deadline".into())
+    } else {
+        None
+    };
+    ShutdownOutcome::Clean {
+        in_flight_cancelled,
     }
 }
 

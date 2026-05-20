@@ -219,12 +219,23 @@ pub enum RuntimeError {
     /// `Handle::try_current()` failed at build time.
     #[error("no current tokio runtime: {0}")]
     NoTokioRuntime(String),
-    /// The session id was already open in this `Runtime`.
+    /// The session id was already open in this `Runtime` (in-memory registry).
     #[error("session already open: {0}")]
     SessionAlreadyOpen(SessionId),
+    /// The session id already exists in the backing store (`OpenMode::New` collision).
+    #[error("session {id:?} already exists in store")]
+    SessionAlreadyExists {
+        /// The session id that collided.
+        id: SessionId,
+    },
     /// Resume-phase failure for `OpenMode::Resume` or `OpenMode::Attach`.
-    #[error("resume failed: {0}")]
-    ResumeFailed(String),
+    #[error("resume failed for session {id:?}: {reason}")]
+    ResumeFailed {
+        /// The session id for which resume was attempted.
+        id: SessionId,
+        /// Human-readable description of why the resume failed.
+        reason: String,
+    },
     /// A required dependency was not set on the builder.
     #[error("missing required dependency: {0}")]
     MissingDependency(&'static str),
