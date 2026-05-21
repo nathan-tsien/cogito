@@ -7,19 +7,12 @@
 //!
 //! See `docs/superpowers/specs/2026-05-21-dev-experience-cli-display-design.md`.
 
-// SCAFFOLDING: this entire module is built incrementally across Tasks 3-7
-// of the dev-experience plan. Removed in Task 7 when `chat.rs` wires up
-// `Renderer::for_stdout()`. By that point every constant and method below
-// has at least one real call site outside of `#[cfg(test)]`.
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::io::{IsTerminal, Result as IoResult, Write};
 use std::time::Instant;
 
 use cogito_protocol::stream::StreamEvent;
 
-// Color/style codes used by `paint`; some are referenced only in later tasks.
 const CYAN: &str = "36";
 const GREEN: &str = "32";
 const RED: &str = "31";
