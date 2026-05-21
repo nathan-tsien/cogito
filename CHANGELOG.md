@@ -38,10 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SessionCommand::Trigger(TurnTrigger)`. Internal rename; the
   `NewMessage` struct is deleted (was never exposed outside
   `cogito_core::runtime::types`).
-- `cogito-core::runtime::SessionHandle::send_user` is now a 1-line
-  shim around `submit(TurnTrigger::UserText(text.into()))`. Behavior
-  preserved; existing call sites (`cogito-cli`, integration tests,
-  chaos tests) unchanged.
+- `cogito-core::runtime::SessionHandle::send_user` renamed to
+  `submit_user_text` and reduced to a 1-line shim around
+  `submit(TurnTrigger::UserText(text.into()))`. The old name read as
+  "send TO user" (verb+object) while the actual semantics are "submit
+  text FROM the user"; the noun-style name aligns with `submit` and
+  removes the directional ambiguity.
 - `cogito-core::runtime::mod` no longer re-exports `NewMessage`; it
   re-exports `TurnTrigger` instead.
 

@@ -26,8 +26,8 @@ future SaaS layer wrapping cogito).
   `StorageSystem` / `BrainSpawner` traits; v0.1 ships a built-in
   `read_file` tool and a composable provider
 - **Runtime** — dependency injection, panic isolation, per-session actor;
-  `Runtime::open_session` → `SessionHandle::{send_user, cancel_turn,
-  shutdown, subscribe}`
+  `Runtime::open_session` → `SessionHandle::{submit, submit_user_text,
+  cancel_turn, shutdown, subscribe}`
 - **Surface** — `cogito-cli chat` runs an end-to-end loop against
   Anthropic or any OpenAI-compatible endpoint
 

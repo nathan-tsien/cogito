@@ -252,9 +252,9 @@ async fn run_to_completion_without_faults(scenario: &ChaosScenario) -> GoldenRun
     let _events_rx = handle.subscribe();
 
     handle
-        .send_user(extract_user_text(scenario))
+        .submit_user_text(extract_user_text(scenario))
         .await
-        .expect("send_user");
+        .expect("submit_user_text");
     wait_for_terminal_broadcast(&handle).await;
 
     let events = read_log(store.as_ref(), session_id).await;
@@ -300,7 +300,7 @@ async fn run_with_y_fault(scenario: &ChaosScenario, crash_after_n: u64) -> Vec<C
     // the actor task), so setting the trigger before open_session would
     // panic the test process for low crash_after_n values. Arm the trigger
     // AFTER open_session so the panic only ever lands inside the actor
-    // task once `send_user` kicks off turn-event appends.
+    // task once `submit_user_text` kicks off turn-event appends.
     let inner1: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
     let wrapper1: Arc<FaultInjectingStore<JsonlStore>> =
         Arc::new(FaultInjectingStore::new(Arc::clone(&inner1)));
@@ -323,9 +323,9 @@ async fn run_with_y_fault(scenario: &ChaosScenario, crash_after_n: u64) -> Vec<C
         .await;
 
     handle1
-        .send_user(extract_user_text(scenario))
+        .submit_user_text(extract_user_text(scenario))
         .await
-        .expect("send_user");
+        .expect("submit_user_text");
 
     // Spin until either the on-disk log has `crash_after_n` events (panic
     // landed) or the turn reaches a terminal (turn finished before the

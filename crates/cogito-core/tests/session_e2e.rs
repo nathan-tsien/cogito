@@ -62,7 +62,7 @@ async fn open_send_complete_shutdown() -> Result<(), Box<dyn std::error::Error>>
     // Subscribe before sending so we don't miss events.
     let mut events = handle.subscribe();
 
-    handle.send_user("hello").await?;
+    handle.submit_user_text("hello").await?;
 
     // Wait for TurnCompleted on the broadcast stream (deterministic, no sleep).
     let got_completed = tokio::time::timeout(Duration::from_secs(5), async {
@@ -123,7 +123,7 @@ async fn failed_turn_emits_exactly_one_turn_failed_event() -> Result<(), Box<dyn
 
     // Subscribe before sending so we don't miss the TurnFailed stream event.
     let mut events = handle.subscribe();
-    handle.send_user("trigger failure").await?;
+    handle.submit_user_text("trigger failure").await?;
 
     // Wait for TurnFailed to arrive on the broadcast stream.
     let got_failed = tokio::time::timeout(Duration::from_secs(5), async {
