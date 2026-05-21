@@ -74,6 +74,18 @@ impl ModelGateway for AnthropicGateway {
     ) -> Result<BoxStream<'static, Result<ModelEvent, ModelError>>, ModelError> {
         let body = encode::encode(input);
         let url = format!("{}/v1/messages", self.cfg.base_url.trim_end_matches('/'));
+
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            match serde_json::to_string(&body) {
+                Ok(json) => {
+                    tracing::debug!(target: "cogito::prompt", url = %url, "request: {json}");
+                }
+                Err(e) => {
+                    tracing::debug!(target: "cogito::prompt", "request body serialization failed: {e}");
+                }
+            }
+        }
+
         let response = self
             .client
             .post(&url)
