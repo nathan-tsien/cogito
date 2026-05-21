@@ -53,7 +53,10 @@ impl HarnessStrategy {
             model_params: ModelParams {
                 model: model.into(),
                 max_tokens: 4096,
-                temperature: Some(0.7),
+                // `None` lets each provider apply its own default. Required for
+                // reasoning models (Kimi K2, OpenAI o-series, DeepSeek-R1, …)
+                // that reject any temperature other than 1.0.
+                temperature: None,
                 top_p: None,
                 stop_sequences: vec![],
             },
