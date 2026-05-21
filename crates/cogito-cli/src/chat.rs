@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::render::Renderer;
 use anyhow::{Context, Result, anyhow};
@@ -15,7 +15,16 @@ use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
 use cogito_store_jsonl::JsonlStore;
 use cogito_tools::{BuiltinToolProvider, ReadFile};
+use std::io::Write as _;
+
 use tokio::io::{self, AsyncBufReadExt, BufReader};
+use tokio::sync::mpsc;
+
+/// Window after a Ctrl-C that already initiated a turn cancellation
+/// during which a second Ctrl-C is interpreted as "exit now" rather
+/// than "cancel again". Matches the conventional REPL behaviour
+/// (Python, `IPython`, node) where a double-tap escapes a hung cancel.
+const CTRL_C_EXIT_WINDOW: Duration = Duration::from_secs(2);
 
 /// Arguments for the `chat` subcommand.
 #[derive(Debug, Args)]
@@ -172,14 +181,33 @@ pub async fn run(args: ChatArgs) -> Result<()> {
         .await
         .map_err(|e| anyhow!("open_session: {e:?}"))?;
 
-    tracing::info!(%session_id, "cogito chat started (type /quit to exit, Ctrl-C to cancel turn)");
+    tracing::info!(
+        %session_id,
+        "cogito chat started (type /quit to exit, Ctrl-C to cancel turn / exit when idle)"
+    );
 
-    // Spawn a Ctrl-C handler that cancels the current in-flight turn without
-    // terminating the REPL — the user can keep typing after cancellation.
-    let cancel_handle = handle.clone();
+    run_repl(handle.clone()).await?;
+    let _ = handle.shutdown(Duration::from_secs(30)).await;
+    Ok(())
+}
+
+/// REPL event loop. Owns stdin reading, signal handling, and stream
+/// subscription; lives as its own function so `run()` stays under
+/// `clippy::too_many_lines` and the loop can be tested in isolation.
+async fn run_repl(handle: cogito_core::runtime::SessionHandle) -> Result<()> {
+    // Ctrl-C handler — forwards each press as a message; the main loop
+    // interprets it relative to current state (in-flight turn vs idle).
+    // Bounded mpsc(8) so multiple rapid presses don't deadlock the
+    // signal task.
+    let (ctrl_c_tx, mut ctrl_c_rx) = mpsc::channel::<()>(8);
     tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            let _ = cancel_handle.cancel_turn().await;
+        loop {
+            if tokio::signal::ctrl_c().await.is_err() {
+                break;
+            }
+            if ctrl_c_tx.send(()).await.is_err() {
+                break;
+            }
         }
     });
 
@@ -191,10 +219,38 @@ pub async fn run(args: ChatArgs) -> Result<()> {
     let mut sub = handle.subscribe();
     let mut renderer = Renderer::for_stdout();
 
+    // Tracked across iterations so Ctrl-C can decide cancel-vs-exit.
+    // `turn_in_flight` is set on `submit_user_text` and cleared on the
+    // next terminal `StreamEvent`. `cancel_initiated_at` enables the
+    // double-tap escape: a second Ctrl-C within CTRL_C_EXIT_WINDOW
+    // exits even if the first cancel hasn't reported a terminal event
+    // yet (e.g. a model gateway hanging on shutdown).
+    let mut turn_in_flight = false;
+    let mut cancel_initiated_at: Option<Instant> = None;
+
     renderer.prompt_user()?;
 
     loop {
         tokio::select! {
+            ctrl_c = ctrl_c_rx.recv() => {
+                if ctrl_c.is_none() {
+                    // Signal task exited; rare but treat as session end.
+                    break;
+                }
+                let within_window = cancel_initiated_at
+                    .is_some_and(|t| t.elapsed() < CTRL_C_EXIT_WINDOW);
+                if turn_in_flight && !within_window {
+                    let _ = handle.cancel_turn().await;
+                    cancel_initiated_at = Some(Instant::now());
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "\n(Ctrl-C: cancelling turn — press again within 2s to exit)"
+                    );
+                } else {
+                    let _ = writeln!(std::io::stderr(), "\n(Ctrl-C: exiting)");
+                    break;
+                }
+            },
             read = stdin.read_until(b'\n', &mut line_buf) => match read {
                 Ok(0) => break,
                 Ok(_) => {
@@ -212,6 +268,7 @@ pub async fn run(args: ChatArgs) -> Result<()> {
                         continue;
                     }
                     handle.submit_user_text(l).await.context("submit_user_text")?;
+                    turn_in_flight = true;
                 }
                 Err(e) => return Err(e).context("stdin read"),
             },
@@ -227,6 +284,8 @@ pub async fn run(args: ChatArgs) -> Result<()> {
                     );
                     renderer.on_stream_event(&e)?;
                     if terminal {
+                        turn_in_flight = false;
+                        cancel_initiated_at = None;
                         renderer.prompt_user()?;
                     }
                 }
@@ -235,7 +294,5 @@ pub async fn run(args: ChatArgs) -> Result<()> {
             },
         }
     }
-
-    let _ = handle.shutdown(Duration::from_secs(30)).await;
     Ok(())
 }
