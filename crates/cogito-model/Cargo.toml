@@ -24,6 +24,7 @@ bytes = { workspace = true }
 [dev-dependencies]
 cogito-test-fixtures = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+toml = { workspace = true }
 
 [lints]
 workspace = true
