@@ -217,6 +217,7 @@ pub async fn run(args: ChatArgs) -> Result<()> {
             },
             evt = sub.recv() => match evt {
                 Ok(e) => {
+                    // TurnResumed is mid-turn (agent continues) — no fresh prompt.
                     let terminal = matches!(
                         &e,
                         StreamEvent::TurnCompleted
