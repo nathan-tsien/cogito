@@ -5,6 +5,7 @@
 
 mod banner;
 mod chat;
+mod render;
 
 use clap::{Parser, Subcommand};
 

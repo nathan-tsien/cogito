@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::render::Renderer;
 use anyhow::{Context, Result, anyhow};
 use clap::Args;
 use cogito_core::runtime::{OpenMode, Runtime};
@@ -123,9 +124,6 @@ async fn build_tool_provider(
 }
 
 /// Entry point for the `chat` subcommand.
-// `print!` / `println!` are intentional here: the chat REPL must write model
-// output to stdout without tracing timestamps or log levels.
-#[allow(clippy::print_stdout)]
 pub async fn run(args: ChatArgs) -> Result<()> {
     let inputs = cogito_cli::chat_config::ChatConfigInputs {
         config_path: args.config.clone(),
@@ -191,10 +189,12 @@ pub async fn run(args: ChatArgs) -> Result<()> {
     let mut stdin = BufReader::new(io::stdin());
     let mut line_buf = Vec::new();
     let mut sub = handle.subscribe();
+    let mut renderer = Renderer::for_stdout();
+
+    renderer.prompt_user()?;
 
     loop {
         tokio::select! {
-            // Read the next line from stdin (byte-oriented; UTF-8 lossy).
             read = stdin.read_until(b'\n', &mut line_buf) => match read {
                 Ok(0) => break,
                 Ok(_) => {
@@ -208,20 +208,28 @@ pub async fn run(args: ChatArgs) -> Result<()> {
                         break;
                     }
                     if l.trim().is_empty() {
+                        renderer.prompt_user()?;
                         continue;
                     }
                     handle.submit_user_text(l).await.context("submit_user_text")?;
                 }
                 Err(e) => return Err(e).context("stdin read"),
             },
-            // Forward real-time text deltas to stdout.
             evt = sub.recv() => match evt {
-                Ok(StreamEvent::TextDelta { chunk }) => {
-                    use std::io::Write as _;
-                    print!("{chunk}");
-                    let _ = std::io::stdout().flush();
+                Ok(e) => {
+                    // TurnResumed is mid-turn (agent continues) — no fresh prompt.
+                    let terminal = matches!(
+                        &e,
+                        StreamEvent::TurnCompleted
+                            | StreamEvent::TurnFailed { .. }
+                            | StreamEvent::TurnCancelled
+                            | StreamEvent::TurnPaused
+                    );
+                    renderer.on_stream_event(&e)?;
+                    if terminal {
+                        renderer.prompt_user()?;
+                    }
                 }
-                Ok(_) => {}
                 // Broadcast channel lagged or closed — treat as session end.
                 Err(_) => break,
             },
