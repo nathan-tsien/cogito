@@ -104,6 +104,35 @@ just chat               # uses CLI defaults; for credentials prefer make chat
 - Per-session JSONL files land under `./sessions/` by default; remove
   them with `make sessions-clean`.
 
+### 5. MCP servers (Sprint 4)
+
+`cogito chat` can mount any number of MCP (Model Context Protocol)
+servers via the `[[mcp_servers]]` array in `cogito.toml`. Both stdio
+and streamable-HTTP transports are supported.
+
+```toml
+[[mcp_servers]]
+name = "filesystem"
+transport = "stdio"
+command = "uvx"
+args = ["mcp-server-filesystem", "/tmp"]
+
+[[mcp_servers]]
+name = "company_api"
+transport = "streamable_http"
+url = "https://mcp.example.com/v1"
+bearer_token_env_var = "COMPANY_MCP_TOKEN"
+```
+
+Their tools surface as `mcp__<server>__<tool>` in the model's tool
+catalog. MCP failures (missing binary, env var unset, handshake
+timeout, ...) are **never fatal**: cogito prints a per-server status
+banner on stderr at startup and continues with whatever tools came
+up.
+
+See [ADR-0018](./docs/adr/0018-mcp-integration.md) for the
+architectural contract.
+
 ## Documentation
 
 - `AGENTS.md` — operating manual for AI coding agents (read first)

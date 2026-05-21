@@ -82,3 +82,9 @@ came from multiple sources.
 
 - ARCHITECTURE.md §"Hands layer internal structure"
 - §"Tool execution classes" (H05 doesn't care about class — it's per-tool metadata, surfaced via `ToolDescriptor`)
+
+### Observability fields (Sprint 4)
+
+Each surface build emits `tracing::info!` on target `h05.tool_surface`
+with structured fields: `mcp.tool_count`, `mcp.tool_desc_total_bytes`,
+`builtin.tool_count`. See [ADR-0018 §7](../adr/0018-mcp-integration.md).
