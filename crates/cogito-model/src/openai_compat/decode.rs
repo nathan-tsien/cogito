@@ -31,6 +31,12 @@ pub(crate) struct Decoder {
     tool_calls: BTreeMap<u32, ToolCallBuf>,
     /// Next `block_index` to assign for `tool_use` blocks (starts at 1).
     next_tool_block: u32,
+    /// Whether the stream has already been sealed by a `finish_reason`.
+    /// Some providers (e.g. `SenseNova`) emit `finish_reason` in *every*
+    /// chunk rather than only the last one; without this guard each
+    /// such chunk would re-emit `TextBlockCompleted` + `MessageCompleted`,
+    /// driving multi-hundred-fold write amplification in the store.
+    sealed: bool,
 }
 
 #[derive(Debug, Default)]
@@ -122,8 +128,14 @@ impl Decoder {
             }
         }
 
-        // --- Finish reason seals all buffered blocks ---
+        // --- Finish reason seals all buffered blocks (once) ---
         if let Some(reason) = finish_reason {
+            // Idempotent: providers that emit `finish_reason` in every
+            // chunk (e.g. SenseNova) must not cause repeated seals.
+            if self.sealed {
+                return;
+            }
+            self.sealed = true;
             // Seal the text block first if any text arrived.
             if self.text_started {
                 let text = std::mem::take(&mut self.text_buf);
@@ -178,7 +190,7 @@ fn parse_finish_reason(s: &str) -> StopReason {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
     use crate::openai_compat::wire::{
@@ -346,6 +358,47 @@ mod tests {
         assert_eq!(completed.0, "call_x");
         assert_eq!(completed.1, "list_dir");
         assert_eq!(completed.2, serde_json::json!({"path": "/tmp"}));
+    }
+
+    #[test]
+    fn repeated_finish_reason_per_chunk_seals_only_once() {
+        // SenseNova-style: every chunk carries `finish_reason: "stop"`,
+        // not just the last one. Decoder must seal exactly once.
+        let mut dec = Decoder::new();
+
+        // Three text chunks, each also carrying finish_reason="stop".
+        let mut text_blocks = 0;
+        let mut completed = 0;
+        for chunk_text in ["Hello", ", ", "world!"] {
+            let events = dec
+                .translate(make_chunk(Some(chunk_text), Some("stop")))
+                .expect("translate ok");
+            for e in events {
+                match e {
+                    ModelEvent::TextBlockCompleted { .. } => text_blocks += 1,
+                    ModelEvent::MessageCompleted { .. } => completed += 1,
+                    _ => {}
+                }
+            }
+        }
+
+        // Two extra trailing chunks with finish_reason only.
+        for _ in 0..2 {
+            let events = dec
+                .translate(make_chunk(None, Some("stop")))
+                .expect("translate ok");
+            for e in events {
+                if matches!(
+                    e,
+                    ModelEvent::TextBlockCompleted { .. } | ModelEvent::MessageCompleted { .. }
+                ) {
+                    panic!("sealed decoder must not re-emit terminal events");
+                }
+            }
+        }
+
+        assert_eq!(text_blocks, 1, "TextBlockCompleted must fire exactly once");
+        assert_eq!(completed, 1, "MessageCompleted must fire exactly once");
     }
 
     #[test]
