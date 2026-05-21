@@ -71,11 +71,33 @@ impl<W: Write> Renderer<W> {
                 write!(self.out, "{chunk}")?;
                 self.out.flush()?;
             }
+            StreamEvent::ToolDispatchStarted { call_id, tool_name } => {
+                self.tool_timers
+                    .insert(call_id.clone(), (Instant::now(), tool_name.clone()));
+                let line = self.paint(DIM_YELLOW, &format!("[tool] {tool_name} \u{2026}"));
+                write!(self.out, "\n{line}")?;
+                self.in_text = false;
+            }
+            StreamEvent::ToolDispatchEnded { call_id, ok } => {
+                let (name, ms) = match self.tool_timers.remove(call_id) {
+                    Some((started, name)) => (name, started.elapsed().as_millis()),
+                    None => ("?".to_string(), 0u128),
+                };
+                let status = if *ok { "ok" } else { "err" };
+                let body = format!("[tool] {name} {status} ({ms}ms)");
+                let line = if *ok {
+                    self.paint(DIM_YELLOW, &body)
+                } else {
+                    self.paint(RED, &body)
+                };
+                write!(self.out, "\n{line}")?;
+                self.in_text = false;
+            }
             StreamEvent::TurnCompleted => {
                 writeln!(self.out)?;
                 self.in_text = false;
             }
-            // Other variants land in subsequent tasks.
+            // Remaining variants land in Task 5.
             _ => {}
         }
         Ok(())
@@ -128,5 +150,62 @@ mod tests {
             StreamEvent::TurnCompleted,
         ]);
         assert_eq!(out, "\nagent: hi there\n");
+    }
+
+    #[test]
+    fn tool_lifecycle_ok_no_color() {
+        let out = render_events(&[
+            StreamEvent::TurnStarted,
+            StreamEvent::ToolDispatchStarted {
+                call_id: "c1".into(),
+                tool_name: "read_file".into(),
+            },
+            StreamEvent::ToolDispatchEnded {
+                call_id: "c1".into(),
+                ok: true,
+            },
+            StreamEvent::TurnCompleted,
+        ]);
+        assert!(
+            out.starts_with("\n[tool] read_file …\n[tool] read_file ok ("),
+            "unexpected start: {out:?}"
+        );
+        assert!(out.ends_with("ms)\n"), "unexpected end: {out:?}");
+    }
+
+    #[test]
+    fn tool_lifecycle_err_no_color() {
+        let out = render_events(&[
+            StreamEvent::ToolDispatchStarted {
+                call_id: "c2".into(),
+                tool_name: "bad_tool".into(),
+            },
+            StreamEvent::ToolDispatchEnded {
+                call_id: "c2".into(),
+                ok: false,
+            },
+        ]);
+        assert!(
+            out.contains("[tool] bad_tool err ("),
+            "expected 'err' marker, got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn text_after_tool_reprints_agent_prefix() {
+        let out = render_events(&[
+            StreamEvent::TextDelta { chunk: "a".into() },
+            StreamEvent::ToolDispatchStarted {
+                call_id: "c1".into(),
+                tool_name: "t".into(),
+            },
+            StreamEvent::ToolDispatchEnded {
+                call_id: "c1".into(),
+                ok: true,
+            },
+            StreamEvent::TextDelta { chunk: "b".into() },
+        ]);
+        let count = out.matches("agent: ").count();
+        assert_eq!(count, 2, "expected two `agent: ` prefixes, got: {out:?}");
     }
 }
