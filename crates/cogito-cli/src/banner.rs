@@ -17,11 +17,6 @@ use cogito_mcp::{McpServerConfig, McpStartupFailure};
 /// [mcp] ✗ mcp_servers[3] skipped: unknown transport "websocket"
 /// [mcp] note: 0 of N configured servers came up; running with builtin tools only
 /// ```
-//
-// `dead_code` is silenced because Task 12 lands this function ahead of
-// the Task 13 caller in `chat.rs`. Once `chat::run` invokes it the
-// attribute can be removed.
-#[allow(dead_code)]
 pub fn render_banner<W: Write>(
     out: &mut W,
     configs: &[McpServerConfig],

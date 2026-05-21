@@ -51,6 +51,77 @@ pub struct ChatArgs {
     pub system: Option<String>,
 }
 
+/// Build the chat session's `ToolProvider`: registers builtins, brings
+/// up MCP servers (per `cogito.toml`), prints the startup banner to
+/// stderr, and composes the two via `CompositeToolProvider::Strict`
+/// when MCP brought up at least one server.
+///
+/// Returns the builtin-only provider when no MCP servers were
+/// configured or all of them failed (see ADR-0018 §3.5 — MCP failures
+/// are non-fatal to Runtime).
+async fn build_tool_provider(
+    cfg: &cogito_config::RuntimeConfig,
+) -> Result<Arc<dyn cogito_protocol::tool::ToolProvider>> {
+    let builtin: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(
+        BuiltinToolProvider::builder()
+            .with_tool(Arc::new(ReadFile))
+            .build(),
+    );
+
+    let mcp_build = cogito_mcp::build_mcp_provider(&cfg.mcp_servers).await;
+
+    // Banner: merge parse-time + handshake-time failures.
+    let all_failures: Vec<cogito_mcp::McpStartupFailure> = cfg
+        .mcp_parse_failures
+        .iter()
+        .cloned()
+        .chain(mcp_build.failures.iter().cloned())
+        .collect();
+
+    // Per-server tool counts: enumerate cfg.mcp_servers, count descriptors
+    // whose qualified name starts with `mcp__<name>__`.
+    let mut successful_tool_counts: Vec<(String, usize)> = Vec::new();
+    if let Some(provider) = mcp_build.provider.as_ref() {
+        let descriptors = provider.list();
+        for cfg_entry in &cfg.mcp_servers {
+            let prefix = format!("mcp__{}__", cfg_entry.name);
+            let count = descriptors
+                .iter()
+                .filter(|d| d.name.starts_with(&prefix))
+                .count();
+            if count > 0 {
+                successful_tool_counts.push((cfg_entry.name.clone(), count));
+            }
+        }
+    }
+
+    // Print the banner to stderr (ADR-0018 §3.5.3 — surfaces silent skips).
+    let mut stderr = std::io::stderr();
+    if let Err(e) = crate::banner::render_banner(
+        &mut stderr,
+        &cfg.mcp_servers,
+        &all_failures,
+        &successful_tool_counts,
+    ) {
+        tracing::warn!("failed to render mcp startup banner: {e}");
+    }
+
+    // Compose providers. When MCP brought up anything, layer it under
+    // Strict (builtins must not start with `mcp__` per ADR-0018 §4;
+    // debug_assert in BuiltinToolProviderBuilder enforces this).
+    let tools: Arc<dyn cogito_protocol::tool::ToolProvider> = match mcp_build.provider {
+        Some(mcp) => Arc::new(
+            cogito_tools::CompositeToolProvider::new(
+                vec![builtin, mcp],
+                cogito_tools::NamingPolicy::Strict,
+            )
+            .map_err(|e| anyhow!("compose builtins + mcp: {e}"))?,
+        ),
+        None => builtin,
+    };
+    Ok(tools)
+}
+
 /// Entry point for the `chat` subcommand.
 // `print!` / `println!` are intentional here: the chat REPL must write model
 // output to stdout without tracing timestamps or log levels.
@@ -75,11 +146,7 @@ pub async fn run(args: ChatArgs) -> Result<()> {
         .ok_or_else(|| anyhow!("--model required (or set runtime.default_model in cogito.toml)"))?;
 
     let store = Arc::new(JsonlStore::new(cfg.runtime.session_root.clone()));
-    let tools = Arc::new(
-        BuiltinToolProvider::builder()
-            .with_tool(Arc::new(ReadFile))
-            .build(),
-    );
+    let tools = build_tool_provider(&cfg).await?;
 
     let mut strategy = HarnessStrategy::default_with_model(&model_id);
     if let Some(sys) = args.system {
