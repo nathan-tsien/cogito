@@ -27,10 +27,17 @@ fn lifecycle_events_round_trip() -> serde_json::Result<()> {
         StreamEvent::ToolDispatchStarted {
             call_id: "call_1".into(),
             tool_name: "read_file".into(),
+            args: serde_json::json!({"path": "src/main.rs"}),
         },
         StreamEvent::ToolDispatchEnded {
             call_id: "call_1".into(),
             ok: true,
+            error_message: None,
+        },
+        StreamEvent::ToolDispatchEnded {
+            call_id: "call_2".into(),
+            ok: false,
+            error_message: Some("permission denied".into()),
         },
     ];
     for e in events {

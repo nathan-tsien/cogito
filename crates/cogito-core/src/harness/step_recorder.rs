@@ -138,6 +138,7 @@ impl StepRecorder {
         let _ = self.events_tx.send(StreamEvent::ToolDispatchStarted {
             call_id: call_id.clone(),
             tool_name: tool_name.clone(),
+            args: args.clone(),
         });
         self.append(
             Some(turn_id),
@@ -159,10 +160,17 @@ impl StepRecorder {
         call_id: String,
         result: ToolResult,
     ) -> Result<EventId, StoreError> {
-        let ok = matches!(result, ToolResult::Output(_));
+        let (ok, error_message) = match &result {
+            ToolResult::Output(_) => (true, None),
+            ToolResult::Error { message, .. } => (false, Some(message.clone())),
+            // `ToolResult` is `#[non_exhaustive]`: treat unknown variants
+            // as failures with no human-readable message.
+            _ => (false, None),
+        };
         let _ = self.events_tx.send(StreamEvent::ToolDispatchEnded {
             call_id: call_id.clone(),
             ok,
+            error_message,
         });
         self.append(
             Some(turn_id),

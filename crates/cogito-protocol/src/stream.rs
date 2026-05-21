@@ -56,15 +56,27 @@ pub enum StreamEvent {
         call_id: String,
         /// Name of the tool being invoked.
         tool_name: String,
+        /// Tool arguments serialized as a JSON value. Mirrors the
+        /// persisted `ToolUseRecorded.args` payload; carried on the
+        /// stream so non-persisted subscribers (REPL renderer, future
+        /// TUI) can surface what the model is invoking without also
+        /// reading the JSONL log. Renderers choose any truncation /
+        /// highlighting policy.
+        args: serde_json::Value,
     },
 
     /// H08 finished dispatching a tool call. `ok` is false for both
     /// structured errors and panics; subscribers consult the persisted
-    /// `ToolResult` for detail.
+    /// `ToolResult` for the structured `ToolErrorKind`.
     ToolDispatchEnded {
         /// Opaque identifier for the tool call.
         call_id: String,
         /// Whether the invocation succeeded.
         ok: bool,
+        /// Human-readable error message, populated iff `ok == false`.
+        /// Mirrors `ToolResult::Error.message`; carried on the stream
+        /// so subscribers can display the failure reason without
+        /// reading the JSONL log.
+        error_message: Option<String>,
     },
 }

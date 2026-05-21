@@ -377,6 +377,7 @@ dependencies = [
  "cogito-protocol",
  "cogito-store-jsonl",
  "cogito-tools",
+ "serde_json",
  "temp-env",
  "tempfile",
  "tokio",

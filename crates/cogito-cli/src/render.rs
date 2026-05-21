@@ -19,6 +19,31 @@ const RED: &str = "31";
 const DIM: &str = "2";
 const DIM_YELLOW: &str = "2;33";
 
+/// Maximum characters to print from a compact tool-args JSON before
+/// truncating with an ellipsis. Picked so a one-line call rarely wraps
+/// in an 80-col terminal once the `[tool] <name> ` prefix is included.
+const TOOL_ARGS_PREVIEW_MAX: usize = 200;
+
+/// Maximum characters to print from a tool error message before
+/// truncating. Errors are usually short tracebacks or one-liners; this
+/// keeps a misbehaving tool from flooding the terminal scrollback.
+const TOOL_ERROR_PREVIEW_MAX: usize = 400;
+
+/// Truncate a UTF-8 string to at most `max` chars (not bytes), appending
+/// `...` when truncation happened. Returns the original string when it
+/// already fits within `max`.
+fn truncate_chars(s: &str, max: usize) -> String {
+    let count = s.chars().count();
+    if count <= max {
+        return s.to_string();
+    }
+    // Reserve 3 chars for the ellipsis.
+    let keep = max.saturating_sub(3);
+    let mut out: String = s.chars().take(keep).collect();
+    out.push_str("...");
+    out
+}
+
 /// REPL renderer driven by `StreamEvent`s. Generic over the output
 /// sink so tests can drive it with a `Vec<u8>` buffer.
 pub struct Renderer<W: Write> {
@@ -64,14 +89,32 @@ impl<W: Write> Renderer<W> {
                 write!(self.out, "{chunk}")?;
                 self.out.flush()?;
             }
-            StreamEvent::ToolDispatchStarted { call_id, tool_name } => {
+            StreamEvent::ToolDispatchStarted {
+                call_id,
+                tool_name,
+                args,
+            } => {
                 self.tool_timers
                     .insert(call_id.clone(), (Instant::now(), tool_name.clone()));
-                let line = self.paint(DIM_YELLOW, &format!("[tool] {tool_name} \u{2026}"));
+                // Compact one-line JSON; falls back to `{}` when the
+                // value somehow fails to serialize (shouldn't happen
+                // for valid serde_json::Value but stay defensive).
+                let args_preview = serde_json::to_string(args).map_or_else(
+                    |_| "{}".to_string(),
+                    |s| truncate_chars(&s, TOOL_ARGS_PREVIEW_MAX),
+                );
+                let line = self.paint(
+                    DIM_YELLOW,
+                    &format!("[tool] {tool_name} {args_preview} \u{2026}"),
+                );
                 write!(self.out, "\n{line}")?;
                 self.in_text = false;
             }
-            StreamEvent::ToolDispatchEnded { call_id, ok } => {
+            StreamEvent::ToolDispatchEnded {
+                call_id,
+                ok,
+                error_message,
+            } => {
                 let (name, ms) = match self.tool_timers.remove(call_id) {
                     Some((started, name)) => (name, started.elapsed().as_millis()),
                     None => ("?".to_string(), 0u128),
@@ -83,11 +126,26 @@ impl<W: Write> Renderer<W> {
                 } else {
                     self.paint(RED, &body)
                 };
-                write!(self.out, "\n{line}")?;
+                writeln!(self.out, "\n{line}")?;
+                if let Some(msg) = error_message.as_deref() {
+                    let truncated = truncate_chars(msg, TOOL_ERROR_PREVIEW_MAX);
+                    // 8-space indent so the message visually attaches
+                    // to the `[tool] … err (…)` line above without
+                    // being mistaken for a new agent / tool line.
+                    let indented = self.paint(RED, &format!("        {truncated}"));
+                    writeln!(self.out, "{indented}")?;
+                }
                 self.in_text = false;
             }
             StreamEvent::TurnCompleted => {
-                writeln!(self.out)?;
+                // Only emit a trailing newline when the previous event
+                // didn't already terminate its line (i.e. mid-stream
+                // text). Tool / lifecycle events use `writeln!` and
+                // are self-terminating, so a second newline here would
+                // produce a stray blank line.
+                if self.in_text {
+                    writeln!(self.out)?;
+                }
                 self.in_text = false;
             }
             StreamEvent::TurnPaused => {
@@ -173,15 +231,19 @@ mod tests {
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "read_file".into(),
+                args: serde_json::json!({"path": "src/main.rs"}),
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: true,
+                error_message: None,
             },
             StreamEvent::TurnCompleted,
         ]);
         assert!(
-            out.starts_with("\n[tool] read_file …\n[tool] read_file ok ("),
+            out.starts_with(
+                "\n[tool] read_file {\"path\":\"src/main.rs\"} …\n[tool] read_file ok ("
+            ),
             "unexpected start: {out:?}"
         );
         assert!(out.ends_with("ms)\n"), "unexpected end: {out:?}");
@@ -193,15 +255,136 @@ mod tests {
             StreamEvent::ToolDispatchStarted {
                 call_id: "c2".into(),
                 tool_name: "bad_tool".into(),
+                args: serde_json::json!({}),
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c2".into(),
                 ok: false,
+                error_message: None,
             },
         ]);
         assert!(
             out.contains("[tool] bad_tool err ("),
             "expected 'err' marker, got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn tool_args_preview_no_color() {
+        let out = render_events(&[StreamEvent::ToolDispatchStarted {
+            call_id: "c1".into(),
+            tool_name: "query_cameras".into(),
+            args: serde_json::json!({"fuzzy_keyword": "深圳"}),
+        }]);
+        assert!(
+            out.contains(r#"{"fuzzy_keyword":"深圳"}"#),
+            "expected args JSON in output: {out:?}"
+        );
+        assert!(
+            out.contains("[tool] query_cameras"),
+            "expected tool name prefix: {out:?}"
+        );
+    }
+
+    #[test]
+    fn tool_args_truncated_when_long() {
+        // Build args that, when serialized, exceed TOOL_ARGS_PREVIEW_MAX.
+        let long: String = "x".repeat(500);
+        let out = render_events(&[StreamEvent::ToolDispatchStarted {
+            call_id: "c1".into(),
+            tool_name: "t".into(),
+            args: serde_json::json!({"blob": long}),
+        }]);
+        // The output line is `\n[tool] t <preview> …`. Locate the
+        // preview substring between the tool name and the trailing
+        // ellipsis (U+2026 \u{2026}) and assert it ends with `...`
+        // and is within the budget.
+        let line = out.lines().find(|l| l.contains("[tool] t")).unwrap_or("");
+        let preview = line
+            .strip_prefix("[tool] t ")
+            .and_then(|s| s.strip_suffix(" \u{2026}"))
+            .unwrap_or(line);
+        assert!(
+            preview.ends_with("..."),
+            "expected truncation marker, got preview: {preview:?}"
+        );
+        assert!(
+            preview.chars().count() <= TOOL_ARGS_PREVIEW_MAX,
+            "preview exceeded TOOL_ARGS_PREVIEW_MAX: {preview:?}"
+        );
+    }
+
+    #[test]
+    fn tool_error_message_indented_after_err_line() {
+        let out = render_events(&[
+            StreamEvent::ToolDispatchStarted {
+                call_id: "c1".into(),
+                tool_name: "t".into(),
+                args: serde_json::json!({}),
+            },
+            StreamEvent::ToolDispatchEnded {
+                call_id: "c1".into(),
+                ok: false,
+                error_message: Some("boom".into()),
+            },
+        ]);
+        assert!(
+            out.contains("err ("),
+            "expected err marker before message: {out:?}"
+        );
+        assert!(
+            out.contains("\n        boom\n"),
+            "expected 8-space-indented error message line: {out:?}"
+        );
+    }
+
+    #[test]
+    fn tool_error_message_truncated_when_long() {
+        let long: String = "x".repeat(800);
+        let out = render_events(&[
+            StreamEvent::ToolDispatchStarted {
+                call_id: "c1".into(),
+                tool_name: "t".into(),
+                args: serde_json::json!({}),
+            },
+            StreamEvent::ToolDispatchEnded {
+                call_id: "c1".into(),
+                ok: false,
+                error_message: Some(long),
+            },
+        ]);
+        let indented_line = out
+            .lines()
+            .find(|l| l.starts_with("        x"))
+            .unwrap_or("");
+        let msg = indented_line.trim_start();
+        assert!(
+            msg.ends_with("..."),
+            "expected truncation marker on error message: {msg:?}"
+        );
+        assert!(
+            msg.chars().count() <= TOOL_ERROR_PREVIEW_MAX,
+            "error message exceeded TOOL_ERROR_PREVIEW_MAX: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn tool_ok_does_not_print_error_line() {
+        let out = render_events(&[
+            StreamEvent::ToolDispatchStarted {
+                call_id: "c1".into(),
+                tool_name: "t".into(),
+                args: serde_json::json!({}),
+            },
+            StreamEvent::ToolDispatchEnded {
+                call_id: "c1".into(),
+                ok: true,
+                error_message: None,
+            },
+        ]);
+        assert!(
+            !out.contains("\n        "),
+            "ok path should not emit an indented error line: {out:?}"
         );
     }
 
@@ -212,10 +395,12 @@ mod tests {
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
+                args: serde_json::json!({}),
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: true,
+                error_message: None,
             },
             StreamEvent::TextDelta { chunk: "b".into() },
         ]);
@@ -262,10 +447,12 @@ mod tests {
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
+                args: serde_json::json!({}),
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: false,
+                error_message: Some("oops".into()),
             },
             StreamEvent::TurnFailed { reason: "x".into() },
         ]);
@@ -286,6 +473,7 @@ mod tests {
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
+                args: serde_json::json!({}),
             },
             StreamEvent::TurnFailed { reason: "x".into() },
         ]);
