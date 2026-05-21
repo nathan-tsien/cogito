@@ -372,6 +372,7 @@ dependencies = [
  "clap",
  "cogito-config",
  "cogito-core",
+ "cogito-mcp",
  "cogito-model",
  "cogito-protocol",
  "cogito-store-jsonl",
