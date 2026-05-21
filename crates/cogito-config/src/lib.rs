@@ -24,3 +24,7 @@ pub use loader::{ConfigError, ConfigLoader};
 pub mod env;
 
 pub use env::EnvConfigLoader;
+
+pub mod merge;
+
+pub use merge::merge_layers;
