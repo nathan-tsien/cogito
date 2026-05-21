@@ -123,18 +123,18 @@ the principle and ADR-0014 (v0.4) for the `TenantContext` model.
 Run these instead of inventing your own:
 
 ```bash
-just fmt              # rustfmt
-just fix              # clippy --fix + fmt (add a crate name to scope)
-just test             # nextest, faster than cargo test
-just bench            # criterion benchmarks
-just chaos            # run chaos tests (slow)
-just ci               # the CI gate locally
+make fmt                       # rustfmt
+make fix [CRATE=<name>]        # clippy --fix + fmt (add a crate to scope)
+make test [CRATE=<name>]       # nextest, faster than cargo test
+make bench                     # criterion benchmarks
+make chaos                     # run chaos tests (slow)
+make ci                        # the CI gate locally
 ```
 
 ## What to do when you finish a task
 
-1. `just fmt && just fix <crate>` — ensure clean
-2. `just test -p <crate-you-touched>` — verify tests pass
+1. `make fmt && make fix CRATE=<crate>` — ensure clean
+2. `make test CRATE=<crate-you-touched>` — verify tests pass
 3. Update `docs/components/H0X-*.md` if you changed component behavior
 4. Update `CHANGELOG.md` if you added a public-API change
 5. If you completed a sprint or version milestone, update `ROADMAP.md`'s checklist
@@ -159,7 +159,7 @@ What's **not** OK:
 
 ## Patience note
 
-When running `cargo` commands (`just fix`, `cargo test`), be patient.
+When running `cargo` commands (`make fix`, `cargo test`), be patient.
 Rust lock-file resolution can be slow. Don't kill the command by PID —
 that corrupts the lock file. Wait it out.
 

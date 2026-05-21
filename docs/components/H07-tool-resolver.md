@@ -71,3 +71,11 @@ clarity here directly improves recovery rate.
 - ARCHITECTURE.md §"Turn state machine" (ModelCompleted)
 - ARCHITECTURE.md §"Hands layer internal structure" (`ToolDescriptor.input_schema` source)
 - AGENTS.md §"Inviolable design principles" #5 (Tool failures are structured errors, not panics)
+
+### MCP-sourced tool schemas (Sprint 4)
+
+Tool schemas from MCP servers (`mcp__<server>__<tool>` tools) are
+forwarded verbatim from `rmcp::model::Tool::input_schema` into the
+`ToolDescriptor::schema`. H07 applies its standard JSON Schema
+validation; no MCP-specific path. See
+[ADR-0018 §6](../adr/0018-mcp-integration.md).

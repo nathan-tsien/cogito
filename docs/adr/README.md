@@ -17,6 +17,7 @@ recording an architectural decision and its context.
 - 0015 — Reserved for v0.6 Storage HTTP wire protocol — renumbered from 0013
 - [0016](./0016-turn-trigger-abstraction.md) — Turn-trigger abstraction (`TurnTrigger` enum, `SessionHandle::submit`, additive event-log evolution path)
 - [0017](./0017-cogito-runtime-configuration-model.md) — Cogito Runtime configuration model (`cogito-config` crate, `RuntimeConfig` + `ConfigLoader` trait, `cogito.toml` + `strategies/*.yaml` hybrid layout, layered partial merge, named provider instances)
+- [0018](./0018-mcp-integration.md) — MCP integration (`cogito-mcp` crate, `rmcp` 1.5 client wrapper, stdio + streamable-HTTP transports, `mcp__server__tool` namespacing, **MCP failures non-fatal to Runtime** principle + `McpStartupFailure` channel + mandatory startup banner)
 
 ## Template
 

@@ -3,6 +3,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)]
 
+mod banner;
 mod chat;
 
 use clap::{Parser, Subcommand};

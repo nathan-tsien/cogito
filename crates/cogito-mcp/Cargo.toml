@@ -9,12 +9,34 @@ publish.workspace = true
 [dependencies]
 cogito-protocol.workspace = true
 
-tokio.workspace = true
 async-trait.workspace = true
+http.workspace = true
+rmcp.workspace = true
+# rmcp 1.7's streamable-HTTP client trait is implemented for *its* reqwest
+# 0.13 `Client`. We need to spell that exact type in `BuiltTransport` so
+# the variant can hold the value returned by
+# `StreamableHttpClientTransport::from_config`. The workspace's reqwest
+# (0.12, used by `cogito-model`) is incompatible at the type level. We
+# carry this minimal direct dep to bridge the two; once the workspace
+# bumps to reqwest 0.13 the duplication goes away.
+reqwest = { version = "0.13", default-features = false }
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha1 = "0.10"
 thiserror.workspace = true
+tokio.workspace = true
+toml = "0.8"
 tracing.workspace = true
+
+[dev-dependencies]
+# Integration tests spin up an in-process rmcp server; we need the
+# server feature for that. Not enabled in regular builds — keeps the
+# crate small.
+rmcp = { workspace = true, features = ["server"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }
+tokio-util = { workspace = true }
 
 [lints]
 workspace = true

@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use cogito_mcp::{McpServerConfig, McpStartupFailure};
 use cogito_model::ProviderConfig;
 use cogito_protocol::strategy::HarnessStrategy;
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,12 @@ pub struct RuntimeConfig {
     /// Sprint 4.5: always empty. Sprint 5 populates by walking
     /// `runtime.strategies_dir`.
     pub strategies: HashMap<String, HarnessStrategy>,
+    /// Sprint 4 (ADR-0018): successfully-parsed MCP server entries.
+    pub mcp_servers: Vec<McpServerConfig>,
+    /// Sprint 4 (ADR-0018): per-entry deserialization failures.
+    /// Surface code joins these with handshake-time failures from
+    /// `build_mcp_provider` and surfaces them in the startup banner.
+    pub mcp_parse_failures: Vec<McpStartupFailure>,
 }
 
 /// Finalized `[runtime]` section. All fields are resolved (no `Option`
@@ -52,6 +59,11 @@ pub struct RuntimeConfigPartial {
     pub runtime: Option<RuntimeSectionPartial>,
     /// Optional `[[providers]]` array contribution.
     pub providers: Option<Vec<ProviderConfig>>,
+    /// Optional `[[mcp_servers]]` array (Sprint 4). Stored as raw
+    /// TOML values so per-entry deserialization can be deferred to
+    /// finalize, where a bad entry becomes a `McpStartupFailure`
+    /// instead of poisoning the whole parse. See ADR-0018 §3.
+    pub mcp_servers: Option<Vec<toml::Value>>,
 }
 
 /// Partial `[runtime]` section. Every field is `Option<T>` so the
@@ -69,6 +81,29 @@ pub struct RuntimeSectionPartial {
     pub strategies_dir: Option<PathBuf>,
 }
 
+/// Per-entry try-deserialize. Successes go to the typed list;
+/// failures become `McpStartupFailure::ConfigParse` carrying the
+/// 0-based index and the deserialization error message.
+pub(crate) fn finalize_mcp_servers(
+    raw: Option<Vec<toml::Value>>,
+) -> (Vec<McpServerConfig>, Vec<McpStartupFailure>) {
+    let Some(entries) = raw else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut ok = Vec::new();
+    let mut errs = Vec::new();
+    for (i, value) in entries.into_iter().enumerate() {
+        match value.try_into::<McpServerConfig>() {
+            Ok(cfg) => ok.push(cfg),
+            Err(e) => errs.push(McpStartupFailure::ConfigParse {
+                index: i,
+                error: e.to_string(),
+            }),
+        }
+    }
+    (ok, errs)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -84,6 +119,7 @@ mod tests {
                 strategies_dir: Some(PathBuf::from("./strategies")),
             }),
             providers: Some(vec![]),
+            mcp_servers: None,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: RuntimeConfigPartial = serde_json::from_str(&s).unwrap();
@@ -98,6 +134,7 @@ mod tests {
         let p = RuntimeConfigPartial::default();
         assert!(p.runtime.is_none());
         assert!(p.providers.is_none());
+        assert!(p.mcp_servers.is_none());
     }
 
     #[test]
@@ -123,5 +160,60 @@ mod tests {
         "#;
         let err = toml::from_str::<RuntimeConfigPartial>(toml_str).unwrap_err();
         assert!(err.to_string().contains("bogus") || err.to_string().contains("unknown"));
+    }
+
+    #[test]
+    fn mcp_servers_round_trips_through_partial_as_raw_toml_values() {
+        let toml_str = r#"
+            [[mcp_servers]]
+            name = "fs"
+            transport = "stdio"
+            command = "uvx"
+            args = ["mcp-server-filesystem", "/tmp"]
+        "#;
+        let partial: RuntimeConfigPartial = toml::from_str(toml_str).unwrap();
+        let raw = partial.mcp_servers.expect("mcp_servers parsed");
+        assert_eq!(raw.len(), 1);
+        // Raw form: each entry is still a toml::Value::Table.
+        assert!(raw[0].as_table().is_some());
+    }
+
+    #[test]
+    fn bad_mcp_entry_does_not_poison_provider_parse() {
+        let toml_str = r#"
+            [[mcp_servers]]
+            name = "good"
+            transport = "stdio"
+            command = "echo"
+
+            [[mcp_servers]]
+            name = "bad"
+            transport = "websocket"
+            url = "ws://x"
+        "#;
+        let partial: RuntimeConfigPartial =
+            toml::from_str(toml_str).expect("top-level parse must succeed even with bad mcp entry");
+        let (ok, errs) = finalize_mcp_servers(partial.mcp_servers);
+        assert_eq!(ok.len(), 1);
+        assert_eq!(ok[0].name, "good");
+        assert_eq!(errs.len(), 1);
+        let McpStartupFailure::ConfigParse { index, .. } = &errs[0] else {
+            panic!("expected ConfigParse");
+        };
+        assert_eq!(*index, 1);
+    }
+
+    #[test]
+    fn missing_mcp_servers_section_yields_empty_lists() {
+        let partial: RuntimeConfigPartial = toml::from_str(
+            r#"
+            [runtime]
+            session_root = "/tmp/x"
+        "#,
+        )
+        .unwrap();
+        let (ok, errs) = finalize_mcp_servers(partial.mcp_servers);
+        assert!(ok.is_empty());
+        assert!(errs.is_empty());
     }
 }

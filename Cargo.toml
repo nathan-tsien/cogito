@@ -73,10 +73,23 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros", "chro
 # HTTP
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
 bytes = "1.7"
+# Used to construct typed HeaderName / HeaderValue values that the `rmcp`
+# (>= 1.7) streamable-HTTP client config consumes. We intentionally do NOT
+# depend on `reqwest` from `cogito-mcp` — rmcp pulls a different major
+# (0.13) and bridges it internally via `from_config(...)`.
+http = "1"
 
 # Schemas
 jsonschema = "0.18"
 schemars = { version = "0.8", features = ["chrono", "uuid1"] }
+
+# MCP (Model Context Protocol)
+rmcp = { version = "1.5", default-features = false, features = [
+    "client",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+    "macros",
+] }
 
 # IDs and time
 uuid = { version = "1.10", features = ["v7", "serde"] }

@@ -1,29 +1,35 @@
 # cogito — Makefile for local development and quick debugging
 #
 # Usage:
-#   make chat              interactive REPL (openai-compat, uses MODEL from .env)
-#   make chat-anthropic    interactive REPL (Anthropic)
+#   make chat              interactive REPL (provider/model from cogito.toml)
 #   make test              run all workspace tests
 #   make test CRATE=cogito-core   run one crate
-#   make ci                full CI gate (fmt + clippy + layer-check + test)
+#   make ci                full CI gate (fmt-check + clippy + layer-check + test)
 #   make clean             wipe build artifacts
 #
-# Variables can be overridden on the command line:
-#   make chat MODEL=claude-opus-4-7 SESSION_ROOT=./my-sessions
+# Provider / model selection lives in `cogito.toml`. The file is loaded
+# from (priority order):
+#   1. $COGITO_CONFIG
+#   2. ./cogito.toml
+#   3. $XDG_CONFIG_HOME/cogito/config.toml   (defaulted below)
 #
-# Prerequisites: Rust 1.85+, cargo.  Optional: just, cargo-nextest.
+# CLI args (`--model`, `--provider`, `--base-url`) still work if you
+# need a one-off override; pass them through as `make chat -- --model foo`
+# is NOT supported, run `cargo run -p cogito-cli -- chat --model foo`
+# directly for that.
+#
+# Prerequisites: Rust 1.85+, cargo.  Optional: cargo-nextest.
 
-# ── Load .env if present ─────────────────────────────────────────────────────
+# Load .env if present (e.g. ANTHROPIC_API_KEY, COGITO_MCP_*_TOKEN).
 -include .env
 export
 
-# ── Defaults (overridden by .env or command line) ────────────────────────────
-MODEL        ?= sensenova-6.7-flash-lite
-SESSION_ROOT ?= ./sessions
-RUST_LOG     ?= info
-CRATE        ?=
+# cogito-config's file loader only consults XDG_CONFIG_HOME when it is
+# set and non-empty (no implicit ~/.config/ fallback). Default it here
+# so `~/.config/cogito/config.toml` is picked up automatically.
+export XDG_CONFIG_HOME ?= $(HOME)/.config
 
-# ── Internal helpers ─────────────────────────────────────────────────────────
+# Internal helpers
 CARGO        := cargo
 CLI_RUN      := $(CARGO) run -p cogito-cli --
 
@@ -35,9 +41,11 @@ else
 TEST_CMD     = $(CARGO) test
 endif
 
+CRATE        ?=
+
 .PHONY: default help \
-        chat chat-anthropic chat-openai \
-        test ci fmt fix clippy layer-check \
+        chat \
+        test test-integration ci fmt fmt-check fix clippy layer-check \
         bench bench-baseline chaos \
         clean sessions-clean \
         gen-schema gen-schema-check \
@@ -45,19 +53,17 @@ endif
 
 default: help
 
-# ── Help ─────────────────────────────────────────────────────────────────────
 help:
 	@echo ""
 	@echo "cogito development targets"
 	@echo ""
 	@echo "  Chat / REPL"
-	@echo "    make chat               openai-compat REPL (MODEL from .env)"
-	@echo "    make chat-anthropic     Anthropic REPL (ANTHROPIC_API_KEY from .env)"
-	@echo "    make chat-openai        explicit openai-compat REPL"
+	@echo "    make chat               interactive REPL (config from cogito.toml)"
 	@echo ""
 	@echo "  Testing"
 	@echo "    make test               all workspace tests"
 	@echo "    make test CRATE=<name>  single crate"
+	@echo "    make test-integration   curated integration suite (no API key required)"
 	@echo "    make ci                 full CI gate"
 	@echo "    make chaos              resume chaos tests (slow)"
 	@echo ""
@@ -70,41 +76,23 @@ help:
 	@echo ""
 	@echo "  Misc"
 	@echo "    make clean              cargo clean"
-	@echo "    make sessions-clean     remove ./sessions/*.jsonl"
+	@echo "    make sessions-clean SESSION_ROOT=...  remove *.jsonl under SESSION_ROOT"
 	@echo "    make env-check          print active env values (no secrets)"
 	@echo ""
 
-# ── Environment sanity check ─────────────────────────────────────────────────
+# Environment sanity check (no secrets printed; just yes/no flags).
 env-check:
-	@echo "MODEL        = $(MODEL)"
-	@echo "SESSION_ROOT = $(SESSION_ROOT)"
-	@echo "RUST_LOG     = $(RUST_LOG)"
-	@echo "OPENAI_BASE_URL = $(OPENAI_BASE_URL)"
+	@echo "XDG_CONFIG_HOME = $(XDG_CONFIG_HOME)"
+	@echo "RUST_LOG        = $(RUST_LOG)"
 	@echo "ANTHROPIC_API_KEY set: $(if $(ANTHROPIC_API_KEY),yes,no)"
 	@echo "OPENAI_API_KEY set:    $(if $(OPENAI_API_KEY),yes,no)"
 
-# ── Chat / REPL ───────────────────────────────────────────────────────────────
-chat: env-check
-	$(CLI_RUN) chat \
-		--model "$(MODEL)" \
-		--provider openai-compat \
-		--base-url "$(OPENAI_BASE_URL)" \
-		--session-root "$(SESSION_ROOT)"
+# Chat / REPL — provider/model from cogito.toml. Override at the CLI
+# layer by invoking `cargo run -p cogito-cli -- chat --model X` directly.
+chat:
+	$(CLI_RUN) chat
 
-chat-anthropic: env-check
-	$(CLI_RUN) chat \
-		--model "$(MODEL)" \
-		--provider anthropic \
-		--session-root "$(SESSION_ROOT)"
-
-chat-openai: env-check
-	$(CLI_RUN) chat \
-		--model "$(MODEL)" \
-		--provider openai-compat \
-		--base-url "$(OPENAI_BASE_URL)" \
-		--session-root "$(SESSION_ROOT)"
-
-# ── Tests ─────────────────────────────────────────────────────────────────────
+# Tests
 test:
 	@if [ -z "$(CRATE)" ]; then \
 		$(TEST_CMD) --workspace --all-features; \
@@ -112,7 +100,7 @@ test:
 		$(TEST_CMD) -p $(CRATE) --all-features; \
 	fi
 
-# Key integration tests that don't need a real API key
+# Curated integration tests that don't need a real API key.
 test-integration:
 	$(CARGO) test -p cogito-core  --test session_e2e
 	$(CARGO) test -p cogito-core  --test turn_driver_text_only
@@ -123,7 +111,7 @@ test-integration:
 chaos:
 	$(CARGO) test --test resume_chaos -p cogito-core --release -- --nocapture
 
-# ── Code quality ─────────────────────────────────────────────────────────────
+# Code quality
 fmt:
 	$(CARGO) fmt --all
 
@@ -146,14 +134,14 @@ ci: fmt-check clippy layer-check test
 fmt-check:
 	$(CARGO) fmt --all -- --check
 
-# ── Benchmarks ───────────────────────────────────────────────────────────────
+# Benchmarks
 bench:
 	$(CARGO) bench --workspace
 
 bench-baseline:
 	$(CARGO) bench -p cogito-store-jsonl --bench append_throughput
 
-# ── Schema ────────────────────────────────────────────────────────────────────
+# Schema
 gen-schema:
 	$(CARGO) run -p cogito-gen-schema --release -- \
 		--output docs/schemas/conversation-event-v1.json
@@ -163,10 +151,13 @@ gen-schema-check:
 		--output docs/schemas/conversation-event-v1.json \
 		--check
 
-# ── Cleanup ───────────────────────────────────────────────────────────────────
+# Cleanup
 clean:
 	$(CARGO) clean
 
+# Remove session JSONL files under SESSION_ROOT (caller supplies the path).
+SESSION_ROOT ?=
 sessions-clean:
+	@[ -n "$(SESSION_ROOT)" ] || (echo "usage: make sessions-clean SESSION_ROOT=<dir>" && exit 1)
 	@echo "Removing session files from $(SESSION_ROOT)/ ..."
 	@rm -f $(SESSION_ROOT)/*.jsonl && echo "Done." || echo "Nothing to remove."

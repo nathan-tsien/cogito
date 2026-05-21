@@ -234,6 +234,59 @@ Strategies are **provider-agnostic**: the YAML does not name a
 provider. The runtime binds strategy and provider at request time
 via `--provider <name>` or `runtime.default_provider`.
 
+### `[[mcp_servers]]`
+
+The `[[mcp_servers]]` array configures Model Context Protocol servers
+whose tools surface alongside cogito's built-ins. See
+[ADR-0018](../adr/0018-mcp-integration.md) for the full contract.
+
+**Transports:**
+
+stdio:
+
+```toml
+[[mcp_servers]]
+name = "filesystem"
+transport = "stdio"
+command = "uvx"
+args = ["mcp-server-filesystem", "/tmp"]
+env = { LOG_LEVEL = "info" }     # optional
+startup_timeout_sec = 10         # optional, default 10
+tool_timeout_sec = 60            # optional, default 60
+enabled_tools = ["read_file"]    # optional allowlist
+disabled_tools = []              # optional denylist
+```
+
+streamable-HTTP:
+
+```toml
+[[mcp_servers]]
+name = "company_api"
+transport = "streamable_http"
+url = "https://mcp.example.com/v1"
+bearer_token_env_var = "COMPANY_MCP_TOKEN"
+http_headers = { "X-Tenant" = "acme" }
+```
+
+**Verbose tool descriptions.** If your MCP servers produce verbose
+tool descriptions, use `enabled_tools` to narrow the catalog. Future
+strategy-level token budgets (Sprint 6 H10 + the Context Management
+spike) will enforce per-turn limits automatically; v0.1 leaves the
+choice to you.
+
+**stdio `args` path resolution.** `args` entries are passed verbatim
+to the child process; cogito performs no path expansion, no `~` /
+`$VAR` substitution, and no absolutization. Relative paths resolve
+against the child's working directory, which inherits from the cogito
+CLI process. If you need a specific working directory, wrap with
+`command = "bash"`, `args = ["-c", "cd /path && exec the-server"]`.
+
+**Failure behavior.** MCP server failures never block `cogito chat`
+startup. Each configured server is announced on stderr with its
+status; the agent continues with whatever tools came up. To make a
+missing server fatal, you currently need a wrapper script — a
+built-in `strict_mcp_startup` mode is on the v0.4 SaaS-ready roadmap.
+
 ---
 
 ## 7. File search path

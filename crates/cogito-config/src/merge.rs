@@ -25,6 +25,9 @@ fn merge_into(mut acc: RuntimeConfigPartial, next: RuntimeConfigPartial) -> Runt
     if let Some(providers_next) = next.providers {
         acc.providers = Some(providers_next);
     }
+    if let Some(mcp_next) = next.mcp_servers {
+        acc.mcp_servers = Some(mcp_next);
+    }
     acc
 }
 
@@ -77,6 +80,9 @@ impl RuntimeConfigPartial {
             default_provider = Some(providers[0].name().to_string());
         }
 
+        let (mcp_servers, mcp_parse_failures) =
+            crate::types::finalize_mcp_servers(self.mcp_servers);
+
         Ok(RuntimeConfig {
             runtime: RuntimeSection {
                 session_root: rt
@@ -90,6 +96,8 @@ impl RuntimeConfigPartial {
             },
             providers,
             strategies: std::collections::HashMap::new(),
+            mcp_servers,
+            mcp_parse_failures,
         })
     }
 }

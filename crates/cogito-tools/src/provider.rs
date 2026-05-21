@@ -50,6 +50,10 @@ impl BuiltinToolProviderBuilder {
     /// Register one builtin tool.
     #[must_use]
     pub fn with_tool(mut self, tool: Arc<dyn BuiltinTool>) -> Self {
+        debug_assert!(
+            !tool.descriptor().name.starts_with("mcp__"),
+            "builtin tool names must not start with `mcp__` (ADR-0018 §4)"
+        );
         self.tools.push(tool);
         self
     }

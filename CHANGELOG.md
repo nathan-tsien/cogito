@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Sprint 4 (MCP sync tools)
+
+- `cogito-mcp` crate: rmcp 1.5 client wrapper + `ToolProvider`
+  adapter. Stdio and streamable-HTTP transports; bearer-token auth
+  via env var. OAuth deferred to a follow-up ADR.
+- `McpToolProvider`: aggregates tools across configured MCP servers
+  using `mcp__<server>__<tool>` qualified naming (sanitize disallowed
+  chars, 64-char SHA-1 truncation, dedupe with warn).
+- `McpStartupFailure`: unified channel for per-server failures
+  (ConfigParse / BearerEnvMissing / DuplicateName / StartupTimeout /
+  TransportError / HandshakeFailed). `#[non_exhaustive]`.
+- `cogito-config`: `[[mcp_servers]]` section with lenient per-entry
+  TOML deserialization; bad entries become `McpStartupFailure::
+  ConfigParse` without poisoning the rest of the TOML parse.
+- `cogito-cli chat`: startup banner prints per-server status on
+  stderr (e.g., `[mcp] OK <name> ready (N tools)` and `[mcp] FAIL
+  <name> skipped: <reason>` — using `✓` and `✗` glyphs in the actual
+  banner output).
+- H05 Tool Surface: emits `mcp.tool_count`, `mcp.tool_desc_total_bytes`,
+  `builtin.tool_count` tracing fields per turn.
+- ADR-0018: MCP integration architectural contract — license posture,
+  transport scope, **MCP failures non-fatal to Runtime** principle
+  (compiler-enforced via `McpProviderBuildResult` return type),
+  namespacing, result mapping, schema trust posture, layer placement.
+
 ### Added — Sprint 4.5 (config-file loading)
 
 - `cogito-config` crate: value types, `ConfigLoader` trait,

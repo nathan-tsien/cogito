@@ -24,7 +24,7 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] Workspace topology fixed per ADR-0004: dropped `cogito-conversation`, added `cogito-store-jsonl`, stripped Hands/Boundary/Session deps from `cogito-core`
 - [x] Protocol types landed: `ExecutionClass`, `StreamEvent`, `JobCompletionEvent`, `JobManager::on_complete`, `TurnOutcome`, `TurnFailureReason` (12+ serde-roundtrip tests passing)
 - [x] Runtime module scaffolded (stubs): `Runtime`, `RuntimeBuilder`, `SessionHandle`, per-session loop task (`runtime::session_loop::run_session` + `SessionShared`), `store_writer`
-- [x] CI runs `just ci` (fmt + clippy + layer-check + test) + cargo-deny job
+- [x] CI runs `make ci` (fmt + clippy + layer-check + test) + cargo-deny job
 - [x] Toolchain aligned to MSRV 1.85 (edition 2024 requirement)
 
 #### Sprint 1 · H02 Step Recorder + JSONL store (1.5 day)

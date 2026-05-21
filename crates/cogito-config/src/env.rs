@@ -46,6 +46,7 @@ impl ConfigLoader for EnvConfigLoader {
                 strategies_dir,
             }),
             providers: None,
+            mcp_servers: None,
         };
         Ok(partial)
     }
