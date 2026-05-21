@@ -20,7 +20,7 @@ pub mod naming;
 pub mod result_mapping;
 
 // Internal modules — not part of the public surface.
-// mod client;
+mod client;
 mod handler;
 mod transport;
 

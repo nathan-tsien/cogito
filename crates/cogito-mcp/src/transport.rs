@@ -29,7 +29,6 @@ use crate::error::McpStartupFailure;
 /// `StreamableHttp` is parameterised by rmcp's internal `reqwest::Client`
 /// (0.13.x), not the workspace `reqwest` (0.12.x). The `from_config`
 /// constructor handles that for us.
-#[allow(dead_code)] // Consumed by `client.rs` in Task 8.
 pub(crate) enum BuiltTransport {
     ChildProcess(TokioChildProcess),
     StreamableHttp(StreamableHttpClientTransport<reqwest::Client>),
@@ -37,7 +36,6 @@ pub(crate) enum BuiltTransport {
 
 /// Build a transport from a [`McpTransportConfig`]. The `server_name`
 /// is used only to annotate failures.
-#[allow(dead_code)] // Consumed by `client.rs` in Task 8.
 pub(crate) fn build_transport(
     server_name: &str,
     cfg: &McpTransportConfig,

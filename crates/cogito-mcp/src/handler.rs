@@ -23,19 +23,12 @@ use tracing::{debug, info, warn};
 
 /// Identifies the server this handler belongs to, so trace fields
 /// can group messages by origin.
-//
-// `dead_code` allow: the `client` module (Task 7) is the sole
-// constructor; until it lands, the type is only exercised by the
-// `ClientHandler` trait impl below. Once Task 7 lands the allow can
-// be removed.
-#[allow(dead_code)]
 #[derive(Clone)]
 pub(crate) struct MinimalClientHandler {
     server_name: String,
     client_info: ClientInfo,
 }
 
-#[allow(dead_code)]
 impl MinimalClientHandler {
     pub(crate) fn new(server_name: String, client_info: ClientInfo) -> Self {
         Self {
