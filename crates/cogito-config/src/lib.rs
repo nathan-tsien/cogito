@@ -16,3 +16,7 @@
 pub mod types;
 
 pub use types::{RuntimeConfig, RuntimeConfigPartial, RuntimeSection, RuntimeSectionPartial};
+
+pub mod loader;
+
+pub use loader::{ConfigError, ConfigLoader};
