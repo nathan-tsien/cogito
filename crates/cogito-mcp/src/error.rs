@@ -168,7 +168,10 @@ mod tests {
         // fails this test loudly.
         let cases: Vec<(McpStartupFailure, &str)> = vec![
             (
-                McpStartupFailure::ConfigParse { index: 2, error: "boom".into() },
+                McpStartupFailure::ConfigParse {
+                    index: 2,
+                    error: "boom".into(),
+                },
                 "mcp_servers[2] failed to parse: boom",
             ),
             (
@@ -179,7 +182,10 @@ mod tests {
                 "server `s`: env var `T` for bearer token is unset",
             ),
             (
-                McpStartupFailure::DuplicateName { name: "d".into(), index: 3 },
+                McpStartupFailure::DuplicateName {
+                    name: "d".into(),
+                    index: 3,
+                },
                 "server name `d` is duplicated (entry at index 3 skipped)",
             ),
             (
