@@ -12,23 +12,23 @@ workspace = true
 
 [features]
 default = []
-file = ["dep:toml", "dep:serde_yaml"]
+file = ["dep:serde_yaml"]
 
 [dependencies]
 cogito-protocol = { workspace = true }
 cogito-model    = { workspace = true }
+cogito-mcp      = { workspace = true }
 
 serde       = { workspace = true, features = ["derive"] }
 serde_json  = { workspace = true }
 thiserror   = { workspace = true }
 async-trait = { workspace = true }
 tracing     = { workspace = true }
+toml        = { workspace = true }
 
-toml       = { workspace = true, optional = true }
 serde_yaml = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio    = { workspace = true, features = ["macros", "rt", "sync"] }
 tempfile = { workspace = true }
 temp-env = { workspace = true, features = ["async_closure"] }
-toml     = { workspace = true }

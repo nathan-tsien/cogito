@@ -63,6 +63,7 @@ fn cli_inputs_to_partial(inputs: &ChatConfigInputs) -> RuntimeConfigPartial {
             strategies_dir: None,
         }),
         providers: None,
+        mcp_servers: None,
     }
 }
 
