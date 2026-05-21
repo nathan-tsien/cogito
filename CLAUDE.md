@@ -11,6 +11,7 @@ This repo already has detailed agent-facing documentation. Before making changes
 - **`ROADMAP.md`** — the current sprint. **Only work on the current sprint** unless explicitly directed otherwise.
 - **`docs/components/H0X-*.md`** — per-component design notes. Read the doc for any component you're touching.
 - **`docs/adr/`** — architecture decision records.
+- **`docs/configuration/overview.md`** — holistic map of the configuration story (sections, sources, merge, secret handling, crate layout). Start here when anything related to config / `cogito.toml` / `RuntimeConfig` / provider selection comes up.
 
 If `AGENTS.md` and this file conflict, `AGENTS.md` wins.
 
@@ -93,6 +94,7 @@ Each crate maps to exactly one layer in the Brain / Hands / Session design (ADR-
 - `RUSTFLAGS=-Dwarnings` via `.cargo/config.toml` — warnings break the build
 - **All code comments (doc comments `///`, module docs `//!`, inline `//`) are written in English.** Chinese is reserved for design docs (`docs/superpowers/specs/`), ADRs, commit messages, and human-facing conversation. Rationale: code is read by future maintainers and AI agents who default to English; mixing languages in source hurts grep and review.
 - **No decorative numerals or markers in comments / prose.** Don't use `①②③…`, `★`, `►`, ✓, ✗, ⚠ etc. as step markers, bullets, or emphasis — neither in source comments nor in user-facing docs (`README.md`, `ARCHITECTURE.md`, `docs/components/`, `docs/adr/`). Use plain `1.` / `2.` for numbered steps and `-` for bullets. Rationale: these glyphs break `grep`, render inconsistently across editors / terminals, and add no information that an ASCII number doesn't. Box-drawing characters (`┌─┐│▼►`) inside fenced ASCII-art diagrams are exempt — they carry layout, not decoration.
+- **Tagged-config factories belong in the crate that owns the implementations.** When a configuration value selects one of N concrete trait objects (e.g., `ProviderConfig` → `Arc<dyn ModelGateway>`), put the `match`-on-tag dispatch in the crate that owns the trait impls (e.g., `cogito_model::build_gateway`), **not** in Surface crates (`cogito-cli`, `cogito-tui`, consumer's Server code). Surface code calls one function and receives the trait object. Rationale: adding a new variant (e.g., Sprint 5 `OpenAiResponses`) should require editing only the owning crate; surfaces stay untouched, the `serde(tag = "kind")` enum surfaces config errors at deserialization time, and the dispatch table doesn't fork across surfaces. Applies to: `ModelGateway` factory (`cogito-model`), and any future config-driven trait-object factories (`ToolProvider`, plugin, subagent).
 
 ## Testing requirements
 
