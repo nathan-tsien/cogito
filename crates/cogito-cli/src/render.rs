@@ -7,6 +7,12 @@
 //!
 //! See `docs/superpowers/specs/2026-05-21-dev-experience-cli-display-design.md`.
 
+// SCAFFOLDING: this entire module is built incrementally across Tasks 3-7
+// of the dev-experience plan. Removed in Task 7 when `chat.rs` wires up
+// `Renderer::for_stdout()`. By that point every constant and method below
+// has at least one real call site outside of `#[cfg(test)]`.
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::io::{IsTerminal, Result as IoResult, Write};
 use std::time::Instant;
@@ -14,22 +20,14 @@ use std::time::Instant;
 use cogito_protocol::stream::StreamEvent;
 
 // Color/style codes used by `paint`; some are referenced only in later tasks.
-#[allow(dead_code)]
 const CYAN: &str = "36";
-#[allow(dead_code)]
 const GREEN: &str = "32";
-#[allow(dead_code)]
 const RED: &str = "31";
-#[allow(dead_code)]
 const DIM: &str = "2";
-#[allow(dead_code)]
 const DIM_YELLOW: &str = "2;33";
 
 /// REPL renderer driven by `StreamEvent`s. Generic over the output
 /// sink so tests can drive it with a `Vec<u8>` buffer.
-// `dead_code` suppressed here because `chat.rs` does not wire this up until
-// the next task; all public surface is exercised by the test module.
-#[allow(dead_code)]
 pub struct Renderer<W: Write> {
     out: W,
     color: bool,
@@ -37,7 +35,6 @@ pub struct Renderer<W: Write> {
     tool_timers: HashMap<String, (Instant, String)>,
 }
 
-#[allow(dead_code)]
 impl<W: Write> Renderer<W> {
     /// Construct a renderer over an explicit writer. `color` controls
     /// whether ANSI escape sequences are emitted.
@@ -93,7 +90,6 @@ impl<W: Write> Renderer<W> {
     }
 }
 
-#[allow(dead_code)]
 impl Renderer<std::io::Stdout> {
     /// Convenience: construct a renderer over `std::io::stdout()` with
     /// color enabled iff stdout is a terminal.
