@@ -28,3 +28,6 @@ pub use env::EnvConfigLoader;
 pub mod merge;
 
 pub use merge::merge_layers;
+
+#[cfg(feature = "file")]
+pub mod interpolate;
