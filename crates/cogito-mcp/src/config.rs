@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 /// within the array — duplicates land as
 /// [`crate::error::McpStartupFailure::DuplicateName`] (ADR-0018 §3).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub struct McpServerConfig {
     /// Server identifier; appears in `mcp__<name>__<tool>` qualified
     /// names and in the startup banner.
@@ -56,7 +55,7 @@ pub struct McpServerConfig {
 /// MCP ever standardizes one) can land additively without breaking
 /// downstream `match` arms.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "transport", rename_all = "snake_case")]
+#[serde(tag = "transport", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum McpTransportConfig {
     /// stdio child process. See MCP spec
@@ -108,7 +107,11 @@ mod tests {
         .unwrap();
         assert_eq!(cfg.name, "filesystem");
         match cfg.transport {
-            McpTransportConfig::Stdio { command, args, env: _ } => {
+            McpTransportConfig::Stdio {
+                command,
+                args,
+                env: _,
+            } => {
                 assert_eq!(command, "uvx");
                 assert_eq!(args, vec!["mcp-server-filesystem", "/tmp"]);
             }
@@ -128,7 +131,11 @@ mod tests {
         )
         .unwrap();
         match cfg.transport {
-            McpTransportConfig::StreamableHttp { url, bearer_token_env_var, .. } => {
+            McpTransportConfig::StreamableHttp {
+                url,
+                bearer_token_env_var,
+                ..
+            } => {
                 assert_eq!(url, "https://mcp.example.com/v1");
                 assert_eq!(bearer_token_env_var.as_deref(), Some("COMPANY_MCP_TOKEN"));
             }
