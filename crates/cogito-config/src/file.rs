@@ -37,12 +37,12 @@ impl FileConfigLoader {
                 resolved_path: Some(p.as_ref().to_path_buf()),
             });
         }
-        if let Ok(v) = std::env::var("COGITO_CONFIG")
-            && !v.is_empty()
-        {
-            return Ok(Self {
-                resolved_path: Some(PathBuf::from(v)),
-            });
+        if let Ok(v) = std::env::var("COGITO_CONFIG") {
+            if !v.is_empty() {
+                return Ok(Self {
+                    resolved_path: Some(PathBuf::from(v)),
+                });
+            }
         }
         let local = PathBuf::from("./cogito.toml");
         if local.is_file() {
