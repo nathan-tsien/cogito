@@ -107,9 +107,9 @@ impl ModelGateway for OpenAiCompatGateway {
         // request JSON so developers can verify the tool schema and conversation
         // history reach the model exactly as intended.
         if tracing::enabled!(tracing::Level::DEBUG) {
-            match serde_json::to_string_pretty(&body) {
+            match serde_json::to_string(&body) {
                 Ok(json) => {
-                    tracing::debug!(target: "cogito::prompt", url = %url, "\n── request body ──\n{json}\n──────────────────");
+                    tracing::debug!(target: "cogito::prompt", url = %url, "request: {json}");
                 }
                 Err(e) => {
                     tracing::debug!(target: "cogito::prompt", "request body serialization failed: {e}");
