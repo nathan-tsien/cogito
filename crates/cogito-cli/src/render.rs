@@ -249,4 +249,56 @@ mod tests {
         let out = render_events(&[StreamEvent::TurnPaused, StreamEvent::TurnResumed]);
         assert_eq!(out, "\n[paused]\n[resumed]");
     }
+
+    fn render_events_color(events: &[StreamEvent]) -> String {
+        let mut buf: Vec<u8> = Vec::new();
+        {
+            let mut r = Renderer::new(&mut buf, true);
+            for e in events {
+                r.on_stream_event(e).unwrap();
+            }
+        }
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn color_codes_balanced() {
+        let out = render_events_color(&[
+            StreamEvent::TurnStarted,
+            StreamEvent::TextDelta { chunk: "hi".into() },
+            StreamEvent::ToolDispatchStarted {
+                call_id: "c1".into(),
+                tool_name: "t".into(),
+            },
+            StreamEvent::ToolDispatchEnded {
+                call_id: "c1".into(),
+                ok: false,
+            },
+            StreamEvent::TurnFailed { reason: "x".into() },
+        ]);
+        // Every ESC-bracketed open code must be paired with a reset (ESC[0m).
+        let resets = out.matches("\x1b[0m").count();
+        let opens = out.matches("\x1b[").count() - resets;
+        assert_eq!(
+            opens, resets,
+            "unbalanced ANSI sequences (opens={opens}, resets={resets}): {out:?}"
+        );
+        assert!(resets > 0, "expected at least one ANSI sequence: {out:?}");
+    }
+
+    #[test]
+    fn no_color_path_emits_no_escape_sequences() {
+        let out = render_events(&[
+            StreamEvent::TextDelta { chunk: "hi".into() },
+            StreamEvent::ToolDispatchStarted {
+                call_id: "c1".into(),
+                tool_name: "t".into(),
+            },
+            StreamEvent::TurnFailed { reason: "x".into() },
+        ]);
+        assert!(
+            !out.contains('\x1b'),
+            "no_color path leaked ESC byte: {out:?}"
+        );
+    }
 }
