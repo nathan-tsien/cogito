@@ -66,7 +66,7 @@ pub enum ResumePoint {
     /// Async job completed but Brain crashed before consuming
     /// JobCompletedRecorded. FSM enters ToolDispatching with the result
     /// injected. call_id is resolved by walk-back (Sprint 3 invariant:
-    /// ≤1 async dispatch per turn; Sprint 4 may revise).
+    /// ≤1 async dispatch per turn; Sprint 5 may revise).
     ResumeAfterJobCompletion {
         turn_id: TurnId,
         job_id: JobId,
@@ -162,7 +162,7 @@ the actor after each tool returns, all of which appear after `latest_mcc`):
   `latest_mcc`.
 - **`ResumeAfterJobCompletion.call_id`**: walk back before `TurnPaused` and
   find the most recent unmatched `ToolUseRecorded` call_id. Sprint 3
-  invariant: ≤1 async dispatch per turn. Sprint 4 may add `call_id` directly
+  invariant: ≤1 async dispatch per turn. Sprint 5 may add `call_id` directly
   to the `TurnPaused` payload when multi-async-dispatch is introduced.
 
 ### Error cases
@@ -172,7 +172,7 @@ the actor after each tool returns, all of which appear after `latest_mcc`):
   `ResumeError::Malformed` (v0.1 invariant: single turn-in-flight per session).
 - `schema_version > SCHEMA_VERSION` → `ResumeError::UnsupportedSchema`.
 - `schema_version < SCHEMA_VERSION` → currently SCHEMA_VERSION is 1; no
-  action needed; revisit post-Sprint 7.
+  action needed; revisit post-Sprint 8.
 
 ## Algorithm sketch
 
@@ -279,7 +279,7 @@ block Sprint 3 but remain visible):
   reads are deferred to a v0.6 hardening ADR.
 - **`TurnPaused` missing `call_id` payload** (risk 6): Sprint 3's walk-back
   algorithm for resolving `call_id` in `ResumeAfterJobCompletion` depends on
-  the Sprint 3 invariant of ≤1 async dispatch per turn. When Sprint 4
+  the Sprint 3 invariant of ≤1 async dispatch per turn. When Sprint 5
   introduces multi-async-dispatch, `TurnPaused` will need an explicit
   `call_id` field; the walk-back approach will no longer be correct.
 

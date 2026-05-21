@@ -4,7 +4,7 @@
 > (`pre_prompt`, `pre_dispatch`, `post_model`, `post_turn`, `on_error`)
 > as no-op slots that always return `HookDecision::Allow`. Real
 > `HookHandler` trait, policy hooks, and `MetricsRecorder` integration
-> land Sprint 6.
+> land Sprint 7.
 
 ## Role in Harness
 
@@ -42,7 +42,7 @@ to be enforced in code review and by the `HookHandler` trait signature
 ## Interface
 
 ```rust
-// TODO (Sprint 6): define HookHandler trait in cogito-protocol.
+// TODO (Sprint 7): define HookHandler trait in cogito-protocol.
 //
 // The trait must NOT take a generic I/O capability. Inputs are owned
 // values (prompt slice, tool call snapshot); outputs are pure

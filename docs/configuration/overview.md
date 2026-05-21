@@ -185,7 +185,7 @@ Process-wide startup options.
 | `session_root`    | `PathBuf`       | `"./sessions"`     | JSONL store directory |
 | `default_provider`| `Option<String>`| auto if 1 provider | Provider name to use when `--provider` is absent |
 | `default_model`   | `Option<String>`| —                  | Wire-level model id; required if CLI doesn't pass `--model` |
-| `strategies_dir`  | `PathBuf`       | `"./strategies"`   | YAML directory; consumed by Sprint 5 loader |
+| `strategies_dir`  | `PathBuf`       | `"./strategies"`   | YAML directory; consumed by Sprint 6 loader |
 
 ### `[[providers]]`
 
@@ -227,7 +227,7 @@ One YAML file per strategy, under `runtime.strategies_dir`. Filename
 contains no `name:` field.
 
 Schema authoritative source: [`docs/components/H10-strategy-selector.md`](../components/H10-strategy-selector.md).
-Loader lands in **Sprint 5** — Sprint 4.5 reserves the field but
+Loader lands in **Sprint 6** — Sprint 4.5 reserves the field but
 does not walk the directory.
 
 Strategies are **provider-agnostic**: the YAML does not name a
@@ -268,9 +268,9 @@ across projects, put it in `$XDG_CONFIG_HOME` and omit
 | `${ENV_VAR}` + `${ENV_VAR:-default}`      | Sprint 4.5    | ADR-0017 §6    |
 | `cogito-model::ProviderConfig::Anthropic` | Sprint 4.5    | Sprint 4.5 spec |
 | `cogito-model::ProviderConfig::OpenAiCompat` | Sprint 4.5 | Sprint 4.5 spec |
-| `cogito-model::ProviderConfig::OpenAiResponses` | Sprint 5 | ROADMAP §"Sprint 5" |
-| `strategies/*.yaml` loader (H10 registry) | Sprint 5      | H10 doc        |
-| `--strategy <name>` CLI                   | Sprint 5      | H10 doc        |
+| `cogito-model::ProviderConfig::OpenAiResponses` | Sprint 6 | ROADMAP §"Sprint 6" |
+| `strategies/*.yaml` loader (H10 registry) | Sprint 6      | H10 doc        |
+| `--strategy <name>` CLI                   | Sprint 6      | H10 doc        |
 | `[plugins]` schema                        | post-v0.3     | future ADR     |
 | `[[subagents]]` schema                    | v0.3          | ADR-0011 (reserved) |
 | Database `ConfigLoader` (consumer-impl)   | v0.4+         | consumer code  |
@@ -452,7 +452,7 @@ sees only protocol traits.
 
 - [ADR-0017 — Cogito Runtime configuration model](../adr/0017-cogito-runtime-configuration-model.md) (authoritative on every architectural decision)
 - [Sprint 4.5 spec](../superpowers/specs/2026-05-21-sprint-4-5-config-file-design.md) (first implementation)
-- [H10 Strategy Selector](../components/H10-strategy-selector.md) (strategy schema, Sprint 5 loader)
+- [H10 Strategy Selector](../components/H10-strategy-selector.md) (strategy schema, Sprint 6 loader)
 - [`CLAUDE.md` §Coding standards](../../CLAUDE.md) (tagged-config factories rule)
 - [`AGENTS.md` §Inviolable design principles](../../AGENTS.md) (Brain ↔ Hands ↔ Session boundaries)
 - [ADR-0004](../adr/0004-brain-hands-session-boundaries.md) (crate layering)

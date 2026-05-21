@@ -6,7 +6,7 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 complete; Sprint 4 (Async Jobs) next.
+> **v0.1 · Foundation** — Sprints 0–3 + 4.5 complete; Sprint 4 (MCP sync tools) next.
 
 ## Version plan
 
@@ -50,8 +50,8 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] H06 Stream Demultiplexer (Anthropic + OpenAI-Compat events → cogito events; gateway-preaggregation X mode)
 - [x] H07 Tool Call Resolver (JSON Schema validation, structured errors)
 - [x] H08 Tool Dispatcher (sync path; panic catch around invoke)
-- [x] H09 Hook Pipeline (no-op insertion points; real hooks in Sprint 6)
-- [x] H10 Strategy Selector (`HarnessStrategy::default_with_model` factory; YAML registry in Sprint 5)
+- [x] H09 Hook Pipeline (no-op insertion points; real hooks in Sprint 7)
+- [x] H10 Strategy Selector (`HarnessStrategy::default_with_model` factory; YAML registry in Sprint 6)
 - [x] `MockModelGateway` for integration tests
 - [x] `runtime::session_loop::run_session` Topology I + `Runtime::open_session` + `SessionHandle::{send_user, cancel_turn, shutdown}`
 - [x] CLI `cogito chat` works end-to-end against Anthropic OR vLLM/SGLang with `read_file`
@@ -65,7 +65,7 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] EventId threading complete: Sprint 2 `recorded_event_id: "unknown"` stub cleaned up; all `record_*` methods return `Result<EventId, StoreError>`
 - [x] Chaos test (`crates/cogito-core/tests/resume_chaos.rs`) drives crashes through the wired resume paths (see narrowing notes below)
 - [x] All 4 oracles (prefix immutable / terminal equivalent / tool mapping equivalent / final text equivalent) pass for the boundaries the test exercises
-- [x] `MockJobManager` exists in `cogito-test-fixtures` (Sprint 4 wires it into the actor; v0.1 returns `ShutdownOutcome::JobManagerUnavailable` for paused-job ResumePoint variants)
+- [x] `MockJobManager` exists in `cogito-test-fixtures` (Sprint 5 wires it into the actor; v0.1 returns `ShutdownOutcome::JobManagerUnavailable` for paused-job ResumePoint variants)
 - [x] Chaos test total CI time < 10s (verified: 0.13s debug, <0.05s release)
 
 **Sprint 3 closure — v0.1 narrowings:**
@@ -73,19 +73,27 @@ Driver, panic isolation, and chaos-tested resume.
 The following items were intentionally scoped down for v0.1 with explicit TODO markers in code:
 
 - **`RestartCurrentTurn` downgrades to `FreshTurn` + warn** in `apply_resume_point` (`session_loop.rs`). Full `RestartCurrentTurn` requires recovering `user_input` from the persisted log; deferred to post-Sprint-3.
-- **`ResumePausedJob` and `ResumeAfterJobCompletion` return `ShutdownOutcome::JobManagerUnavailable`** in `apply_resume_point`. v0.1 has no `JobManager` injection into Runtime — Sprint 4 will wire that in and activate these paths.
+- **`ResumePausedJob` and `ResumeAfterJobCompletion` return `ShutdownOutcome::JobManagerUnavailable`** in `apply_resume_point`. v0.1 has no `JobManager` injection into Runtime — Sprint 5 will wire that in and activate these paths.
 - **Chaos test covers 2 scenarios (`no_tool_short_turn`, `single_tool_happy_path`) × wired resume boundaries.** The `paused_async_job` scenario is unrunnable in v0.1; `tool_returns_error` was deferred. The test uses `PanicAt` (X-path-like) for crash injection because `NotifyAt + clean shutdown` writes a terminal event (defeating the chaos invariant); both proven to work via the existing infrastructure.
 - **Latent: cancel-token disconnect** between `SessionState` and `SessionShared`. `SessionHandle::cancel_turn()` fires the original token; the session loop's `spawn_turn_driver` mints a new token per turn. Tracked via `TODO(cancel-token-disconnect)` in `session_loop.rs`. Pre-existing; not exercised by chaos tests.
 
 These narrowings preserve the Sprint 3 invariants on the wired paths and document the remaining work clearly for the next sprint.
 
-#### Sprint 4 · Async Jobs (2 days)
-- [ ] `cogito-jobs` implements `JobManager` (tokio task + JSONL job log persistence)
-- [ ] `cogito-jobs` provides cross-process job state persistence (mirrors event log structure; required by Sprint 3 ResumePausedJob path — see Sprint 3 spec §5.6)
-- [ ] H08 Tool Dispatcher async path (handles `InvokeOutcome::Async(JobId)`)
-- [ ] One real long task tool (`run_tests` or similar)
-- [ ] Loop pauses on async, resumes on completion
-- [ ] Mid-pause user input handling: queued, processed after current turn
+#### Sprint 4 · MCP sync tools (1.5–2 days)
+
+**Goal**: pull `cogito-mcp` forward from v0.2 to give Brain a real catalog
+of sync tools beyond the single built-in `read_file`, unblocking parallel
+testing of Brain's tool-loop, prompt composition, and strategy selection.
+Architecture-inspired by Codex's `rmcp-client` (Apache-2.0) — pattern-only
+reimplementation, no source-code lift; `rmcp` itself is a normal upstream
+dep (Apache-2.0, `modelcontextprotocol/rust-sdk`).
+
+- [ ] `cogito-mcp` crate: thin wrapper over `rmcp` 1.5 with `transport-child-process` (stdio) + `transport-streamable-http-client-reqwest` (streamable-HTTP); bearer-token via env-var. OAuth flow deferred to a follow-up ADR.
+- [ ] `McpToolProvider`: `ToolProvider` impl aggregating tools across configured servers via `mcp__<server>__<tool>` qualified naming (sanitize disallowed chars to `_`, 64-char cap with SHA-1 truncation suffix, dedupe with warn).
+- [ ] `cogito-config`: `mcp_servers` section with `Stdio` / `StreamableHttp` transports + per-server `enabled_tools` / `disabled_tools` + startup/tool timeouts.
+- [ ] `cogito-cli chat`: wire `McpToolProvider` into the `Runtime` builder via the existing `--config` path; tool surface visible to Brain.
+- [ ] Integration test: exercise `tools/list` + `tools/call` end-to-end through `cogito chat` against a real streamable-HTTP MCP server with bearer auth.
+- [ ] **ADR-0018**: MCP integration — transport scope, namespacing convention, deferred OAuth, license note (`rmcp` upstream + Codex pattern attribution).
 
 #### Sprint 4.5 · 配置文件 + base_url override (0.5–1 day)
 
@@ -98,22 +106,30 @@ These narrowings preserve the Sprint 3 invariants on the wired paths and documen
 - [x] 文档:ADR-0017 落地、H10 doc 注脚、ROADMAP 更新
 
 Closes GitLab Issue #1 sub-needs 1 + 2. Sub-need 3 (OpenAI Responses
-adapter) remains scheduled for Sprint 5.
+adapter) remains scheduled for Sprint 6.
 
-#### Sprint 5 · Multi-model Strategy (1 day)
+#### Sprint 5 · Async Jobs (2 days)
+- [ ] `cogito-jobs` implements `JobManager` (tokio task + JSONL job log persistence)
+- [ ] `cogito-jobs` provides cross-process job state persistence (mirrors event log structure; required by Sprint 3 ResumePausedJob path — see Sprint 3 spec §5.6)
+- [ ] H08 Tool Dispatcher async path (handles `InvokeOutcome::Async(JobId)`)
+- [ ] One real long task tool (`run_tests` or similar)
+- [ ] Loop pauses on async, resumes on completion
+- [ ] Mid-pause user input handling: queued, processed after current turn
+
+#### Sprint 6 · Multi-model Strategy (1 day)
 - [ ] OpenAI adapter in `cogito-model` (Responses API; ContentBlock serialization to OpenAI's flat top-level items)
 - [ ] H10 Strategy Selector with YAML config loading from `strategies/*.yaml`
 - [ ] CLI `--model` flag selects strategy
 - [ ] Per-strategy `model_params`, `allowed_tools`, `system_prompt`
 
-#### Sprint 6 · Hook Pipeline + TUI (2 days)
+#### Sprint 7 · Hook Pipeline + TUI (2 days)
 - [ ] H09 Hook Pipeline with purity rule enforcement (see `docs/components/H09-hook-pipeline.md`)
 - [ ] Two example hooks (sensitive content, bash audit)
 - [ ] `MetricsRecorder` trait in protocol + default no-op
 - [ ] Basic TUI with ratatui (replicates `cogito chat`)
 - [ ] Per-hook P99 latency budget verified
 
-#### Sprint 7 · v0.1 hardening (1 day)
+#### Sprint 8 · v0.1 hardening (1 day)
 - [ ] All component design docs cross-referenced and current
 - [ ] CHANGELOG.md initial entry
 - [ ] Tag `v0.1.0`
@@ -149,7 +165,6 @@ multimedia tool to validate the full path.
 - [ ] `cogito-storage-local` crate: `file://` + `http(s)://` (with local cache) + `blob://` (mapped to local dir)
 - [ ] `ExecCtx.storage: Arc<dyn StorageSystem>` field
 - [ ] `cogito-tools-multimedia` crate: `transcribe_audio` tool (uses Whisper API or local model — TBD)
-- [ ] `cogito-mcp` crate: MCP client as `ToolProvider`
 - [ ] TUI surface (if not landed in v0.1)
 - [ ] Default secret redactor implementation
 - [ ] Tag `v0.2.0`
