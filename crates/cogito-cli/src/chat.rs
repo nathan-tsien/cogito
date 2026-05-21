@@ -73,6 +73,11 @@ async fn load_layered_config(args: &ChatArgs) -> Result<RuntimeConfig> {
         .map_err(|e| anyhow!("finalizing config: {e}"))
 }
 
+/// Convert CLI args into a `RuntimeConfigPartial` for use as the
+/// highest-precedence merge layer. Only the args that correspond to
+/// `[runtime]` table fields are forwarded; `--config` selects the file,
+/// `--base-url` is applied post-merge in `select_provider`, and
+/// `--system` / `--session-id` are session-scoped, not config-scoped.
 fn cli_args_to_partial(args: &ChatArgs) -> RuntimeConfigPartial {
     let any = args.model.is_some() || args.provider.is_some() || args.session_root.is_some();
     RuntimeConfigPartial {
@@ -93,7 +98,12 @@ fn cli_args_to_partial(args: &ChatArgs) -> RuntimeConfigPartial {
 ///
 /// Selection follows Sprint 2 inference: `claude-*` models route to
 /// Anthropic, otherwise OpenAI-compat.
-fn synthesize_legacy_provider(model: &str) -> Result<ProviderConfig> {
+///
+/// `cli_base_url` is the value of the CLI `--base-url` flag; it is
+/// used as a fallback for `OPENAI_BASE_URL` so Sprint 2 invocations
+/// like `cogito chat --model gpt-4o --base-url http://...` continue
+/// to work without `OPENAI_BASE_URL` set.
+fn synthesize_legacy_provider(model: &str, cli_base_url: Option<&str>) -> Result<ProviderConfig> {
     if model.starts_with("claude-") || std::env::var("ANTHROPIC_API_KEY").is_ok() {
         let key = std::env::var("ANTHROPIC_API_KEY")
             .context("ANTHROPIC_API_KEY not set (no cogito.toml found either)")?;
@@ -105,10 +115,14 @@ fn synthesize_legacy_provider(model: &str) -> Result<ProviderConfig> {
             timeout_secs: None,
         })
     } else {
-        let base_url = std::env::var("OPENAI_BASE_URL").context(
-            "OPENAI_BASE_URL not set and no cogito.toml found; \
-             set OPENAI_BASE_URL or declare providers in a config file",
-        )?;
+        let base_url = std::env::var("OPENAI_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| cli_base_url.map(String::from))
+            .context(
+                "OPENAI_BASE_URL not set and no cogito.toml found; \
+                 set OPENAI_BASE_URL, pass --base-url, or declare providers in a config file",
+            )?;
         let api_key = std::env::var("OPENAI_API_KEY").ok();
         Ok(ProviderConfig::OpenAiCompat {
             name: "default".into(),
@@ -141,7 +155,7 @@ fn select_provider(cfg: &RuntimeConfig, args: &ChatArgs) -> Result<ProviderConfi
         .unwrap_or("");
 
     let mut chosen = if cfg.providers.is_empty() {
-        synthesize_legacy_provider(model_for_synth)?
+        synthesize_legacy_provider(model_for_synth, args.base_url.as_deref())?
     } else {
         let name =
             cfg.runtime.default_provider.as_deref().ok_or_else(|| {
