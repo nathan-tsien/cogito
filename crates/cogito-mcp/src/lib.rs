@@ -16,7 +16,7 @@ pub mod config;
 pub mod error;
 // pub mod factory;
 pub mod naming;
-// pub mod provider;
+pub mod provider;
 pub mod result_mapping;
 
 // Internal modules — not part of the public surface.
@@ -27,4 +27,4 @@ mod transport;
 pub use config::{McpServerConfig, McpTransportConfig};
 pub use error::{McpError, McpStartupFailure};
 // pub use factory::{McpProviderBuildResult, build_mcp_provider};
-// pub use provider::McpToolProvider;
+pub use provider::McpToolProvider;

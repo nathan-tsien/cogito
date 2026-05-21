@@ -1,11 +1,12 @@
 //! Per-server `rmcp` client handle. Owns a running rmcp service and
 //! the per-server policy (timeouts, tool filter applied at handshake).
 //!
-//! Items are `pub(crate)` and currently exercised only by tests; the
-//! provider (Task 9) and factory (Task 10) become the production
-//! consumers. Until those land, suppress dead-code lints at the
-//! module level.
-#![allow(dead_code)]
+//! The runtime path (provider) consumes [`McpServerHandle`],
+//! [`call_tool`], and [`CallError`]. The handshake path
+//! ([`handshake_and_list`], [`HandshakeOutcome`], [`filter_tools`],
+//! [`client_info`], and the `DEFAULT_STARTUP_TIMEOUT` constant) is
+//! consumed by the factory (Task 10); item-level `#[allow(dead_code)]`
+//! suppresses warnings until then.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,6 +22,7 @@ use crate::transport::{BuiltTransport, build_transport};
 
 /// Default startup timeout when [`McpServerConfig::startup_timeout_sec`]
 /// is omitted.
+#[allow(dead_code)] // consumed by factory (Task 10)
 pub(crate) const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Default tool-call timeout when [`McpServerConfig::tool_timeout_sec`]
@@ -35,6 +37,7 @@ pub(crate) struct McpServerHandle {
 }
 
 /// What the handshake produced.
+#[allow(dead_code)] // consumed by factory (Task 10)
 pub(crate) struct HandshakeOutcome {
     pub(crate) handle: McpServerHandle,
     /// Server-internal tools (post enabled/disabled filter), one per
@@ -42,6 +45,7 @@ pub(crate) struct HandshakeOutcome {
     pub(crate) tools: Vec<rmcp::model::Tool>,
 }
 
+#[allow(dead_code)] // consumed by factory (Task 10) via handshake_and_list
 fn client_info() -> ClientInfo {
     ClientInfo::new(
         ClientCapabilities::default(),
@@ -54,6 +58,7 @@ fn client_info() -> ClientInfo {
 ///
 /// On any failure, returns an [`McpStartupFailure`] (NOT a normal
 /// `Result::Err`) — the caller (factory) collects these and proceeds.
+#[allow(dead_code)] // consumed by factory (Task 10)
 pub(crate) async fn handshake_and_list(
     cfg: &McpServerConfig,
 ) -> Result<HandshakeOutcome, McpStartupFailure> {
@@ -130,6 +135,7 @@ pub(crate) async fn handshake_and_list(
 
 /// Apply enabled/disabled filters. `enabled` first (when set), then
 /// `disabled` removes from the result.
+#[allow(dead_code)] // consumed by factory (Task 10) via handshake_and_list
 fn filter_tools(
     tools: Vec<rmcp::model::Tool>,
     enabled: Option<&[String]>,

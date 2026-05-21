@@ -10,6 +10,11 @@
 //!   notifications to `tracing`.
 //!
 //! See ADR-0018 for the elicitation rationale (out of scope for v0.1).
+//!
+//! Items are reached only from `client::handshake_and_list`, which is
+//! consumed by the factory (Task 10). Until then, dead-code lints are
+//! suppressed at the module level.
+#![allow(dead_code)]
 
 use rmcp::ClientHandler;
 use rmcp::RoleClient;
