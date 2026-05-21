@@ -9,6 +9,7 @@ members = [
     "crates/cogito-sandbox",
     "crates/cogito-jobs",
     "crates/cogito-mcp",
+    "crates/cogito-config",
     "crates/cogito-cli",
     "crates/cogito-tui",
     "crates/testing/cogito-test-fixtures",
@@ -29,6 +30,7 @@ publish = false
 
 [workspace.dependencies]
 # Internal crates
+cogito-config = { path = "crates/cogito-config" }
 cogito-core = { path = "crates/cogito-core" }
 cogito-protocol = { path = "crates/cogito-protocol" }
 cogito-store-jsonl = { path = "crates/cogito-store-jsonl" }
@@ -96,6 +98,7 @@ proptest = "1.5"
 criterion = { version = "0.5", features = ["html_reports"] }
 rstest = "0.22"
 tempfile = "3.10"
+temp-env = "0.3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

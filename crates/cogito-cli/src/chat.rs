@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use clap::Args;
 use cogito_core::runtime::{OpenMode, Runtime};
-use cogito_model::{AnthropicConfig, AnthropicGateway, OpenAiCompatConfig, OpenAiCompatGateway};
+use cogito_model::build_gateway;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::SessionId;
 use cogito_protocol::strategy::HarnessStrategy;
@@ -19,58 +19,36 @@ use tokio::io::{self, AsyncBufReadExt, BufReader};
 /// Arguments for the `chat` subcommand.
 #[derive(Debug, Args)]
 pub struct ChatArgs {
-    /// Model identifier (e.g. `claude-opus-4-7`, `gpt-4o`).
+    /// Path to a `cogito.toml`. Highest precedence in the search path.
     #[arg(long)]
-    pub model: String,
-    /// LLM provider. Inferred from model name if omitted: `claude-*` → anthropic, else openai-compat.
-    #[arg(long, value_parser = ["anthropic", "openai-compat"])]
+    pub config: Option<PathBuf>,
+
+    /// Model identifier (e.g. `claude-opus-4-7`, `gpt-4o`). Overrides
+    /// `runtime.default_model` from the config.
+    #[arg(long)]
+    pub model: Option<String>,
+
+    /// Provider name (matches `[[providers]] name = "..."` in the config).
+    /// Overrides `runtime.default_provider`.
+    #[arg(long)]
     pub provider: Option<String>,
-    /// Base URL for the OpenAI-compatible endpoint (or `OPENAI_BASE_URL` env var).
+
+    /// Base URL override applied to the selected provider AFTER merge.
     #[arg(long)]
     pub base_url: Option<String>,
-    /// Directory where per-session JSONL files are stored.
-    #[arg(long, default_value = "./sessions")]
-    pub session_root: PathBuf,
+
+    /// Directory where per-session JSONL files are stored. Overrides
+    /// `runtime.session_root`.
+    #[arg(long)]
+    pub session_root: Option<PathBuf>,
+
     /// Resume an existing session by ULID. A new session is created if omitted.
     #[arg(long)]
     pub session_id: Option<String>,
+
     /// Override the default system prompt.
     #[arg(long)]
     pub system: Option<String>,
-}
-
-/// Construct a [`ModelGateway`] from the CLI args. Pulls API keys / base URLs
-/// from env vars (`ANTHROPIC_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_API_KEY`).
-fn build_gateway(args: &ChatArgs) -> Result<Arc<dyn ModelGateway>> {
-    let provider = args.provider.clone().unwrap_or_else(|| {
-        if args.model.starts_with("claude-") {
-            "anthropic".into()
-        } else {
-            "openai-compat".into()
-        }
-    });
-    match provider.as_str() {
-        "anthropic" => {
-            let key = std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY not set")?;
-            Ok(Arc::new(
-                AnthropicGateway::new(AnthropicConfig::with_api_key(key))
-                    .map_err(|e| anyhow!("anthropic gateway: {e}"))?,
-            ))
-        }
-        "openai-compat" => {
-            let base_url = args
-                .base_url
-                .clone()
-                .or_else(|| std::env::var("OPENAI_BASE_URL").ok())
-                .context("--base-url or OPENAI_BASE_URL required for openai-compat")?;
-            let mut cfg = OpenAiCompatConfig::with_base_url(base_url);
-            cfg.api_key = std::env::var("OPENAI_API_KEY").ok();
-            Ok(Arc::new(
-                OpenAiCompatGateway::new(cfg).map_err(|e| anyhow!("openai-compat gateway: {e}"))?,
-            ))
-        }
-        _ => anyhow::bail!("invalid provider: {provider}"),
-    }
 }
 
 /// Entry point for the `chat` subcommand.
@@ -78,17 +56,32 @@ fn build_gateway(args: &ChatArgs) -> Result<Arc<dyn ModelGateway>> {
 // output to stdout without tracing timestamps or log levels.
 #[allow(clippy::print_stdout)]
 pub async fn run(args: ChatArgs) -> Result<()> {
-    let gateway = build_gateway(&args)?;
+    let inputs = cogito_cli::chat_config::ChatConfigInputs {
+        config_path: args.config.clone(),
+        model: args.model.clone(),
+        provider: args.provider.clone(),
+        base_url: args.base_url.clone(),
+        session_root: args.session_root.clone(),
+    };
+    let cfg = cogito_cli::chat_config::load_layered_config(&inputs).await?;
+    let provider_cfg = cogito_cli::chat_config::select_provider(&cfg, &inputs)?;
+    let gateway: Arc<dyn ModelGateway> =
+        build_gateway(provider_cfg).map_err(|e| anyhow!("building gateway: {e}"))?;
 
-    // JsonlStore::new is synchronous and infallible.
-    let store = Arc::new(JsonlStore::new(args.session_root.clone()));
+    let model_id = args
+        .model
+        .clone()
+        .or_else(|| cfg.runtime.default_model.clone())
+        .ok_or_else(|| anyhow!("--model required (or set runtime.default_model in cogito.toml)"))?;
+
+    let store = Arc::new(JsonlStore::new(cfg.runtime.session_root.clone()));
     let tools = Arc::new(
         BuiltinToolProvider::builder()
             .with_tool(Arc::new(ReadFile))
             .build(),
     );
 
-    let mut strategy = HarnessStrategy::default_with_model(&args.model);
+    let mut strategy = HarnessStrategy::default_with_model(&model_id);
     if let Some(sys) = args.system {
         strategy.system_prompt = sys;
     }

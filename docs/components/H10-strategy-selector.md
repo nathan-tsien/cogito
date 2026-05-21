@@ -78,6 +78,12 @@ the duration of the turn** and consumed (read-only) by H11, H04, H05, H09.
 - `task` (e.g., "code-review" vs "chat" vs "tool-heavy") is reserved in the API but ignored in 0.x (defaults to a single per-model strategy)
 - Strategy registry is in-memory; no hot reload (process restart to pick up YAML edits)
 
+> **2026-05-21 update (ADR-0017 §9):** Strategy file basename
+> (without `.yaml`) is the canonical strategy name; the YAML body
+> drops `name:` and `applicable_models:` fields. The two existing
+> draft files (`strategies/claude-opus.yaml`, `strategies/gpt-4.yaml`)
+> will be rewritten when Sprint 5 lands the loader.
+
 ## Example strategy YAML (Sprint 5+)
 
 ```yaml

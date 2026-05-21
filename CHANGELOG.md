@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Sprint 4.5 (config-file loading)
+
+- `cogito-config` crate: value types, `ConfigLoader` trait,
+  `EnvConfigLoader`, layered partial merge, `${VAR}` interpolation,
+  `FileConfigLoader` (feature `file`).
+- `cogito-model::ProviderConfig` (tagged-union over provider kinds)
+  + `build_gateway` factory.
+- `cogito chat`: `--config <path>`; legacy ENV bridge preserves
+  Sprint 2 invocations.
+
+### Changed
+
+- `cogito chat --model` now optional (falls back to
+  `runtime.default_model` in `cogito.toml`).
+
 ### Added — Post-Sprint 3 (ADR-0016 TurnTrigger)
 
 - `cogito-protocol::turn_trigger::TurnTrigger` — single-variant

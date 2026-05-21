@@ -16,6 +16,7 @@ recording an architectural decision and its context.
 - 0009–0014 — Reserved for v0.2 / v0.3 / v0.4 ADRs (StorageSystem, multimedia, Subagent, Sandbox lifecycle, Credential isolation, TenantContext) — renumbered from the previous 0007–0012 slot allocation by PR #6
 - 0015 — Reserved for v0.6 Storage HTTP wire protocol — renumbered from 0013
 - [0016](./0016-turn-trigger-abstraction.md) — Turn-trigger abstraction (`TurnTrigger` enum, `SessionHandle::submit`, additive event-log evolution path)
+- [0017](./0017-cogito-runtime-configuration-model.md) — Cogito Runtime configuration model (`cogito-config` crate, `RuntimeConfig` + `ConfigLoader` trait, `cogito.toml` + `strategies/*.yaml` hybrid layout, layered partial merge, named provider instances)
 
 ## Template
 

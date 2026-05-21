@@ -87,6 +87,19 @@ These narrowings preserve the Sprint 3 invariants on the wired paths and documen
 - [ ] Loop pauses on async, resumes on completion
 - [ ] Mid-pause user input handling: queued, processed after current turn
 
+#### Sprint 4.5 · 配置文件 + base_url override (0.5–1 day)
+
+- [x] `cogito-config` crate(value types + ConfigLoader trait + EnvConfigLoader + merge)
+- [x] `cogito-config` feature `file` → FileConfigLoader (`cogito.toml`)
+- [x] `cogito-model::ProviderConfig` + `build_gateway` 工厂
+- [x] `cogito-cli` 重构 `chat.rs`:`--config` 参数 + 三层 merge
+- [x] Legacy ENV bridge:`cogito.toml` 缺席时合成 `default` provider
+- [x] 单元/集成测试覆盖 merge、插值、搜索路径、CLI 流程
+- [x] 文档:ADR-0017 落地、H10 doc 注脚、ROADMAP 更新
+
+Closes GitLab Issue #1 sub-needs 1 + 2. Sub-need 3 (OpenAI Responses
+adapter) remains scheduled for Sprint 5.
+
 #### Sprint 5 · Multi-model Strategy (1 day)
 - [ ] OpenAI adapter in `cogito-model` (Responses API; ContentBlock serialization to OpenAI's flat top-level items)
 - [ ] H10 Strategy Selector with YAML config loading from `strategies/*.yaml`
