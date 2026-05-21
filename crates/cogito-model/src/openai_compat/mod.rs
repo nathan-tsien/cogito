@@ -166,7 +166,15 @@ impl ModelGateway for OpenAiCompatGateway {
                     Step::Cancelled => {
                         Err(ModelError::Cancelled)?;
                     }
-                    Step::Line(None) => break,
+                    Step::Line(None) => {
+                        // Stream closed: emit terminal events
+                        // (TextBlockCompleted / ToolUseCompleted /
+                        // MessageCompleted) from the decoder before exit.
+                        for m in decoder.finalize() {
+                            yield m;
+                        }
+                        break;
+                    }
                     Step::Line(Some(res)) => {
                         let line = res?;
                         // Skip empty lines and the final [DONE] sentinel.

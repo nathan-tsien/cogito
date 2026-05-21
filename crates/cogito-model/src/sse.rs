@@ -71,6 +71,8 @@ pub fn replay_openai_compat_into_model_events(
                 out.push(m);
             }
         }
+        // Mirror the live gateway: emit terminal events at stream close.
+        out.extend(decoder.finalize());
         Ok::<_, ModelError>(())
     })?;
     Ok(out)
