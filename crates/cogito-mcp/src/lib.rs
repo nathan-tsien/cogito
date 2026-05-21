@@ -17,7 +17,7 @@ pub mod error;
 // pub mod factory;
 pub mod naming;
 // pub mod provider;
-// pub mod result_mapping;
+pub mod result_mapping;
 
 // Internal modules — not part of the public surface.
 // mod client;
