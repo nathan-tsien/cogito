@@ -20,3 +20,7 @@ pub use types::{RuntimeConfig, RuntimeConfigPartial, RuntimeSection, RuntimeSect
 pub mod loader;
 
 pub use loader::{ConfigError, ConfigLoader};
+
+pub mod env;
+
+pub use env::EnvConfigLoader;

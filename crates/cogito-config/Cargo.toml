@@ -28,7 +28,7 @@ toml       = { workspace = true, optional = true }
 serde_yaml = { workspace = true, optional = true }
 
 [dev-dependencies]
-tokio    = { workspace = true, features = ["macros", "rt"] }
+tokio    = { workspace = true, features = ["macros", "rt", "sync"] }
 tempfile = { workspace = true }
 temp-env = { workspace = true, features = ["async_closure"] }
 toml     = { workspace = true }
