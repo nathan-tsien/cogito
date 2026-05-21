@@ -59,12 +59,15 @@ Surface Builder / H07 Tool Resolver / H08 Tool Dispatcher 不感知 MCP
    不复制源码。
 7. **Streamable-HTTP transport + bearer 认证**:从 `bearer_token_env_var`
    字段读 env,作为 `Authorization: Bearer <value>` 头注入 reqwest
-   client。环境变量缺失 fail-loud(返回 startup 错误,不静默)。
+   client。环境变量缺失 → 该 server 进 `mcp_startup_failures` channel
+   (见 §3.5),Runtime 继续构造,其他 server / builtin 工具不受影响。
 8. **Stdio transport**:子进程 spawn,`kill_on_drop(true)`,`env_clear()`
    + 明确白名单,stderr 接到 tracing(参考 Codex 的做法)。
-9. **Eager handshake**:Runtime 启动时连接全部已配置 server,完成
-   `initialize` + `tools/list`。失败 server warn+skip(不阻塞 Runtime
-   构造),其工具不出现在目录。`startup_timeout_sec` 默认 10s。
+9. **Eager handshake + non-fatal failures**:Runtime 启动时并发连接全部
+   已配置 server,完成 `initialize` + `tools/list`。任何失败(配置解析、
+   env 缺失、握手超时、duplicate name 等)进 `mcp_startup_failures`
+   channel,**Runtime 仍正常构造**;失败 server 的工具不出现在目录。
+   `startup_timeout_sec` 默认 10s。统一原则见 §3.5。
 10. **Per-server `enabled_tools` / `disabled_tools` 列表**:精确名字
     匹配(server 内 raw 名,非 qualified 名),allowlist 先于 denylist
     应用。
@@ -75,11 +78,15 @@ Surface Builder / H07 Tool Resolver / H08 Tool Dispatcher 不感知 MCP
     list+call 全链路)+ E2E(对用户提供的 streamable-HTTP 服务,带
     bearer,跑 `cogito chat` 端到端,手动 + scripted)。
 13. **ADR-0018**:transport scope、namespacing、许可证立场、deferred
-    OAuth、failed-server fault containment 决策。
-14. **README + `docs/configuration/overview.md`** 加 MCP 配置段;H05
-    doc 注脚 MCP-provided tools 透明性;H07 doc 注脚 MCP 工具的
-    schema 直接 forward 不再二次校验。
-15. **CHANGELOG** Sprint 4 entry。
+    OAuth、**MCP failures non-fatal to Runtime** 原则(§3.5 的架构承诺,
+    锁进 ADR)、`mcp_startup_failures` 通道。
+14. **README + `docs/configuration/overview.md`** 加 MCP 配置段 + 失败
+    模型说明;H05 doc 注脚 MCP-provided tools 透明性;H07 doc 注脚
+    MCP 工具的 schema 直接 forward 不再二次校验。
+15. **`cogito chat` startup banner**:对每个 configured server 在 stderr
+    打印 `[mcp] ✓ <name> ready (<N> tools)` 或 `[mcp] ✗ <name> skipped:
+    <reason>`,使 silent skip 可见。
+16. **CHANGELOG** Sprint 4 entry。
 
 ### 1.2 Out-of-scope(明确不做,避免 scope creep)
 
@@ -190,18 +197,23 @@ OAuth 单独切出,见 Out-of-scope。
 
 ### Q6 · 单 server 故障 → 影响整体?
 
-**Per-server fault containment**:某个 server 起不来 → warn-log +
-skip,Runtime **继续构造**,其工具简单地不在目录里。
+**MCP 任何失败都不阻塞 Runtime**。完整原则与实现见 **§3.5 Failure
+model**。摘要:
 
-理由:dev 体验。常见场景:某个 MCP server 二进制临时缺、网络抖动、
-bearer token 过期。整体阻塞太硬。
+- 配置解析错(unknown transport、duplicate name、unknown field)→
+  仅该 entry 进 `mcp_startup_failures`,其他 entry + providers +
+  runtime section 全部正常工作。
+- 环境性错(binary 不存在、handshake 超时、HTTP 5xx)→ 同上。
+- env 变量缺失(`bearer_token_env_var` 指空) → 同上(原 spec 草稿
+  曾标 hard-fail,2026-05-21 review 后改为 soft-skip,统一到本原则)。
+- N 个 server 全失败 → Runtime 仍构造,prominent banner 提醒。
 
-副作用:Brain 看到的 tool catalog 可能与配置文件预期不一致,但这是
-透明的 —— H10 strategy 的 `allowed_tools` 在工具不存在时本就会 warn,
-现有路径吸收即可。
+理由:MCP 是 additive 能力,不该让 typo 把 agent 整个搞 down;builtin
+工具 + provider(model gateway)才是 agent 不可降级的底座,那俩仍
+hard-fail(见 §3.5 适用边界)。
 
-Hard-fail mode(配置错误 → 启动失败)留给 v0.4 SaaS-ready 时引入
-`strict_mcp_startup: bool` 字段,v0.1 不暴露。
+Hard-fail mode 给 v0.4 SaaS-ready 时引入 `strict_mcp_startup: bool`
+字段(§6.2 Q2 决定预留),v0.1 不暴露。
 
 ### Q7 · MCP `CallToolResult` → cogito `ToolResult` 映射
 
@@ -260,15 +272,18 @@ tool_timeout_sec = 30
 - **`name` 字段必填且全局唯一**:进入 qualified name 时必须确定。
 - **bearer secret 不进文件**:只接受 `bearer_token_env_var`(env 变
   量名),禁止 `bearer_token`(明文)字段。这与 ADR-0017 §6 的 secret
-  posture 一致 —— secrets 来自 env,文件只占位。
+  posture 一致 —— secrets 来自 env,文件只占位。env 变量缺失时:该
+  server 进 `mcp_startup_failures`,Runtime 不受影响(§3.5)。
 - `${VAR}` 字符串插值在 `cogito-config::FileConfigLoader` 已实现,
   `mcp_servers` 段自动享有(`url`、`http_headers` value 都可包含
   `${VAR}`)。
 - `enabled_tools`/`disabled_tools` 用 **server-内 raw 名**,不是
   qualified 名 —— 用户写配置时不需要预知 sanitize 后的样子。
   应用顺序:先 enabled_tools 过滤(若设置),再 disabled_tools 删除。
-- 未知字段 fail-loud(`deny_unknown_fields` 在 `McpServerConfig` 上):
-  对齐 `cogito-config` 内层 struct 既有策略。
+- 未知字段在 `McpServerConfig` 上仍 `deny_unknown_fields` —— 但失败被
+  **per-entry 捕获**进 `McpStartupFailure::ConfigParse`(§3.5.2),
+  **不**污染整 TOML 解析。这与 `cogito-config` 内层 struct 的 strict
+  deserialize 策略一致,只是被宽松的外层数组包装。
 - 反向:`#[serde(default)]` 在 top-level `RuntimeConfigPartial`,`mcp_servers`
   整段缺失合法,默认空 vec。
 
@@ -420,6 +435,25 @@ impl ToolProvider for McpToolProvider {
     fn list(&self) -> Vec<ToolDescriptor> { self.descriptors.clone() }
     async fn invoke(&self, name: &str, args: Value, ctx: ExecCtx) -> InvokeOutcome { ... }
 }
+
+// factory.rs
+pub struct McpProviderBuildResult {
+    /// `None` when no server came up (empty config, or all failed).
+    pub provider: Option<Arc<dyn ToolProvider>>,
+    /// Per-server startup failures (env missing, handshake fail, etc.).
+    /// Combined with `cogito-config`'s parse-time failures at the Surface.
+    pub failures: Vec<McpStartupFailure>,
+}
+
+pub async fn build_mcp_provider(
+    cfgs: &[McpServerConfig],
+) -> McpProviderBuildResult { /* ... */ }
+
+// Lenient config-partial shape — see §4.1 for full type and §3.5.2 for
+// the failure variant lifted into McpStartupFailure::ConfigParse.
+//
+// cogito-config holds `Vec<toml::Value>` until finalize, so a typo in
+// one [[mcp_servers]] entry never poisons the entire TOML parse.
 ```
 
 ### 3.3 数据流(单次 tool call)
@@ -448,23 +482,149 @@ InvokeOutcome::Sync(ToolResult::Output(...) | ToolResult::Error { ... })
 ### 3.4 启动序列(eager handshake)
 
 ```text
-Runtime::build()
-  │ 读取 RuntimeConfig.mcp_servers
-  │ build_mcp_provider(cfgs):
+load_runtime_config()                          # cogito-config
+  │ FileConfigLoader → toml::from_str → RuntimeConfigPartial
+  │   mcp_servers: Vec<toml::Value>           # 整数组宽松,逐项解析延后
+  │ EnvConfigLoader / CLI patch (no MCP fields)
+  │ merge → finalize:
+  │   for each raw toml::Value in mcp_servers:
+  │     try McpServerConfig::deserialize(value):
+  │       Ok(cfg)  → cfg push to RuntimeConfig.mcp_servers
+  │       Err(e)   → McpStartupFailure::ConfigParse { index, error: e }
+  │                  push to RuntimeConfig.mcp_parse_failures
+  │ 返回 RuntimeConfig{ providers, mcp_servers, mcp_parse_failures, ... }
+
+Runtime::build()                               # cogito-core
+  │ tools = BuiltinToolProvider::new(...)
+  │
+  │ result = build_mcp_provider(&cfg.mcp_servers).await:
   │   1. for each cfg, spawn task:
-  │        - build transport (stdio child process | http client)
+  │        - 验 bearer_token_env_var 指向的 env 存在(不存在 → failure)
+  │        - 验 server name 全局唯一(冲突 → failure)
+  │        - build transport (stdio child | http client)
   │        - rmcp::service::serve_client(handler, transport)
   │        - timeout(startup_timeout_sec) wrapper
   │        - service.list_tools()
   │        - filter by enabled_tools / disabled_tools
+  │        - 任何一步 Err → McpStartupFailure 加入 result.failures
   │   2. JoinSet::join_all() — 并发等所有任务
-  │   3. 成功的 handle 收进 routes; 失败的 warn-log skip
-  │   4. qualify_tools 在所有成功 server 间统一(防 cross-server dup)
-  │   5. 返回 McpToolProvider(routes, descriptors) 或 None(全失败/空)
+  │   3. 成功的 handle 收进 routes
+  │   4. qualify_tools 跨成功 server 统一(防 cross-server dup)
+  │   5. McpProviderBuildResult { provider: Option<...>, failures }
+  │
+  │ all_failures = cfg.mcp_parse_failures ++ result.failures
+  │ print_startup_banner(&cfg.mcp_servers, &all_failures)   # stderr
   │
   │ Composite { children: [BuiltinToolProvider, McpToolProvider?] }
-  │ 注入 RuntimeBuilder.tools()
+  │ 注入 RuntimeBuilder.tools()  # MCP 失败完全不影响这一步成功
 ```
+
+### 3.5 Failure model
+
+**核心原则**:**MCP 任何失败都不阻塞 Runtime 构造**。该 server 的工具
+不进 tool catalog,Brain 看到的 surface 自然缩水,但 agent 整体可用。
+
+#### 3.5.1 适用边界(important)
+
+此原则**仅适用于 MCP**。其他配置错误的处理方式不变:
+
+| 配置错 | 原则 | 例子 |
+|---|---|---|
+| `[runtime]` 字段错(unknown_field、类型错) | **hard-fail at config load** | `session_root = 123` |
+| `[[providers]]` 任一条目错 | **hard-fail at config load** | provider 用未实现的 `kind` |
+| Provider env 变量缺失(`api_key_env_var`)| **hard-fail** | model gateway 没法连,agent 不能工作 |
+| TOML 文件本身格式错 | **hard-fail** | 语法错、文件不存在 |
+| `[[mcp_servers]]` 任一条目错 | **soft-skip,Runtime 继续** | unknown transport / unknown field / bad value |
+| `mcp_servers[i].bearer_token_env_var` env 缺失 | **soft-skip** | env 没 export |
+| MCP server handshake 失败 | **soft-skip** | binary 不存在、超时、HTTP 5xx |
+| MCP server `name` 冲突 | **soft-skip(后到者)** | 同名 server 出现两次 |
+| MCP server 全部失败 | **soft-skip,Runtime 仍构造,banner 提醒** | 配置 3 个全挂 |
+
+底层判定:**没了 provider,agent 是死的;少了 MCP,agent 是瘸的**。瘸
+着能走;死了走不了。
+
+#### 3.5.2 `McpStartupFailure` 统一通道
+
+```rust
+// cogito-mcp/src/error.rs
+#[derive(Debug, Clone, thiserror::Error)]
+#[non_exhaustive]
+pub enum McpStartupFailure {
+    /// 配置反序列化失败(unknown transport / unknown field / 类型错)
+    #[error("mcp_servers[{index}] failed to parse: {error}")]
+    ConfigParse { index: usize, error: String },
+
+    /// `bearer_token_env_var` 指向的环境变量不存在或为空
+    #[error("server `{name}`: env var `{env_var}` for bearer token is unset")]
+    BearerEnvMissing { name: String, env_var: String },
+
+    /// server `name` 在数组中重复
+    #[error("server name `{name}` is duplicated (entry at index {index} skipped)")]
+    DuplicateName { name: String, index: usize },
+
+    /// `initialize` / `tools/list` 超时
+    #[error("server `{name}`: startup timed out after {timeout_sec}s")]
+    StartupTimeout { name: String, timeout_sec: f64 },
+
+    /// transport-level 失败(子进程 spawn 失败、HTTP 连不通、握手 RPC 错)
+    #[error("server `{name}`: transport error: {error}")]
+    TransportError { name: String, error: String },
+
+    /// 其他 rmcp 报上来的错(协议 mismatch、server 不支持 tools 等)
+    #[error("server `{name}`: handshake failed: {error}")]
+    HandshakeFailed { name: String, error: String },
+}
+```
+
+- 通道在**两处**产出:`cogito-config::finalize`(`ConfigParse` 变体)+
+  `cogito-mcp::build_mcp_provider`(其余 5 个变体)。
+- 通道在**一处**消费:`cogito-cli`(或未来 `cogito-tui`、消费方
+  Server)在 Runtime build 完成后读取,打 banner / 上报观测平台。
+- **`McpStartupFailure::Display` 必须不泄露 secret**:`BearerEnvMissing`
+  只暴露 env 变量名,不暴露任何 token 值(因为 token 根本就不存在,
+  这里相对安全;但 design 上确保 `TransportError` / `HandshakeFailed`
+  的 message 也不会拼上 token。单测覆盖。)
+
+#### 3.5.3 Startup banner
+
+`cogito chat` 在 Runtime 构造完成后、accepting input 之前,对每个
+**已配置(出现在 cogito.toml 里的) entry** 打一行 stderr:
+
+```text
+[mcp] ✓ filesystem ready (4 tools)
+[mcp] ✓ company_api ready (12 tools)
+[mcp] ✗ broken_server skipped: env var `COMPANY_MCP_TOKEN` is unset
+[mcp] ✗ mcp_servers[3] skipped: unknown transport "websocket"
+```
+
+理由:不打 banner,silent skip 的体验差 —— 用户改了配置 typo,startup
+继续,但工具不见了,以为 Brain "笨";打了 banner,一眼看到原因。
+
+实现细节:
+- `print_startup_banner(configs: &[McpServerConfig], failures: &[McpStartupFailure])`
+  住在 `cogito-cli`(不在 `cogito-mcp`),因为打印路径是 Surface 关
+  注。其他 Surface(TUI、消费方 Server)按需自实现等价 UI。
+- 通过 `enabled_tools` / `disabled_tools` filter 后的有效工具数才显
+  示在 `(N tools)` 后缀里。
+- 全失败时 banner 末尾追加 prominent 提示:`[mcp] note: 0 of N
+  configured servers came up; running with builtin tools only`。
+
+#### 3.5.4 与 Strategy 的交互
+
+H10 strategy 的 `allowed_tools: ToolFilter` 可能引用某个 MCP 工具的
+qualified name(如 `mcp__filesystem__search`)。如果该 server 没起
+来,H10 不会因此抛错 —— 它只是过滤 Brain 看到的 surface,丢失的工具
+就是丢失。H05 / H07 在 model 试图调用不存在的工具时返
+`ToolErrorKind::InvalidArgs`(现有路径),Brain 自己决策。这条与
+Sprint 2 已有行为一致,Sprint 4 不引入新分支。
+
+#### 3.5.5 不在范围内
+
+- **Runtime 启动后**的 MCP server 失联(子进程崩、HTTP 连接断)→ 不
+  在本节范围;那是 invoke-time 错误,见 §Q11(返 `ToolResult::Error`)
+  + §6.1 风险表(自动重连推到 v0.x 之后)。
+- **Hard-fail mode**(strict_mcp_startup)→ v0.4 SaaS-ready 引入,
+  §6.2 Q2 决定预留字段不启用。
 
 ---
 
@@ -472,31 +632,81 @@ Runtime::build()
 
 ### 4.1 `cogito-config`
 
-`RuntimeConfigPartial` 加字段:
+`mcp_servers` 在 partial 层用**未解析的 `Vec<toml::Value>`**,在
+finalize 层逐项 try-deserialize —— 单条 entry 配置错绝不污染整 TOML
+解析,见 §3.5。
+
 ```rust
+// types.rs (partial — 宽松)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RuntimeConfigPartial {
     pub runtime: Option<RuntimeSectionPartial>,
     pub providers: Option<Vec<ProviderConfig>>,
-    /// Sprint 4 新增。
-    pub mcp_servers: Option<Vec<McpServerConfig>>,
+    /// Sprint 4 新增。原始 TOML value,逐项解析延后到 finalize。
+    pub mcp_servers: Option<Vec<toml::Value>>,
+}
+
+// types.rs (finalized — 已 split 成两个 vec)
+pub struct RuntimeConfig {
+    pub runtime: RuntimeSection,
+    pub providers: Vec<ProviderConfig>,
+    pub strategies: HashMap<String, HarnessStrategy>,
+    /// Sprint 4 新增 —— 成功解析的 entry。
+    pub mcp_servers: Vec<McpServerConfig>,
+    /// Sprint 4 新增 —— 解析失败的 entry,Surface 在 banner 中展示。
+    pub mcp_parse_failures: Vec<McpStartupFailure>,
 }
 ```
-`RuntimeConfig` 同步加 `pub mcp_servers: Vec<McpServerConfig>` 字段
-(finalize 时 `.unwrap_or_default()`)。
 
-Layered merge:`mcp_servers` 跟 `providers` 同策略,**整体替换**而非
-元素级 merge(per ADR-0017 §3 已锁定模式),`Some(_)` 覆盖。
+`McpStartupFailure` 定义在 `cogito-mcp::error`(§3.5.2),
+`cogito-config` 反向 dep 它(MCP-specific value type 流入 finalized
+config;不违反 ADR-0004,因为两者都在 Hand 邻接层)。
+
+Finalize 算法:
+```rust
+fn finalize_mcp_servers(raw: Vec<toml::Value>)
+    -> (Vec<McpServerConfig>, Vec<McpStartupFailure>)
+{
+    let mut ok = Vec::new();
+    let mut errs = Vec::new();
+    for (i, value) in raw.into_iter().enumerate() {
+        match value.try_into::<McpServerConfig>() {
+            Ok(cfg) => ok.push(cfg),
+            Err(e)  => errs.push(McpStartupFailure::ConfigParse {
+                index: i,
+                error: e.to_string(),
+            }),
+        }
+    }
+    (ok, errs)
+}
+```
+
+Layered merge:`mcp_servers` 在 partial 层仍是 `Vec<toml::Value>`
+**整体替换**(`Some(_)` 覆盖),逐项解析在 merge **之后** 由 finalize
+做一次。
 
 ### 4.2 `cogito-cli chat`
 
 `ChatConfigInputs` 不变 —— CLI flags 不引入 `--mcp-*`(配置项足够多
-之后再考虑)。Runtime 构造在 `chat.rs` 主路径里加一行:
+之后再考虑)。Runtime 构造在 `chat.rs` 主路径里展开:
 
 ```rust
-let mcp_provider = cogito_mcp::build_mcp_provider(&cfg.mcp_servers).await?;
-let tools: Arc<dyn ToolProvider> = match mcp_provider {
+// 1. build MCP provider (eager handshake, non-fatal)
+let mcp_result = cogito_mcp::build_mcp_provider(&cfg.mcp_servers).await;
+
+// 2. 合并 parse-time + handshake-time failures
+let all_failures: Vec<_> = cfg.mcp_parse_failures
+    .iter()
+    .chain(mcp_result.failures.iter())
+    .collect();
+
+// 3. banner 在 stderr 打印每个 server 的 ✓/✗
+print_startup_banner(&cfg.mcp_servers, &all_failures);
+
+// 4. composite 装配 (MCP None → 退化到 builtin-only)
+let tools: Arc<dyn ToolProvider> = match mcp_result.provider {
     Some(mcp) => Arc::new(CompositeToolProvider::new(
         vec![builtin, mcp],
         NamingPolicy::Strict,
@@ -504,6 +714,11 @@ let tools: Arc<dyn ToolProvider> = match mcp_provider {
     None => builtin,
 };
 ```
+
+注意:**`build_mcp_provider` 返回 `McpProviderBuildResult`(§3.2),
+不返回 `Result<_, McpError>`**。MCP 失败不上升为 `?`,Runtime 构造
+路径必须**不可能因 MCP 失败而短路**。这是 §3.5 原则落地的关键代码
+约束。
 
 ### 4.3 ToolProvider plumbing
 
@@ -600,17 +815,24 @@ CI 用 in-process mock(§5.2)代替,无 secret 泄露。
 | streamable-HTTP transport 在某些 server 上 SSE-fallback 失败 | 用户的 server 不通 | E2E 测试就是验它;失败立即 ADR-0018 补一段 fallback 策略 |
 | stdio 子进程在 macOS / Windows 路径解析差异 | dev 体验 | Codex 的 `program_resolver.rs` 解决此问题;Sprint 4 v0.1 暂用 `which` crate + 显式 `command` 字符串,Windows 不在 v0.1 验证矩阵 |
 | MCP server 返超长 tool schema 把 prompt 撑爆 | model context 爆炸 | H05 已有 `tool_order` + Strategy `allowed_tools` 控制;v0.1 文档化建议:多于 50 个工具的 server 用 `enabled_tools` allow-list |
-| `bearer_token_env_var` 配错环境变量名 → secret 静默缺失 | 调用失败但 message 含 endpoint URL | fail-loud:env 缺失时整 server startup 报错,不进 fault-skip(与 §Q6 总体 skip 策略冲突,但 secret 错配是配置 bug,值得 hard-fail) |
+| `bearer_token_env_var` 配错环境变量名 → secret 静默缺失 | 工具不可用 + 用户不知道为啥 | soft-skip(§3.5)+ startup banner 显式打出 `env var X is unset` —— 让 silent skip 可见,不留埋点。Banner 是与 §3.5 配套的必要补偿。 |
 | 多 server 并发 startup 时序竞争 | 偶发 startup 失败 | `JoinSet::join_all()` 各自独立,无共享状态,设计上不竞争;集成测试中跑两次确认 |
 | rmcp client 在 server panic / 关连接时悬挂 | turn 卡死 | tool_timeout + cancel 双重保护;tracing 标注 server disconnect 事件以便 debug |
 
-### 6.2 Open questions(spec 落地前需要 align)
+### 6.2 Open questions
 
-1. **`bearer_token_env_var` 缺失:hard-fail 还是 warn-skip?**(§6.1
-   表中倾向 hard-fail,与 §Q6 server-level skip 不一致。
-   **推荐 hard-fail**:secret 错配是配置 bug,值得醒目报错。)
+#### 已决(2026-05-21 review)
+
+1. ~~`bearer_token_env_var` 缺失:hard-fail 还是 warn-skip?~~
+   **DECIDED: soft-skip(2026-05-21)。** 统一进 §3.5 原则:任何
+   MCP 配置级错都不阻塞 Runtime,只是该 server 工具不进 catalog。补
+   偿是 §3.5.3 startup banner 让 silent skip 可见。该原则同时锁进
+   ADR-0018(architectural 决策,而非 spec 内部细节)。
+
+#### 仍 open
+
 2. **是否在 `cogito-config` 里加 `strict_mcp_startup: bool` 字段?**
-   v0.1 不暴露(§Q6 决定),但要不要预留字段为 v0.4 留位?
+   v0.1 不暴露,但要不要预留字段为 v0.4 留位?
    **推荐预留** —— 名字进 schema,值固定为 false,doc 注明 "Sprint
    4 ignored; v0.4 SaaS-ready 启用 hard-fail mode"。
 3. **H07 对 MCP server 给的 schema 是否信任?** §Q12 的答案是"信任,
@@ -635,18 +857,20 @@ CI 用 in-process mock(§5.2)代替,无 secret 泄露。
 
 | # | Task | 主要文件 | 验证 |
 |---|---|---|---|
-| T1 | `cogito-mcp` 骨架 + `McpServerConfig` value types + `McpError` | `cogito-mcp/Cargo.toml`, `src/{lib,config,error}.rs` | `cargo test -p cogito-mcp`(config roundtrip) |
+| T1 | `cogito-mcp` 骨架 + `McpServerConfig` value types + `McpError` + **`McpStartupFailure` 通道**(§3.5.2) | `cogito-mcp/Cargo.toml`, `src/{lib,config,error}.rs` | `cargo test -p cogito-mcp`(config roundtrip + `McpStartupFailure::Display` secret 不泄露单测) |
 | T2 | `naming::qualify` + 单测(表驱动,12+ case) | `src/naming.rs` + tests | 覆盖 §Q4 全部边界 |
-| T3 | `transport::{build_stdio, build_streamable_http}` + `client::McpServerHandle` 状态机 | `src/{transport,client}.rs` | 集成测试 `stdio_handshake_and_call` + `http_handshake_and_call_with_bearer` |
+| T3 | `transport::{build_stdio, build_streamable_http}` + `client::McpServerHandle` 状态机 + **每步错都收进 `McpStartupFailure`** | `src/{transport,client}.rs` | 集成测试 `stdio_handshake_and_call` + `http_handshake_and_call_with_bearer` + `bearer_env_missing_yields_failure` |
 | T4 | `result_mapping::to_cogito_result` + 单测(7 case) | `src/result_mapping.rs` | §Q7 映射表全覆盖 |
-| T5 | `McpToolProvider` impl + `build_mcp_provider` 工厂 + eager 并发握手 | `src/{provider,factory}.rs` | 集成测试 `failed_server_fault_contained` + `enabled_tools_filters` |
-| T6 | `cogito-config` 加 `mcp_servers` 字段 + finalize + tests | `cogito-config/src/{types,merge}.rs` + tests | toml roundtrip + merge 覆盖 |
-| T7 | `cogito-cli chat.rs` 接入 + E2E smoke + README 段 + ADR-0018 + CHANGELOG | `cogito-cli/src/chat.rs`, `docs/adr/0018-*.md`, `README.md`, `docs/configuration/overview.md`, `CHANGELOG.md` | 手动 E2E 对用户 server,`just ci` 绿 |
+| T5 | `McpToolProvider` impl + `build_mcp_provider` 工厂 + eager 并发握手 + **返回 `McpProviderBuildResult`(provider + failures)** | `src/{provider,factory}.rs` | 集成测试 `failed_server_fault_contained` + `all_servers_fail_runtime_still_builds` + `enabled_tools_filters` |
+| T6 | `cogito-config` 加 `mcp_servers: Vec<toml::Value>` 宽松 partial + finalize **per-entry try-deserialize**(§4.1)+ `mcp_parse_failures` 字段 + tests | `cogito-config/src/{types,merge}.rs` + tests | toml roundtrip + merge 覆盖 + **`bad_mcp_entry_does_not_poison_provider_parse`** 单测 |
+| T7 | `cogito-cli chat.rs` 接入 + **startup banner**(§3.5.3)+ E2E smoke + README 段 + ADR-0018 + CHANGELOG | `cogito-cli/src/chat.rs`, `docs/adr/0018-*.md`, `README.md`, `docs/configuration/overview.md`, `CHANGELOG.md` | 手动 E2E 对用户 server,banner 输出 snapshot 测试,`just ci` 绿 |
 
 T1–T2 可并行起步(纯本地);T3 依赖 T1;T4 独立;T5 依赖 T3+T4;
-T6 独立(纯 config);T7 依赖 T5+T6。
+T6 依赖 T1(`McpStartupFailure` 类型);T7 依赖 T5+T6。
 
-**估时**:1.5–2 个工作日(spec 锁定后)。
+**估时**:1.5–2 个工作日(spec 锁定后)。Failure-model 这条线增加约
+半天测试覆盖(per-entry parse、banner snapshot、全失败仍构造),不
+影响总体在 v0.1 时间盒内。
 
 ---
 
