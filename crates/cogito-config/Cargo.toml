@@ -1,0 +1,34 @@
+[package]
+name = "cogito-config"
+description = "Configuration loading for the cogito Agent Runtime: value types, ConfigLoader trait, ENV / file source loaders, layered partial merge."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+file = ["dep:toml", "dep:serde_yaml"]
+
+[dependencies]
+cogito-protocol = { workspace = true }
+cogito-model    = { workspace = true }
+
+serde       = { workspace = true, features = ["derive"] }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+async-trait = { workspace = true }
+tracing     = { workspace = true }
+
+toml       = { workspace = true, optional = true }
+serde_yaml = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio    = { workspace = true, features = ["macros", "rt"] }
+tempfile = { workspace = true }
+temp-env = { workspace = true, features = ["async_closure"] }
+toml     = { workspace = true }
