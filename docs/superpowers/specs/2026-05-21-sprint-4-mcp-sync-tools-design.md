@@ -80,13 +80,18 @@ Surface Builder / H07 Tool Resolver / H08 Tool Dispatcher 不感知 MCP
 13. **ADR-0018**:transport scope、namespacing、许可证立场、deferred
     OAuth、**MCP failures non-fatal to Runtime** 原则(§3.5 的架构承诺,
     锁进 ADR)、`mcp_startup_failures` 通道。
-14. **README + `docs/configuration/overview.md`** 加 MCP 配置段 + 失败
-    模型说明;H05 doc 注脚 MCP-provided tools 透明性;H07 doc 注脚
-    MCP 工具的 schema 直接 forward 不再二次校验。
+14. **README + `docs/configuration/overview.md`** 加 MCP 配置段 + §4.5.2
+    的三条用户文档(冗长 description / `args` 路径语义 / 失败行为);
+    H05 doc 注脚 MCP-provided tools 透明性;H07 doc 注脚 MCP 工具的
+    schema 直接 forward 不再二次校验。
 15. **`cogito chat` startup banner**:对每个 configured server 在 stderr
     打印 `[mcp] ✓ <name> ready (<N> tools)` 或 `[mcp] ✗ <name> skipped:
     <reason>`,使 silent skip 可见。
-16. **CHANGELOG** Sprint 4 entry。
+16. **H05 tracing observability**:每次 tool surface 组装时 emit
+    `mcp.tool_desc_total_bytes` + `mcp.tool_count` + `builtin.tool_count`
+    字段(§4.5.1),让用户看得见 MCP 工具描述占了多少字节;不做截断
+    policy(§6.2 Q4 决定)。
+17. **CHANGELOG** Sprint 4 entry。
 
 ### 1.2 Out-of-scope(明确不做,避免 scope creep)
 
@@ -331,16 +336,28 @@ JSON Schema (Draft 2020-12),与 cogito `ToolDescriptor::schema` 同
 spec,直接复制到 descriptor。H07 Tool Resolver 用既有 jsonschema crate
 做校验,无 MCP-specific 路径。
 
+#### Q12.1 · cogito 边界要不要加最低 sanity 检查(如必须 `type:
+"object"`)?**(2026-05-21 review decided: NO)**
+
+理由:
+- **MCP spec 已强制** `inputSchema.type = "object"`(2025-06-18
+  protocol);符合规范的 server 不可能违反,加检查只为防 spec-violator,
+  非真实问题。
+- **失败半径已经够小**:坏 schema 通过 H07 → model 生成参数到 MCP
+  server 端拒掉 → 返 `ToolResult::Error`(`InvocationFailed`)→ Brain
+  现有路径吸收。坏的是单次调用,不是 session。
+- **CLAUDE.md 原则**:"don't add validation for scenarios that can't
+  happen; trust framework guarantees; only validate at system
+  boundaries (user input, external APIs)。" MCP 是用户主动配置的
+  trusted dep,不是 untrusted input。
+- **未来 escape hatch**:真遇到坏 server,加 `McpStartupFailure::
+  SchemaInvalid` variant 是 additive。
+
 唯一边界 case:MCP server 给的 schema 是 `Object<unknown_keys>`,
 H07 用 strict 模式校验时可能拒掉模型生成的有效参数。
-**对策**:为 MCP-source 工具,`ToolDescriptor::schema` 设置一个
-"non-strict additional properties"标记 —— 但 v0.1 不引入新字段,而是
-对 MCP 工具 schema 做一次"递归注入 `additionalProperties: false` 缺
-失时改为 true"的 transform。
-**或者**更简单:H07 默认就该接受 unknown keys(JSON Schema 默认行为
-就是允许),只在 descriptor 显式 `additionalProperties: false` 时拒。
-回查 H07 实现:它走 jsonschema crate 默认 mode,不强加 strict —— 所以
-**无需 transform,直接 forward**。
+**对策**:H07 默认走 jsonschema crate 默认 mode,不强加 strict ——
+JSON Schema 默认就允许 unknown keys。所以**无需 transform,直接
+forward**。
 
 ### Q13 · Observability + provenance
 
@@ -741,6 +758,57 @@ ADR-0004 layer rule 检查:
   按 ADR-0004 这属于"Hand → Hand 共享 value type",层规允许。
   (如果分级检查脚本不识别这种,加白名单。)
 
+### 4.5 Observability + 用户文档
+
+#### 4.5.1 Tracing 字段
+
+H05 Tool Surface Builder 在每次组装 tool surface 时,emit 一条
+tracing event(`info` 级)统计 MCP 工具描述总字节数:
+
+```rust
+tracing::info!(
+    target: "h05.tool_surface",
+    mcp.tool_count = mcp_tool_count,
+    mcp.tool_desc_total_bytes = mcp_desc_bytes,
+    builtin.tool_count = builtin_tool_count,
+    "tool surface built"
+);
+```
+
+理由:§6.2 Q4 决定不截断 MCP description,但要让运维**看得见**自己
+的 prompt 里 MCP 占了多少。零 policy 成本,纯 observability。当某天
+用户报"prompt 太大"或要做 budget 优化,grep tracing 即可定位。
+
+实现位置:`cogito-core::harness::tool_surface_builder`(H05);它能
+拿到所有工具的 descriptor,可直接 group by name 前缀(`mcp__` ↔
+其他)做累加。Surface-内部细节,不影响 Brain 契约。
+
+#### 4.5.2 用户文档(`docs/configuration/overview.md` MCP 段)
+
+文档化以下三条(Q4 + Q5 决定):
+
+1. **冗长 description 处理**:
+   > If your MCP servers produce verbose tool descriptions, use
+   > `enabled_tools` to narrow the catalog. Future strategy-level
+   > token budgets (Sprint 6 H10 + the Context Management spike)
+   > will enforce per-turn limits automatically; v0.1 leaves the
+   > choice to you.
+
+2. **stdio `args` 路径语义**:
+   > `args` entries are passed verbatim to the child process; cogito
+   > performs no path expansion, no `~`/`$VAR` substitution, and no
+   > absolutization. Relative paths resolve against the child's
+   > working directory, which inherits from the cogito CLI process.
+   > If you need a specific working directory, wrap with
+   > `command = "bash"`, `args = ["-c", "cd /path && exec the-server"]`.
+
+3. **MCP 失败行为**(§3.5 摘要):
+   > MCP server failures never block `cogito chat` startup. Each
+   > configured server is announced on stderr with its status; the
+   > agent continues with whatever tools came up. To make a missing
+   > server fatal, you currently need a wrapper script — a built-in
+   > `strict_mcp_startup` mode is on the v0.4 SaaS-ready roadmap.
+
 ---
 
 ## 5 · Testing strategy
@@ -821,31 +889,57 @@ CI 用 in-process mock(§5.2)代替,无 secret 泄露。
 
 ### 6.2 Open questions
 
+所有原 open question 已在 2026-05-21 review 闭环。
+
 #### 已决(2026-05-21 review)
 
 1. ~~`bearer_token_env_var` 缺失:hard-fail 还是 warn-skip?~~
-   **DECIDED: soft-skip(2026-05-21)。** 统一进 §3.5 原则:任何
-   MCP 配置级错都不阻塞 Runtime,只是该 server 工具不进 catalog。补
-   偿是 §3.5.3 startup banner 让 silent skip 可见。该原则同时锁进
-   ADR-0018(architectural 决策,而非 spec 内部细节)。
+   **DECIDED: soft-skip。** 统一进 §3.5 原则:任何 MCP 配置级错都不
+   阻塞 Runtime,只是该 server 工具不进 catalog。补偿是 §3.5.3 startup
+   banner 让 silent skip 可见。该原则同时锁进 ADR-0018(architectural
+   决策,而非 spec 内部细节)。
 
-#### 仍 open
+2. ~~是否在 `cogito-config` 里预留 `strict_mcp_startup: bool` 字段?~~
+   **DECIDED: 不预留。** 翻原 spec 草稿的"推荐预留"。理由:
+   - CLAUDE.md 明确反对 "design for hypothetical future requirements" /
+     "add features beyond what the task requires"。
+   - 一个固定 false、v0.1 完全 inert 的 bool 对当下零价值;v0.4 真要
+     做时,可能发现不是 global bool 而是 per-server `required: true`,
+     预留的"半成品形状"反而成包袱。
+   - `#[serde(default)]` 保证未来加字段不算 breaking change,延后零
+     成本。
+   - 反方论据是 `strategies_dir` 这种"预留字段"先例,但它是个**有合
+     理 default 的路径**(语义清晰即使 v0.1 不 walk),与纯 inert bool
+     性质不同。
 
-2. **是否在 `cogito-config` 里加 `strict_mcp_startup: bool` 字段?**
-   v0.1 不暴露,但要不要预留字段为 v0.4 留位?
-   **推荐预留** —— 名字进 schema,值固定为 false,doc 注明 "Sprint
-   4 ignored; v0.4 SaaS-ready 启用 hard-fail mode"。
-3. **H07 对 MCP server 给的 schema 是否信任?** §Q12 的答案是"信任,
-   直接 forward",但如果 MCP server 给一个故意宽松的 schema(允许任
-   意字段),H07 会 happily 接受。是否需要在 cogito 边界做一次最低限
-   schema sanity 检查(如必须是 `type: "object"`)?
-   **推荐 v0.1 不做** —— H07 行为现状;遇到坏 schema 再补。
-4. **MCP server 暴露的 tool description 是否有长度上限?** 长 description
-   会撑爆 prompt。**推荐 v0.1 不截断**,文档化"建议 server 端控制
-   description 长度"。
-5. **stdio server 的 `cwd` 字段是否引入?** Codex 配置里有,允许指定子
-   进程工作目录。我们 v0.1 默认继承父进程 cwd,**不**暴露 cwd 字段。
-   遇到需要时再加。
+3. ~~H07 对 MCP schema 加最低 sanity 检查?~~ **DECIDED: 不加,trust
+   + forward。** 详见 §Q12.1。MCP spec 强制 `type:"object"`,符合规范
+   的 server 不会违反;失败半径限于单次调用(返 `ToolResult::Error`,
+   Brain 现有路径吸收);CLAUDE.md "only validate at system boundaries"
+   (MCP 是 trusted dep,不是 untrusted input)。真遇到坏 server,加
+   `McpStartupFailure::SchemaInvalid` variant 是 additive。
+
+4. ~~MCP tool description 长度上限?~~ **DECIDED: 不截断 + 加 observ-
+   ability。** 详见 §4.5。
+   - 截断会切掉关键信号(示例 / 格式约束),触发非确定性 bug(模型
+     偶尔传错参数),调试代价远高于"prompt 长一点"。
+   - Prompt budget 是 H10/H11 的职责(strategy `length_budget` +
+     Context Manage spike),Sprint 4 提前做政策决策是越界。
+   - 用户已有手柄:`enabled_tools` allowlist。
+   - **补一条 observability**:H05 Tool Surface Builder 那一步打
+     `mcp.tool_desc_total_bytes` tracing 字段(见 §4.5),让运维看
+     得见 MCP 工具描述占了多少 bytes。zero policy cost。
+   - 文档化建议(§4.5):MCP 描述冗长时用 `enabled_tools` 收窄目录。
+
+5. ~~stdio server 的 `cwd` 字段是否引入?~~ **DECIDED: 不引入。**
+   - 无具体用户诉求驱动(当前用户走 streamable-HTTP)。
+   - 主流 stdio server 启动方式(`uvx` / `npx` / 独立二进制)不依
+     赖 cwd;野生 server 用 shell `bash -c 'cd /path && exec ...'`
+     包装即可,作为 escape hatch。
+   - 加字段是 additive change,真触发再补不算 breaking。
+   - **顺便定个相关歧义**(写进 §4 文档):`args` **原样**传给子进
+     程,cogito **不做**路径展开或绝对化;相对路径以子进程 cwd(=
+     父进程 cwd)为基准。需要绝对路径用户自己写。
 
 ---
 
@@ -863,7 +957,7 @@ CI 用 in-process mock(§5.2)代替,无 secret 泄露。
 | T4 | `result_mapping::to_cogito_result` + 单测(7 case) | `src/result_mapping.rs` | §Q7 映射表全覆盖 |
 | T5 | `McpToolProvider` impl + `build_mcp_provider` 工厂 + eager 并发握手 + **返回 `McpProviderBuildResult`(provider + failures)** | `src/{provider,factory}.rs` | 集成测试 `failed_server_fault_contained` + `all_servers_fail_runtime_still_builds` + `enabled_tools_filters` |
 | T6 | `cogito-config` 加 `mcp_servers: Vec<toml::Value>` 宽松 partial + finalize **per-entry try-deserialize**(§4.1)+ `mcp_parse_failures` 字段 + tests | `cogito-config/src/{types,merge}.rs` + tests | toml roundtrip + merge 覆盖 + **`bad_mcp_entry_does_not_poison_provider_parse`** 单测 |
-| T7 | `cogito-cli chat.rs` 接入 + **startup banner**(§3.5.3)+ E2E smoke + README 段 + ADR-0018 + CHANGELOG | `cogito-cli/src/chat.rs`, `docs/adr/0018-*.md`, `README.md`, `docs/configuration/overview.md`, `CHANGELOG.md` | 手动 E2E 对用户 server,banner 输出 snapshot 测试,`just ci` 绿 |
+| T7 | `cogito-cli chat.rs` 接入 + **startup banner**(§3.5.3)+ **H05 tracing**(§4.5.1)+ E2E smoke + README + `docs/configuration/overview.md` MCP 段(§4.5.2 三条文档)+ ADR-0018 + CHANGELOG | `cogito-cli/src/chat.rs`, `cogito-core/src/harness/tool_surface_builder.rs`(只加 tracing event,不改契约), `docs/adr/0018-*.md`, `README.md`, `docs/configuration/overview.md`, `CHANGELOG.md` | 手动 E2E 对用户 server,banner 输出 snapshot 测试,H05 tracing 字段出现单测,`just ci` 绿 |
 
 T1–T2 可并行起步(纯本地);T3 依赖 T1;T4 独立;T5 依赖 T3+T4;
 T6 依赖 T1(`McpStartupFailure` 类型);T7 依赖 T5+T6。
