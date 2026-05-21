@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 cogito-protocol = { workspace = true }
+cogito-config = { workspace = true, features = ["file"] }
 cogito-core = { workspace = true }
 cogito-model = { workspace = true }
 cogito-tools = { workspace = true }
