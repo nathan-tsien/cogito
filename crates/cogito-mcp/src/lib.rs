@@ -15,7 +15,7 @@
 pub mod config;
 pub mod error;
 // pub mod factory;
-// pub mod naming;
+pub mod naming;
 // pub mod provider;
 // pub mod result_mapping;
 
