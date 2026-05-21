@@ -97,7 +97,28 @@ impl<W: Write> Renderer<W> {
                 writeln!(self.out)?;
                 self.in_text = false;
             }
-            // Remaining variants land in Task 5.
+            StreamEvent::TurnPaused => {
+                let line = self.paint(DIM, "[paused]");
+                write!(self.out, "\n{line}")?;
+                self.in_text = false;
+            }
+            StreamEvent::TurnResumed => {
+                let line = self.paint(DIM, "[resumed]");
+                write!(self.out, "\n{line}")?;
+                self.in_text = false;
+            }
+            StreamEvent::TurnCancelled => {
+                let line = self.paint(DIM_YELLOW, "[cancelled]");
+                write!(self.out, "\n{line}")?;
+                self.in_text = false;
+            }
+            StreamEvent::TurnFailed { reason } => {
+                let body = format!("[error] {reason}");
+                let line = self.paint(RED, &body);
+                write!(self.out, "\n{line}")?;
+                self.in_text = false;
+            }
+            // `StreamEvent` is `#[non_exhaustive]`: future variants render as a no-op.
             _ => {}
         }
         Ok(())
@@ -207,5 +228,25 @@ mod tests {
         ]);
         let count = out.matches("agent: ").count();
         assert_eq!(count, 2, "expected two `agent: ` prefixes, got: {out:?}");
+    }
+
+    #[test]
+    fn turn_failed_prints_reason() {
+        let out = render_events(&[StreamEvent::TurnFailed {
+            reason: "boom".into(),
+        }]);
+        assert_eq!(out, "\n[error] boom");
+    }
+
+    #[test]
+    fn turn_cancelled_prints_marker() {
+        let out = render_events(&[StreamEvent::TurnCancelled]);
+        assert_eq!(out, "\n[cancelled]");
+    }
+
+    #[test]
+    fn turn_paused_resumed_print_markers() {
+        let out = render_events(&[StreamEvent::TurnPaused, StreamEvent::TurnResumed]);
+        assert_eq!(out, "\n[paused]\n[resumed]");
     }
 }
