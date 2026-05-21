@@ -783,4 +783,4 @@ See **ADR-0005** for the authoritative version of these commitments.
 3. Read the design doc for the component you're touching: `docs/components/H0X-*.md`
 4. Read the relevant ADR — especially **ADR-0004** for layer / import rules, **ADR-0005** for quality gates, and **ADR-0006** for the runtime + H01 execution model
 5. For runtime / threading / lifecycle questions, the detailed reference is `docs/superpowers/specs/2026-05-18-runtime-h01-execution-model-design.md` (ADR-0006 is the durable contract; the spec is the full discussion)
-6. Run `just test` to verify your environment
+6. Run `make test` to verify your environment

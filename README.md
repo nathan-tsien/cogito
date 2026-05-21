@@ -64,45 +64,35 @@ cp .env.example .env
 # for vLLM / SGLang / SenseNova / Azure-OpenAI / private gateways.
 ```
 
-`.env` is git-ignored. `make` auto-loads it; the `just` recipes do not.
+`.env` is git-ignored; `make` auto-loads it.
 
 ### 3. Build, test, chat
 
-The project ships **two equivalent task runners**:
-
-- `Makefile` — full feature surface (`.env` auto-load, `make help`,
-  per-provider chat targets, env sanity-check). **Recommended for
-  day-to-day local dev.**
-- `justfile` — minimal recipes, no `.env` auto-load. **Recommended in
-  CI and inside `just ci` (the canonical gate).**
+All local dev flows through `Makefile`. `.env` is auto-loaded if
+present; `make help` lists every target with a one-line summary.
 
 ```bash
 make help               # discover every target with a one-line summary
 make env-check          # print resolved env vars (no secrets) for debugging
 make test               # cargo nextest run --workspace
 make test CRATE=cogito-core
-make ci                 # full local gate: fmt + clippy + layer-check + test
-make chat               # interactive REPL against the OpenAI-compat endpoint
-make chat-anthropic     # interactive REPL against Anthropic
+make ci                 # full local gate: fmt-check + clippy + layer-check + test
+make chat               # interactive REPL (provider/model from cogito.toml)
 ```
 
-Equivalent `just` calls:
-
-```bash
-just test cogito-core   # positional crate arg (NOT -p)
-just ci                 # canonical CI gate (matches GitHub Actions)
-just chat               # uses CLI defaults; for credentials prefer make chat
-```
+Provider, model, and MCP server selection live in `cogito.toml` (search
+path: `$COGITO_CONFIG`, `./cogito.toml`, `$XDG_CONFIG_HOME/cogito/config.toml`).
+For a one-off override, invoke the CLI directly:
+`cargo run -p cogito-cli -- chat --model X --provider Y`.
 
 ### 4. Debugging
 
 - `make env-check` — verify which credentials and defaults are active
   without leaking secrets.
 - `RUST_LOG=cogito=debug make chat` — verbose harness tracing.
-- `just inspect <session_id>` — dump a session's event log (JSONL).
-- `just replay <session_id>` — re-play a session from its event log.
-- Per-session JSONL files land under `./sessions/` by default; remove
-  them with `make sessions-clean`.
+- Per-session JSONL files land under the configured `runtime.session_root`
+  (default `./sessions`); remove them with
+  `make sessions-clean SESSION_ROOT=<path>`.
 
 ### 5. MCP servers (Sprint 4)
 

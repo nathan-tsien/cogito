@@ -34,25 +34,23 @@ If `AGENTS.md` and this file conflict, `AGENTS.md` wins.
 
 ## Commands
 
-Use `just` recipes — don't invent your own:
+Use `make` recipes — don't invent your own:
 
 ```bash
-just fmt                 # cargo fmt --all
-just fix [crate]         # clippy --fix + fmt (optionally scoped)
-just test [crate]        # cargo nextest run (optionally scoped)
-just bench               # criterion benchmarks
-just chaos               # resume_chaos tests (slow, release mode)
-just ci                  # fmt-check + clippy + test (the CI gate)
-just chat                # cogito-cli chat  (available from Sprint 2)
-just inspect <session>   # dump a session's event log
-just replay <session>    # replay a session
+make fmt                       # cargo fmt --all
+make fix [CRATE=<name>]        # clippy --fix + fmt (optionally scoped)
+make test [CRATE=<name>]       # cargo nextest run (optionally scoped)
+make bench                     # criterion benchmarks
+make chaos                     # resume_chaos tests (slow, release mode)
+make ci                        # fmt-check + clippy + layer-check + test
+make chat                      # cogito-cli chat (provider/model from cogito.toml)
 ```
 
-Prereqs: Rust 1.85+ (rustup; edition 2024 requirement — see `rust-toolchain.toml`), `cargo install just cargo-nextest`.
+Prereqs: Rust 1.85+ (rustup; edition 2024 requirement — see `rust-toolchain.toml`), `cargo install cargo-nextest`.
 
 When finishing a task:
-1. `just fmt && just fix <crate>` → clean
-2. `just test -p <crate>` → green
+1. `make fmt && make fix CRATE=<crate>` → clean
+2. `make test CRATE=<crate>` → green
 3. Update `docs/components/H0X-*.md` if component behavior changed
 4. If a sprint goal was completed, write/update the experiment report under `docs/experiments/`
 
@@ -101,7 +99,7 @@ Each crate maps to exactly one layer in the Brain / Hands / Session design (ADR-
 - Every component has a unit test module.
 - Every contract (trait) has a contract test that all implementations must pass (e.g., SQLite and in-memory conversation stores must agree).
 - Integration tests live in `crates/*/tests/`.
-- Resume chaos tests: `crates/cogito-core/tests/resume_chaos.rs` (run via `just chaos`).
+- Resume chaos tests: `crates/cogito-core/tests/resume_chaos.rs` (run via `make chaos`).
 - New features require new tests. **Never `#[ignore]` a test to make it pass.**
 
 ## When uncertain
