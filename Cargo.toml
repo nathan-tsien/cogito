@@ -78,6 +78,14 @@ bytes = "1.7"
 jsonschema = "0.18"
 schemars = { version = "0.8", features = ["chrono", "uuid1"] }
 
+# MCP (Model Context Protocol)
+rmcp = { version = "1.5", default-features = false, features = [
+    "client",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+    "macros",
+] }
+
 # IDs and time
 uuid = { version = "1.10", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }

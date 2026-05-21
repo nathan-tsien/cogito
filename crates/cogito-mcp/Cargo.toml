@@ -9,12 +9,24 @@ publish.workspace = true
 [dependencies]
 cogito-protocol.workspace = true
 
-tokio.workspace = true
 async-trait.workspace = true
+rmcp.workspace = true
+reqwest.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+toml = "0.8"
 tracing.workspace = true
+
+[dev-dependencies]
+# Integration tests spin up an in-process rmcp server; we need the
+# server feature for that. Not enabled in regular builds — keeps the
+# crate small.
+rmcp = { workspace = true, features = ["server"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }
 
 [lints]
 workspace = true
