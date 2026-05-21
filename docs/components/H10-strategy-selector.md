@@ -68,7 +68,7 @@ the duration of the turn** and consumed (read-only) by H11, H04, H05, H09.
   - `system_prompt = "You are a helpful assistant."` (overridable by CLI `--system`)
   - `allowed_tools = ToolFilter::All`
   - `tool_order = None`
-  - `model_params = { model: <model_id>, max_tokens: 4096, temperature: Some(0.7), top_p: None, stop_sequences: [] }`
+  - `model_params = { model: <model_id>, max_tokens: 4096, temperature: None, top_p: None, stop_sequences: [] }` — `temperature: None` defers to the provider default; reasoning models (Kimi K2, o-series, DeepSeek-R1) reject any other value
   - `max_turns = 16`
 
 ## v0.x Sprint 6 scope (designed, not implemented)
