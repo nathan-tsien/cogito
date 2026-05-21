@@ -31,3 +31,9 @@ pub use merge::merge_layers;
 
 #[cfg(feature = "file")]
 pub mod interpolate;
+
+#[cfg(feature = "file")]
+pub mod file;
+
+#[cfg(feature = "file")]
+pub use file::{FileConfigLoader, load_runtime_config};
