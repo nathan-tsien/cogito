@@ -939,6 +939,26 @@
               "type": "string"
             }
           }
+        },
+        {
+          "description": "Resume re-validation failed — the persisted log references tools or schemas that are no longer compatible with the running build. See `cogito-core::harness::resume::ResumeError` for the protocol-side equivalent.",
+          "type": "object",
+          "required": [
+            "kind",
+            "message"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "resume_failed"
+              ]
+            },
+            "message": {
+              "description": "Human-readable description of the resume failure.",
+              "type": "string"
+            }
+          }
         }
       ]
     },

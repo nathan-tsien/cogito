@@ -22,4 +22,4 @@ pub mod types;
 
 pub use builder::{Runtime, RuntimeBuilder, RuntimeError};
 pub use handle::{SessionError, SessionHandle};
-pub use types::{NewMessage, OpenMode, SessionCommand, SessionId, ShutdownOutcome};
+pub use types::{OpenMode, SessionCommand, SessionId, ShutdownOutcome, TurnTrigger};

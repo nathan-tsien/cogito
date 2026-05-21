@@ -7,6 +7,7 @@ use tokio::sync::oneshot;
 // Re-export the canonical session identifier from the protocol layer so all
 // runtime code uses the same type without an extra import path.
 pub use cogito_protocol::ids::SessionId;
+pub use cogito_protocol::turn_trigger::TurnTrigger;
 
 /// How `Runtime::open_session` should treat an existing session id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,8 +54,11 @@ pub enum ShutdownOutcome {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum SessionCommand {
-    /// Caller-driven new user input. Triggers a new `TurnDriver`.
-    Input(NewMessage),
+    /// Caller-driven trigger. Spawns a new `TurnDriver` when no turn is
+    /// in flight. v0.1 only carries `TurnTrigger::UserText`; future
+    /// variants (multimedia user content, skill invocations, hook
+    /// fires) land additively per ADR-0016 + ADR-0007 track B.
+    Trigger(TurnTrigger),
 
     /// Synthesized by the actor after receiving a `JobCompletionEvent` on
     /// the `job_completion` channel. Re-spawns `TurnDriver` with resume state.
@@ -81,15 +85,6 @@ pub enum SessionCommand {
         /// Signals the caller with the outcome once the actor exits.
         ack: oneshot::Sender<ShutdownOutcome>,
     },
-}
-
-/// User-facing input for a new turn. Wrapped in `SessionCommand::Input` so
-/// the command enum stays trivially extensible.
-#[derive(Debug, Clone)]
-pub struct NewMessage {
-    /// Plain text content of the user's message. v0.2 may extend this to
-    /// `Vec<ContentBlock>` for multimodal input.
-    pub text: String,
 }
 
 /// Translate a `JobCompletionEvent` from the dedicated job-completion mpsc

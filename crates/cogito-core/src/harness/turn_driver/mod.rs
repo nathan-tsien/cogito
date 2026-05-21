@@ -18,7 +18,7 @@ use crate::harness::resume::{ResumeDecision, ResumePendingCall, ResumePoint};
 /// Harness-internal translation of `ResumePoint` into the FSM-level shape
 /// `enter_turn` consumes. Three variants because `FreshTurn` and
 /// `ResumePausedJob` are actor-level (handled before `enter_turn` is called):
-/// `FreshTurn` means the actor idles until the next user `Input`, and
+/// `FreshTurn` means the actor idles until the next caller `submit`, and
 /// `ResumePausedJob` puts the actor into `InFlight::PausedOnJob` directly
 /// without entering the FSM.
 ///

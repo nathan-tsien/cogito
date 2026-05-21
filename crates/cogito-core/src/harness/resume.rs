@@ -33,7 +33,7 @@ pub struct ResumeDecision {
 #[non_exhaustive]
 pub enum ResumePoint {
     /// Empty log, or last turn ended in `TurnCompleted` / `TurnFailed`.
-    /// Actor idles until the next user `Input`.
+    /// Actor idles until the next caller `submit` (`SessionCommand::Trigger`).
     FreshTurn,
 
     /// In-flight turn where the most recent model call did not complete

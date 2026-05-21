@@ -18,6 +18,7 @@
 //! - [`stream`]: `StreamEvent` enum (real-time fanout to subscribers)
 //! - [`tool`]: `ToolProvider` trait, `ToolDescriptor`, `InvokeOutcome`, `ExecutionClass`
 //! - [`turn`]: `TurnOutcome`, `TurnFailureReason`
+//! - [`turn_trigger`]: `TurnTrigger` — what caused a new turn to start (ADR-0016)
 //!
 //! All v0.1 contract modules ship as part of Sprint 0 (Tasks 7-10 of
 //! the Sprint 0 closure plan) and Sprint 1 (`event`, `store`).
@@ -35,6 +36,7 @@ pub mod strategy;
 pub mod stream;
 pub mod tool;
 pub mod turn;
+pub mod turn_trigger;
 
 pub use content::ContentBlock;
 pub use event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
@@ -50,3 +52,4 @@ pub use strategy::{HarnessStrategy, ToolFilter};
 pub use tool::{
     ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
 };
+pub use turn_trigger::TurnTrigger;

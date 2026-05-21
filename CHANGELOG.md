@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Post-Sprint 3 (ADR-0016 TurnTrigger)
+
+- `cogito-protocol::turn_trigger::TurnTrigger` — single-variant
+  `#[non_exhaustive]` enum (`UserText(String)` in v0.1). Locks the
+  shape of the abstraction so v0.2 `UserContent`, v0.3+
+  `SkillInvocation`, and v0.6 `HookFired` land additively per ADR-0007
+  track B (no `schema_version` bump). Re-exported at `cogito_protocol::TurnTrigger`.
+- `cogito-core::runtime::SessionHandle::submit(TurnTrigger)` —
+  canonical entry point for any new trigger source. See ADR-0016 §2.
+
+### Changed — Post-Sprint 3 (ADR-0016 TurnTrigger)
+
+- `cogito-core::runtime::SessionCommand::Input(NewMessage)` renamed to
+  `SessionCommand::Trigger(TurnTrigger)`. Internal rename; the
+  `NewMessage` struct is deleted (was never exposed outside
+  `cogito_core::runtime::types`).
+- `cogito-core::runtime::SessionHandle::send_user` is now a 1-line
+  shim around `submit(TurnTrigger::UserText(text.into()))`. Behavior
+  preserved; existing call sites (`cogito-cli`, integration tests,
+  chaos tests) unchanged.
+- `cogito-core::runtime::mod` no longer re-exports `NewMessage`; it
+  re-exports `TurnTrigger` instead.
+
 ### Added — Sprint 2
 
 - `cogito-protocol::gateway` — `ModelGateway` trait + `ModelInput` / `ModelOutput` /
