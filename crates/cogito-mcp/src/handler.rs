@@ -11,10 +11,8 @@
 //!
 //! See ADR-0018 for the elicitation rationale (out of scope for v0.1).
 //!
-//! Items are reached only from `client::handshake_and_list`, which is
-//! consumed by the factory (Task 10). Until then, dead-code lints are
-//! suppressed at the module level.
-#![allow(dead_code)]
+//! Items are reached from `client::handshake_and_list`, which is
+//! consumed by [`crate::factory::build_mcp_provider`].
 
 use rmcp::ClientHandler;
 use rmcp::RoleClient;

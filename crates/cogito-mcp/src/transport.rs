@@ -10,10 +10,8 @@
 //! and pass it in. Custom HTTP headers are typed through the `http` crate
 //! (`HeaderName` / `HeaderValue`), which is the type rmcp's config exposes.
 //!
-//! Items are reached only from `client::handshake_and_list`, which is
-//! consumed by the factory (Task 10). Until then, dead-code lints are
-//! suppressed at the module level.
-#![allow(dead_code)]
+//! Items are reached from `client::handshake_and_list`, which is
+//! consumed by [`crate::factory::build_mcp_provider`].
 
 use std::collections::HashMap;
 use std::process::Stdio;

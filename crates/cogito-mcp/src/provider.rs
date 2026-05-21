@@ -37,7 +37,6 @@ pub struct McpToolProvider {
 impl McpToolProvider {
     /// Build from per-server (handle, raw-tools) pairs. Performs the
     /// qualify + dedup-with-warn step.
-    #[allow(dead_code)] // consumed by factory (Task 10)
     pub(crate) fn from_handshake_outputs(
         outputs: Vec<(Arc<McpServerHandle>, Vec<rmcp::model::Tool>)>,
     ) -> Self {
