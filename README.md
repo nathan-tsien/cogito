@@ -26,8 +26,8 @@ future SaaS layer wrapping cogito).
   `StorageSystem` / `BrainSpawner` traits; v0.1 ships a built-in
   `read_file` tool and a composable provider
 - **Runtime** — dependency injection, panic isolation, per-session actor;
-  `Runtime::open_session` → `SessionHandle::{send_user, cancel_turn,
-  shutdown, subscribe}`
+  `Runtime::open_session` → `SessionHandle::{submit, submit_user_text,
+  cancel_turn, shutdown, subscribe}`
 - **Surface** — `cogito-cli chat` runs an end-to-end loop against
   Anthropic or any OpenAI-compatible endpoint
 
@@ -37,10 +37,11 @@ build-enforced rule, not a convention.
 
 ## Status
 
-**v0.1 · Foundation** — Sprints 0-3 complete (event-sourced JSONL store,
-H01 FSM Turn Driver, Anthropic + OpenAI-compat gateways, H03 Resume
-Coordinator with chaos tests). Sprint 4 (Async Jobs) up next. See
-`ROADMAP.md` for the full version-driven plan toward `v1.0` GA.
+**v0.1 · Foundation** — Sprints 0-3 + 4.5 complete (event-sourced JSONL
+store, H01 FSM Turn Driver, Anthropic + OpenAI-compat gateways, H03 Resume
+Coordinator with chaos tests, config-file loading). Sprint 4 (MCP sync
+tools) up next. See `ROADMAP.md` for the full version-driven plan toward
+`v1.0` GA.
 
 ## Quick start
 

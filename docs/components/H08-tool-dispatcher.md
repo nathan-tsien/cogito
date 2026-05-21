@@ -1,6 +1,6 @@
 # H08 · Tool Dispatcher
 
-> **Status**: 🚧 In progress · Sprint 2 (sync path; `InvokeOutcome::Async` returns a stubbed `ToolResult::Error { kind: InvocationFailed }` until Sprint 4 wires `JobManager`)
+> **Status**: 🚧 In progress · Sprint 2 (sync path; `InvokeOutcome::Async` returns a stubbed `ToolResult::Error { kind: InvocationFailed }` until Sprint 5 wires `JobManager`)
 
 ## Role in Harness
 
@@ -16,10 +16,10 @@ Hands.
   consumed only by `transitions::tool_dispatching` to decide the next
   `TurnState`.
 - `DispatchOutcome::SyncResult(ToolResult)` — proceed to next call (or back to `PromptBuilt`)
-- `DispatchOutcome::AsyncJob(JobId)` — Sprint 4: turn transitions to
+- `DispatchOutcome::AsyncJob(JobId)` — Sprint 5: turn transitions to
   `Paused`; resumes on `JobCompleted` event. Sprint 2 never returns this
   variant — `read_file` is `ExecutionClass::AlwaysSync`. The variant is
-  retained in the enum (`#[non_exhaustive]`) to avoid Sprint-4 re-shaping.
+  retained in the enum (`#[non_exhaustive]`) to avoid Sprint-5 re-shaping.
 
 ## Dependencies
 

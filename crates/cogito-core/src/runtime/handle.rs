@@ -51,8 +51,8 @@ impl SessionHandle {
 
     /// Submit a [`TurnTrigger`]. The session loop spawns a `TurnDriver`
     /// if no turn is in flight. **Canonical entry point** for any new
-    /// trigger source — `send_user` is a convenience shim that calls
-    /// `submit(TurnTrigger::UserText(text.into()))`. See ADR-0016 §2.
+    /// trigger source — `submit_user_text` is a convenience shim that
+    /// calls `submit(TurnTrigger::UserText(text.into()))`. See ADR-0016 §2.
     ///
     /// # Errors
     ///
@@ -67,7 +67,7 @@ impl SessionHandle {
             })
     }
 
-    /// Send a new user text message; the actor will spawn a `TurnDriver`.
+    /// Submit a user-typed text message; the actor will spawn a `TurnDriver`.
     /// Awaits (mailbox backpressure) if the actor is overwhelmed.
     ///
     /// Convenience wrapper around [`SessionHandle::submit`] — equivalent
@@ -78,7 +78,7 @@ impl SessionHandle {
     /// # Errors
     ///
     /// Returns `SessionError::SessionClosed` if the actor has exited.
-    pub async fn send_user(&self, text: impl Into<String>) -> Result<(), SessionError> {
+    pub async fn submit_user_text(&self, text: impl Into<String>) -> Result<(), SessionError> {
         self.submit(TurnTrigger::UserText(text.into())).await
     }
 

@@ -4,6 +4,17 @@
 
 Accepted (2026-05-20).
 
+**Update (2026-05-21):** The convenience shim `SessionHandle::send_user`
+described below was renamed to `SessionHandle::submit_user_text`. The
+old name read as "send TO user" (verb+object) while the actual semantics
+are "submit text FROM the user"; the noun-style name aligns with
+`submit` and removes the directional ambiguity. Semantics unchanged —
+still a 1-line shim over `submit(TurnTrigger::UserText(text.into()))`.
+References to `send_user` in the prose below should be read with that
+substitution where they describe the post-ADR API surface; references
+in the Context and "Given up" sections describe pre-ADR / alternative
+shapes and stand as-is.
+
 ## Context
 
 Today the only way for a caller to start a turn is
@@ -105,13 +116,13 @@ impl SessionHandle {
     /// Convenience: `submit(TurnTrigger::UserText(text.into()))`.
     /// Retained because user-typed text is the dominant path and
     /// callers should not have to spell out the enum for it.
-    pub async fn send_user(&self, text: impl Into<String>) -> Result<(), SessionError> {
+    pub async fn submit_user_text(&self, text: impl Into<String>) -> Result<(), SessionError> {
         self.submit(TurnTrigger::UserText(text.into())).await
     }
 }
 ```
 
-`send_user` is **not** deprecated. It is a thin shim with stable
+`submit_user_text` is **not** deprecated. It is a thin shim with stable
 semantics; deprecating it would create churn in every consumer (CLI,
 integration tests, embed-in-product) for zero gain. New trigger kinds
 use `submit`.
@@ -238,7 +249,7 @@ Each step is additive. No `schema_version` bump.
   variants they handle and fall through for unknown ones
   (`#[non_exhaustive]` forces a `_ =>` arm).
 - The `SessionHandle` surface stays compact: one canonical entry point
-  (`submit`) plus a convenience for the common case (`send_user`).
+  (`submit`) plus a convenience for the common case (`submit_user_text`).
 - External (Go / Python / Node) readers see a forward-compatible event
   log. Per ADR-0007 they already tolerate unknown variants; the new
   optional `origin` field plays by the same rules.
@@ -276,7 +287,7 @@ Each step is additive. No `schema_version` bump.
   (b-档 forward-compatibility rules)
 - `crates/cogito-protocol/src/event.rs` — `EventPayload::TurnStarted`
 - `crates/cogito-core/src/runtime/handle.rs` —
-  `SessionHandle::send_user`
+  `SessionHandle::submit_user_text`
 - `crates/cogito-core/src/runtime/session_loop.rs` — `try_start_turn`
   / `record_turn_started`
 - 2026-05-20 design discussion ("OCP for `SessionHandle.send_user`")

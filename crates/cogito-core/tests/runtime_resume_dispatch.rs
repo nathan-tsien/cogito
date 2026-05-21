@@ -229,7 +229,7 @@ async fn resume_with_completed_session_idles_then_serves_new_input()
     let handle = runtime.open_session(session_id, OpenMode::Resume).await?;
     let mut events_rx = handle.subscribe();
 
-    handle.send_user("hello after resume").await?;
+    handle.submit_user_text("hello after resume").await?;
 
     let got_completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {

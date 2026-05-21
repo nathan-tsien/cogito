@@ -143,7 +143,7 @@ pub async fn run(args: ChatArgs) -> Result<()> {
                     if l.trim().is_empty() {
                         continue;
                     }
-                    handle.send_user(l).await.context("send_user")?;
+                    handle.submit_user_text(l).await.context("submit_user_text")?;
                 }
                 Err(e) => return Err(e).context("stdin read"),
             },

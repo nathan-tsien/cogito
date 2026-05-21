@@ -2,7 +2,7 @@
 
 > **Status**: 🚧 Sprint 2 lands the `HarnessStrategy::default_with_model(model_id)` factory + Mid field set
 > (name / system_prompt / allowed_tools / tool_order / model_params / max_turns).
-> YAML loader + multi-strategy registry + per-task selection remain Sprint 5.
+> YAML loader + multi-strategy registry + per-task selection remain Sprint 6.
 
 ## Role in Harness
 
@@ -29,7 +29,7 @@ sequence" for the canonical walkthrough.
 ## Interface (design level)
 
 - Sprint 2: `HarnessStrategy::default_with_model(model_id: impl Into<String>) -> HarnessStrategy` — a free constructor; no registry, no per-task selection.
-- Sprint 5: `select(model_id: &str, task: &TaskContext, registry: &StrategyRegistry) -> HarnessStrategy` — the full selector backed by a YAML registry.
+- Sprint 6: `select(model_id: &str, task: &TaskContext, registry: &StrategyRegistry) -> HarnessStrategy` — the full selector backed by a YAML registry.
 - `HarnessStrategy` is a plain value type in `cogito-protocol::strategy`. **v0.1 Mid field set** (locked Sprint 2):
   - `name: String` — strategy identifier, written into `TurnStarted` event
   - `system_prompt: String`
@@ -39,12 +39,12 @@ sequence" for the canonical walkthrough.
   - `max_turns: u32` — agent-loop safety budget; default 16
 
   Reserved for later versions (intentionally **not** in v0.1):
-  - `length_budget: usize` — Sprint 7 / H11 ADR-0008
-  - `hooks: Vec<HookConfig>` — Sprint 6
-  - `allow_async_tools: bool` — Sprint 4 (with JobManager)
+  - `length_budget: usize` — Sprint 8 / H11 ADR-0008
+  - `hooks: Vec<HookConfig>` — Sprint 7
+  - `allow_async_tools: bool` — Sprint 5 (with JobManager)
   - `parallel_dispatch: bool` — 0.x option, off in v0.1
 
-The Sprint 2 factory and the Sprint 5 selector are both **pure**: same inputs → same strategy.
+The Sprint 2 factory and the Sprint 6 selector are both **pure**: same inputs → same strategy.
 
 ## Dependencies
 
@@ -71,7 +71,7 @@ the duration of the turn** and consumed (read-only) by H11, H04, H05, H09.
   - `model_params = { model: <model_id>, max_tokens: 4096, temperature: Some(0.7), top_p: None, stop_sequences: [] }`
   - `max_turns = 16`
 
-## v0.x Sprint 5 scope (designed, not implemented)
+## v0.x Sprint 6 scope (designed, not implemented)
 
 - Strategies are loaded from YAML files at runtime startup (`strategies/*.yaml`)
 - Selection key: `model_id` → strategy file (one-to-one mapping in 0.x)
@@ -82,9 +82,9 @@ the duration of the turn** and consumed (read-only) by H11, H04, H05, H09.
 > (without `.yaml`) is the canonical strategy name; the YAML body
 > drops `name:` and `applicable_models:` fields. The two existing
 > draft files (`strategies/claude-opus.yaml`, `strategies/gpt-4.yaml`)
-> will be rewritten when Sprint 5 lands the loader.
+> will be rewritten when Sprint 6 lands the loader.
 
-## Example strategy YAML (Sprint 5+)
+## Example strategy YAML (Sprint 6+)
 
 ```yaml
 # strategies/claude-sonnet-default.yaml
@@ -97,7 +97,7 @@ model_params:
   temperature: 0.7
   max_tokens: 4096
 max_turns: 32
-# Sprint 6+ fields (when H09 hooks land):
+# Sprint 7+ fields (when H09 hooks land):
 # hooks:
 #   - name: "sensitive_content_filter"
 #     config: { severity: "high" }
