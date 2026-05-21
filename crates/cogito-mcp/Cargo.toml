@@ -10,8 +10,16 @@ publish.workspace = true
 cogito-protocol.workspace = true
 
 async-trait.workspace = true
+http.workspace = true
 rmcp.workspace = true
-reqwest.workspace = true
+# rmcp 1.7's streamable-HTTP client trait is implemented for *its* reqwest
+# 0.13 `Client`. We need to spell that exact type in `BuiltTransport` so
+# the variant can hold the value returned by
+# `StreamableHttpClientTransport::from_config`. The workspace's reqwest
+# (0.12, used by `cogito-model`) is incompatible at the type level. We
+# carry this minimal direct dep to bridge the two; once the workspace
+# bumps to reqwest 0.13 the duplication goes away.
+reqwest = { version = "0.13", default-features = false }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
