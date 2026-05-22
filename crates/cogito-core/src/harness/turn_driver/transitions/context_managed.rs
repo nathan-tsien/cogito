@@ -88,6 +88,8 @@ pub async fn transit(ctx: TurnCtx, deps: &TurnDeps) -> TurnState {
                 hook_name,
                 message: reason,
             };
+            // Capture reason string before moving `failure_reason` into `record_turn_failed`.
+            let reason_str = format!("{failure_reason:?}");
             let recorded_event_id = match deps
                 .step
                 .lock()
@@ -99,6 +101,7 @@ pub async fn transit(ctx: TurnCtx, deps: &TurnDeps) -> TurnState {
                 // Recorder failed while recording the failure itself.
                 Err(_) => EventId::recorder_failure_placeholder(),
             };
+            deps.hooks.on_error(&reason_str);
             TurnState::Failed {
                 reason: failure_reason,
                 recorded_event_id,

@@ -86,6 +86,8 @@ pub async fn enter_turn(entry: TurnEntry, ctx: TurnCtx, deps: TurnDeps) -> TurnO
                     // Record the failure event before constructing Failed state.
                     // Mirror the P2.5 pattern: capture EventId from the recorder.
                     let reason = cogito_protocol::turn::TurnFailureReason::ResumeFailed { message };
+                    // Capture reason string before moving `reason` into `record_turn_failed`.
+                    let reason_str = format!("{reason:?}");
                     let event_id = match deps
                         .step
                         .lock()
@@ -96,6 +98,7 @@ pub async fn enter_turn(entry: TurnEntry, ctx: TurnCtx, deps: TurnDeps) -> TurnO
                         Ok(id) => id,
                         Err(_) => EventId::recorder_failure_placeholder(),
                     };
+                    deps.hooks.on_error(&reason_str);
                     TurnState::Failed {
                         reason,
                         recorded_event_id: event_id,

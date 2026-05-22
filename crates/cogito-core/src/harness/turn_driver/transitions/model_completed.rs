@@ -69,6 +69,7 @@ pub async fn transit(
             .await
             .record_turn_completed(ctx.turn_id, cogito_protocol::turn::TurnOutcome::Completed)
             .await;
+        deps.hooks.post_turn();
         return TurnState::Completed {
             final_assistant_content: assistant_content,
         };
@@ -96,6 +97,8 @@ pub async fn transit(
             );
             tracing::error!("{msg}");
             let reason = TurnFailureReason::ModelGatewayFailed { message: msg };
+            // Capture reason string before moving `reason` into `record_turn_failed`.
+            let reason_str = format!("{reason:?}");
             let recorded_event_id = match deps
                 .step
                 .lock()
@@ -107,6 +110,7 @@ pub async fn transit(
                 // Recorder failed while recording the failure itself.
                 Err(_) => EventId::recorder_failure_placeholder(),
             };
+            deps.hooks.on_error(&reason_str);
             return TurnState::Failed {
                 reason,
                 recorded_event_id,
