@@ -226,6 +226,20 @@ pub enum ModelError {
     Cancelled,
 }
 
+/// Limits of the model a `ModelGateway` serves.
+///
+/// Sourced from the gateway implementation, not from strategy config.
+/// Consumed by Compactor for adaptive thresholds and (future) H05 surface
+/// sizing. See ADR-0008.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ModelLimits {
+    /// The model id, with any `[<size>]` suffix preserved.
+    pub model_id: String,
+    /// Total context window in tokens (input + output combined).
+    pub context_window_tokens: u64,
+}
+
 /// Boundary contract between Brain and external LLM providers.
 ///
 /// Implementations live in `cogito-model::anthropic` and
@@ -256,6 +270,16 @@ pub trait ModelGateway: Send + Sync {
     /// Stable identifier for telemetry and logging. Adapters return a
     /// fixed string, not a per-instance value.
     fn provider_id(&self) -> &'static str;
+
+    /// Limits of the model this gateway serves. Used by Compactor for
+    /// adaptive thresholds. Default impl returns a conservative `32_768`
+    /// window; provider adapters SHOULD override.
+    fn model_limits(&self) -> ModelLimits {
+        ModelLimits {
+            model_id: self.provider_id().into(),
+            context_window_tokens: 32_768,
+        }
+    }
 }
 
 /// Parse the conventional `[<size>]` suffix from a model id.
@@ -291,6 +315,42 @@ pub fn parse_context_window_suffix(model_id: &str) -> Option<u64> {
         _ => 1,
     };
     num.checked_mul(mult)
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented
+)]
+mod model_limits_tests {
+    use super::*;
+
+    struct DummyGateway;
+
+    #[async_trait::async_trait]
+    impl ModelGateway for DummyGateway {
+        async fn stream(
+            &self,
+            _input: ModelInput,
+            _ctx: crate::ExecCtx,
+        ) -> Result<BoxStream<'static, Result<ModelEvent, ModelError>>, ModelError> {
+            unimplemented!("not used in this test")
+        }
+
+        fn provider_id(&self) -> &'static str {
+            "dummy"
+        }
+    }
+
+    #[test]
+    fn default_model_limits_is_conservative() {
+        let g = DummyGateway;
+        let limits = g.model_limits();
+        assert_eq!(limits.context_window_tokens, 32_768);
+        assert_eq!(limits.model_id, "dummy");
+    }
 }
 
 #[cfg(test)]

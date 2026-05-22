@@ -47,8 +47,8 @@ pub use content::ContentBlock;
 pub use event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
 pub use exec_ctx::ExecCtx;
 pub use gateway::{
-    Message, ModelError, ModelEvent, ModelGateway, ModelInput, ModelOutput, ModelParams,
-    StopReason, Usage,
+    Message, ModelError, ModelEvent, ModelGateway, ModelInput, ModelLimits, ModelOutput,
+    ModelParams, StopReason, Usage,
 };
 pub use hook::{HookDecision, HookHandler, HookLifecyclePoint, HookProvider};
 pub use ids::{EventId, SessionId, TurnId};
