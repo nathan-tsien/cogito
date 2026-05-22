@@ -35,15 +35,18 @@ use super::wire::{Choice, StreamChunk};
 /// while the live `TextDelta` stream continued to deliver the rest.
 #[derive(Debug, Default)]
 pub(crate) struct Decoder {
-    /// Accumulated text for block 0 (the single text block).
+    /// Accumulated text for the text block.
     text_buf: String,
     /// Whether the text block has been opened (first content delta seen).
     text_started: bool,
     /// Tool-call buffer keyed by stream-level index.
-    /// `block_index` is synthesised: text is always 0; tools are 1..N in
-    /// stream-index order.
+    /// `block_index` is synthesised: when no thinking is present, text is 0
+    /// and tools start at 1; when thinking is present, text shifts to 1 and
+    /// tools start at 2 so the content array sorts as
+    /// `[Thinking(0), Text(1), ToolUse(2+)]`.
     tool_calls: BTreeMap<u32, ToolCallBuf>,
-    /// Next `block_index` to assign for `tool_use` blocks (starts at 1).
+    /// Next `block_index` to assign for `tool_use` blocks (starts at 1;
+    /// bumped to 2 when a `reasoning_content` chunk arrives).
     next_tool_block: u32,
     /// Latest `finish_reason` seen across all chunks. Consumed by
     /// `finalize` to produce the terminal `MessageCompleted::stop_reason`.
@@ -51,6 +54,19 @@ pub(crate) struct Decoder {
     finish_reason: Option<String>,
     /// Whether `finalize` has already run. Idempotent on repeated calls.
     finalized: bool,
+    /// Accumulated reasoning text (DeepSeek `reasoning_content` path).
+    thinking_buf: String,
+    /// Whether any `reasoning_content` chunk has been observed.
+    thinking_started: bool,
+    /// Whether `ThinkingBlockCompleted` has already been emitted for this
+    /// stream (i.e. the thinking block has been sealed).
+    thinking_sealed: bool,
+    /// `block_index` of the thinking block. Always 0 when present.
+    thinking_block_index: u32,
+    /// `block_index` of the text block. Defaults to 0; bumped to 1 when
+    /// thinking is present, so the assistant content array sorts as
+    /// `[Thinking, Text, ToolUse, ...]` per ADR-0019 §4.
+    text_block_index: u32,
 }
 
 #[derive(Debug, Default)]
@@ -94,15 +110,44 @@ impl Decoder {
             finish_reason,
         } = choice;
 
+        // --- Reasoning content (DeepSeek/vLLM separate field) ---
+        if let Some(reasoning) = delta.reasoning_content {
+            if !self.thinking_started {
+                self.thinking_started = true;
+                // First reasoning chunk: bump text and tool indices up
+                // so the assistant message sorts [Thinking(0), Text(1), Tools(2+)]
+                // in H06's content reassembly (which sorts by block_index).
+                self.text_block_index = 1;
+                self.next_tool_block = 2;
+            }
+            if !reasoning.is_empty() {
+                self.thinking_buf.push_str(&reasoning);
+                out.push(ModelEvent::ThinkingDelta {
+                    block_index: self.thinking_block_index,
+                    chunk: reasoning,
+                });
+            }
+        }
+
         // --- Text delta ---
         if let Some(text) = delta.content {
+            // Seal thinking on the first content chunk if reasoning was streaming.
+            if self.thinking_started && !self.thinking_sealed {
+                let thinking_text = std::mem::take(&mut self.thinking_buf);
+                out.push(ModelEvent::ThinkingBlockCompleted {
+                    block_index: self.thinking_block_index,
+                    text: thinking_text,
+                    provider_opaque: None,
+                });
+                self.thinking_sealed = true;
+            }
             if !self.text_started {
                 self.text_started = true;
             }
             if !text.is_empty() {
                 self.text_buf.push_str(&text);
                 out.push(ModelEvent::TextDelta {
-                    block_index: 0,
+                    block_index: self.text_block_index,
                     chunk: text,
                 });
             }
@@ -165,11 +210,23 @@ impl Decoder {
 
         let mut out = Vec::new();
 
+        // Seal any unsealed thinking block (case: reasoning_content arrived
+        // but no delta.content followed — model emitted only reasoning).
+        if self.thinking_started && !self.thinking_sealed {
+            let thinking_text = std::mem::take(&mut self.thinking_buf);
+            out.push(ModelEvent::ThinkingBlockCompleted {
+                block_index: self.thinking_block_index,
+                text: thinking_text,
+                provider_opaque: None,
+            });
+            self.thinking_sealed = true;
+        }
+
         // Seal the text block with the full accumulated text.
         if self.text_started {
             let text = std::mem::take(&mut self.text_buf);
             out.push(ModelEvent::TextBlockCompleted {
-                block_index: 0,
+                block_index: self.text_block_index,
                 text,
             });
             self.text_started = false;
@@ -238,6 +295,20 @@ mod tests {
                     role: None,
                     content: content.map(String::from),
                     reasoning_content: None,
+                    tool_calls: vec![],
+                },
+                finish_reason: finish.map(String::from),
+            }],
+        }
+    }
+
+    fn make_chunk_with_reasoning(reasoning: &str, finish: Option<&str>) -> StreamChunk {
+        StreamChunk {
+            choices: vec![Choice {
+                delta: ChoiceDelta {
+                    role: None,
+                    content: None,
+                    reasoning_content: Some(reasoning.to_string()),
                     tool_calls: vec![],
                 },
                 finish_reason: finish.map(String::from),
@@ -531,5 +602,167 @@ mod tests {
         assert_eq!(parse_finish_reason("tool_calls"), StopReason::ToolUse);
         assert_eq!(parse_finish_reason("LENGTH"), StopReason::MaxTokens);
         assert_eq!(parse_finish_reason("unknown_value"), StopReason::EndTurn);
+    }
+
+    #[test]
+    fn reasoning_content_then_text_yields_thinking_then_text_blocks() {
+        let mut decoder = Decoder::new();
+        let mut events = Vec::new();
+
+        // Two reasoning_content chunks.
+        events.extend(
+            decoder
+                .translate(make_chunk_with_reasoning("I should ", None))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        events.extend(
+            decoder
+                .translate(make_chunk_with_reasoning("grep.", None))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        // Transition: first content chunk.
+        events.extend(
+            decoder
+                .translate(make_chunk(Some("OK."), None))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        // Finish.
+        events.extend(
+            decoder
+                .translate(make_chunk(None, Some("stop")))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        events.extend(decoder.finalize());
+
+        // Expected sequence:
+        //   ThinkingDelta("I should "),
+        //   ThinkingDelta("grep."),
+        //   ThinkingBlockCompleted(text="I should grep.", provider_opaque: None),
+        //   TextDelta("OK."),
+        //   TextBlockCompleted(text="OK."),
+        //   MessageCompleted(stop_reason: EndTurn, ...).
+        let kinds: Vec<&'static str> = events
+            .iter()
+            .map(|e| match e {
+                ModelEvent::ThinkingDelta { .. } => "td",
+                ModelEvent::ThinkingBlockCompleted { .. } => "tc",
+                ModelEvent::TextDelta { .. } => "xd",
+                ModelEvent::TextBlockCompleted { .. } => "xc",
+                ModelEvent::MessageCompleted { .. } => "mc",
+                _ => "??",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["td", "td", "tc", "xd", "xc", "mc"]);
+
+        // ThinkingBlockCompleted carries the full accumulated text and provider_opaque is None.
+        let completed = events.iter().find_map(|e| match e {
+            ModelEvent::ThinkingBlockCompleted {
+                text,
+                provider_opaque,
+                ..
+            } => Some((text.clone(), provider_opaque.clone())),
+            _ => None,
+        });
+        #[allow(clippy::panic)]
+        let (text, opaque) = completed.unwrap_or_else(|| panic!("ThinkingBlockCompleted missing"));
+        assert_eq!(text, "I should grep.");
+        assert_eq!(opaque, None);
+
+        // Block indices: thinking is 0, text is 1.
+        let think_idx = events.iter().find_map(|e| match e {
+            ModelEvent::ThinkingBlockCompleted { block_index, .. } => Some(*block_index),
+            _ => None,
+        });
+        let text_idx = events.iter().find_map(|e| match e {
+            ModelEvent::TextBlockCompleted { block_index, .. } => Some(*block_index),
+            _ => None,
+        });
+        assert_eq!(think_idx, Some(0));
+        assert_eq!(text_idx, Some(1), "text must sort after thinking");
+    }
+
+    #[test]
+    fn reasoning_content_only_no_text_seals_at_finalize() {
+        let mut decoder = Decoder::new();
+        let mut events = Vec::new();
+
+        events.extend(
+            decoder
+                .translate(make_chunk_with_reasoning("thinking only", None))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        events.extend(
+            decoder
+                .translate(make_chunk(None, Some("stop")))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        events.extend(decoder.finalize());
+
+        // Expected: ThinkingDelta, then finalize emits ThinkingBlockCompleted + MessageCompleted.
+        let kinds: Vec<&'static str> = events
+            .iter()
+            .map(|e| match e {
+                ModelEvent::ThinkingDelta { .. } => "td",
+                ModelEvent::ThinkingBlockCompleted { .. } => "tc",
+                ModelEvent::TextBlockCompleted { .. } => "xc",
+                ModelEvent::MessageCompleted { .. } => "mc",
+                _ => "??",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["td", "tc", "mc"]);
+    }
+
+    #[test]
+    fn no_reasoning_content_preserves_text_at_block_index_zero() {
+        // Backwards compat: when no reasoning_content arrives, text stays at block 0.
+        let mut decoder = Decoder::new();
+        let _ = decoder
+            .translate(make_chunk(Some("just text"), Some("stop")))
+            .unwrap_or_else(|e| {
+                #[allow(clippy::panic)]
+                {
+                    panic!("decoder error: {e:?}")
+                }
+            });
+        let final_events = decoder.finalize();
+        let text_idx = final_events.iter().find_map(|e| match e {
+            ModelEvent::TextBlockCompleted { block_index, .. } => Some(*block_index),
+            _ => None,
+        });
+        assert_eq!(
+            text_idx,
+            Some(0),
+            "no reasoning -> text still at block_index 0 (back compat)"
+        );
     }
 }
