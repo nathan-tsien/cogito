@@ -48,10 +48,10 @@ pub mod turn_trigger;
 pub use content::ContentBlock;
 pub use context::{
     CompactionApplied, CompactionInput, CompactionKind, CompactionReplacement, Compactor,
-    CompactorConfig, ContextConfig, ContextDecisionErrors, ContextError, HistoryProjector,
-    HistoryProjectorConfig, InjectionInput, ProjectedMessage, SystemPromptInjector,
-    SystemPromptInjectorConfig, TokenThreshold, ToolFilterInput, ToolFilterOverrideMode,
-    ToolFilterOverrider, ToolFilterOverriderConfig, TruncateConfig,
+    CompactorConfig, ContextConfig, ContextDecisionErrors, ContextError, ContextPipeline,
+    HistoryProjector, HistoryProjectorConfig, InjectionInput, ProjectedMessage,
+    SystemPromptInjector, SystemPromptInjectorConfig, TokenThreshold, ToolFilterInput,
+    ToolFilterOverrideMode, ToolFilterOverrider, ToolFilterOverriderConfig, TruncateConfig,
 };
 pub use event::{ConversationEvent, EventCategory, EventPayload, SCHEMA_VERSION};
 pub use exec_ctx::ExecCtx;

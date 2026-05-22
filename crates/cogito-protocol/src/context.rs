@@ -3,6 +3,8 @@
 //! See `docs/superpowers/specs/2026-05-23-sprint-6-context-management-design.md`
 //! and ADR-0008 for the full design. Implementations live in `cogito-context`.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -266,6 +268,26 @@ pub trait ToolFilterOverrider: Send + Sync {
 
     /// Stable identifier for this overrider implementation (e.g. `"noop"`, `"plugin-overrider"`).
     fn id(&self) -> &'static str;
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline assembly
+// ---------------------------------------------------------------------------
+
+/// Assembled set of trait objects driven by H11 for context management.
+///
+/// Built by `cogito_context::build_pipeline(&ContextConfig)`; injected
+/// into `TurnDeps.context_pipeline` by the Runtime layer at session open.
+#[derive(Clone)]
+pub struct ContextPipeline {
+    /// Compaction strategy for this session.
+    pub compactor: Arc<dyn Compactor>,
+    /// History projection strategy for this session.
+    pub projector: Arc<dyn HistoryProjector>,
+    /// System-prompt injection strategy for this session.
+    pub injector: Arc<dyn SystemPromptInjector>,
+    /// Tool-filter override strategy for this session.
+    pub overrider: Arc<dyn ToolFilterOverrider>,
 }
 
 // ---------------------------------------------------------------------------
