@@ -311,6 +311,42 @@ impl StepRecorder {
             .await
     }
 
+    /// Record a `SystemPromptInjected` event for `turn_id`.
+    ///
+    /// Idempotent per turn: if an event already exists in the log for this
+    /// `turn_id`, the existing [`EventId`] is returned without writing a
+    /// second event. H11 calls this exactly once per turn; the idempotency
+    /// guard protects against resume replays that re-enter `ContextManaged`.
+    pub async fn record_system_prompt_injected(
+        &mut self,
+        turn_id: TurnId,
+        suffix: String,
+        contributors: Vec<String>,
+        produced_by: impl Into<String>,
+    ) -> Result<EventId, StoreError> {
+        self.ensure_prior_history_loaded().await?;
+        if let Some(existing_id) = self.history_cache.iter().find_map(|ev| {
+            match &ev.payload {
+                EventPayload::SystemPromptInjected { turn_id: t, .. } if *t == turn_id => {
+                    Some(ev.event_id)
+                }
+                _ => None,
+            }
+        }) {
+            return Ok(existing_id);
+        }
+        self.append(
+            Some(turn_id),
+            EventPayload::SystemPromptInjected {
+                turn_id,
+                suffix,
+                contributors,
+                produced_by: produced_by.into(),
+            },
+        )
+        .await
+    }
+
     /// Record prompt composition metadata. Called after H04/H05 produce the
     /// `ModelInput` but before the gateway stream opens.
     pub async fn record_prompt_composed(
@@ -938,6 +974,57 @@ mod tests {
             ),
             "expected InvariantViolated for duplicate turn compaction, got {err:?}"
         );
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------------------
+    // record_system_prompt_injected tests
+    // ---------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn record_system_prompt_injected_first_call_writes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempfile::tempdir()?;
+        let store = fresh_store_in(tmp.path());
+        let (tx, _rx) = broadcast::channel(64);
+        let sid = SessionId::new();
+        let mut rec = StepRecorder::new(Arc::clone(&store), tx, sid, 0);
+
+        let turn = TurnId::new();
+        let id = rec
+            .record_system_prompt_injected(
+                turn,
+                "Today is 2026-05-23.".into(),
+                vec!["date".into()],
+                "none",
+            )
+            .await?;
+        // The event should have been persisted at seq 0.
+        assert_eq!(store.latest_seq(sid).await?, Some(0));
+        let _ = id;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn record_system_prompt_injected_idempotent_on_turn()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempfile::tempdir()?;
+        let store = fresh_store_in(tmp.path());
+        let (tx, _rx) = broadcast::channel(64);
+        let sid = SessionId::new();
+        let mut rec = StepRecorder::new(Arc::clone(&store), tx, sid, 0);
+
+        let turn = TurnId::new();
+        let first = rec
+            .record_system_prompt_injected(turn, "a".into(), vec![], "none")
+            .await?;
+        let second = rec
+            .record_system_prompt_injected(turn, "b".into(), vec![], "none")
+            .await?;
+
+        assert_eq!(first, second, "must return same EventId, must not double-write");
+        // Only one event written.
+        assert_eq!(store.latest_seq(sid).await?, Some(0));
         Ok(())
     }
 }
