@@ -237,6 +237,7 @@ mod tests {
                 delta: ChoiceDelta {
                     role: None,
                     content: content.map(String::from),
+                    reasoning_content: None,
                     tool_calls: vec![],
                 },
                 finish_reason: finish.map(String::from),
@@ -255,6 +256,7 @@ mod tests {
                     delta: ChoiceDelta {
                         role: Some("assistant".into()),
                         content: Some(String::new()),
+                        reasoning_content: None,
                         tool_calls: vec![],
                     },
                     finish_reason: None,
@@ -315,6 +317,7 @@ mod tests {
                 delta: ChoiceDelta {
                     role: None,
                     content: None,
+                    reasoning_content: None,
                     tool_calls: vec![ToolCallDelta {
                         index: 0,
                         id: Some("call_abc".into()),
@@ -346,6 +349,7 @@ mod tests {
                 delta: ChoiceDelta {
                     role: None,
                     content: None,
+                    reasoning_content: None,
                     tool_calls: vec![ToolCallDelta {
                         index: 0,
                         id: Some("call_x".into()),
@@ -366,6 +370,7 @@ mod tests {
                 delta: ChoiceDelta {
                     role: None,
                     content: None,
+                    reasoning_content: None,
                     tool_calls: vec![ToolCallDelta {
                         index: 0,
                         id: None,
