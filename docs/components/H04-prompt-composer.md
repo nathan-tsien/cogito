@@ -101,7 +101,20 @@ holds — they are only skipped by H04's projection.
 - **Snapshot** (insta): canonical event log → canonical `ModelInput` JSON, locked.
 - **Property**: composition is idempotent under reordering of independent events (e.g., reordering `HookModified` events doesn't change the resulting `ModelInput` — they don't project).
 
+## Sprint 6: HistoryProjector dispatch
+
+H04 no longer hard-codes the event-to-message projection algorithm. Instead it delegates to `dyn HistoryProjector` sourced from `SessionState.context_pipeline`. The default implementation — `StandardProjector` from `cogito-context` — applies the ADR-0008 covered-set algorithm:
+
+1. Build `covered`: the set-union of all `ContextCompacted.replaced_seq_range` values across the entire event log.
+2. Walk events in seq order; skip any event whose seq falls inside `covered`.
+3. When an uncovered `ContextCompacted` event is encountered, emit its `replacement` (`Drop` = nothing; `Summary` = one user-role `<conversation_summary>` message).
+4. Append the current turn's `SystemPromptInjected.suffix` to `strategy.system_prompt` (if suffix is non-empty).
+
+Pre-Sprint-6 sessions have no `ContextCompacted` or `SystemPromptInjected` events, so `covered` is empty and projection behaves identically to the previous code path.
+
+See ADR-0008 §"Projection semantics" for the full algorithm, invariants enforced at write time, and cascade compaction rules.
+
 ## References
 
 - ARCHITECTURE.md §"Turn state machine" (Init → PromptBuilt)
-- (no dedicated ADR yet — prompt composition policy decisions go in a future ADR if they become contentious)
+- ADR-0008 §"Projection semantics" (HistoryProjector contract and StandardProjector algorithm)
