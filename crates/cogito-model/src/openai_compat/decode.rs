@@ -18,6 +18,22 @@ use cogito_protocol::gateway::{ModelError, ModelEvent, StopReason, Usage};
 
 use super::wire::{Choice, StreamChunk};
 
+/// Open-tag sentinel for inline reasoning blocks emitted by open-source models
+/// (e.g. DeepSeek-R1 raw, QwQ, llama.cpp default).
+const OPEN_TAG: &str = "<think>";
+/// Close-tag sentinel matching `OPEN_TAG`.
+const CLOSE_TAG: &str = "</think>";
+
+/// State of the two-state `<think>` tag parser.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum ThinkTagState {
+    /// Normal text mode — scanning for `<think>`.
+    #[default]
+    Outside,
+    /// Inside a `<think>` block — scanning for `</think>`.
+    Inside,
+}
+
 /// Per-stream decoder state.  One instance per `stream()` call.
 ///
 /// **Lifecycle:** the gateway calls [`Decoder::translate`] once per
@@ -67,6 +83,15 @@ pub(crate) struct Decoder {
     /// thinking is present, so the assistant content array sorts as
     /// `[Thinking, Text, ToolUse, ...]` per ADR-0019 §4.
     text_block_index: u32,
+    /// State machine state for inline `<think>` tag parsing.
+    tag_state: ThinkTagState,
+    /// Pending chunk-boundary buffer for tag matching — text we have
+    /// received but cannot yet emit because it might be the prefix of
+    /// `<think>` or `</think>`.
+    tag_pending: String,
+    /// Disables the inline-tag parser when `reasoning_content` was
+    /// observed on this stream — the two paths are mutually exclusive.
+    tag_parser_disabled: bool,
 }
 
 #[derive(Debug, Default)]
@@ -119,6 +144,10 @@ impl Decoder {
                 // in H06's content reassembly (which sorts by block_index).
                 self.text_block_index = 1;
                 self.next_tool_block = 2;
+                // Disable the inline-tag parser: the two paths are mutually
+                // exclusive. A later `<think>` literal in delta.content is
+                // just plain text, not a tag boundary.
+                self.tag_parser_disabled = true;
             }
             if !reasoning.is_empty() {
                 self.thinking_buf.push_str(&reasoning);
@@ -131,8 +160,9 @@ impl Decoder {
 
         // --- Text delta ---
         if let Some(text) = delta.content {
-            // Seal thinking on the first content chunk if reasoning was streaming.
-            if self.thinking_started && !self.thinking_sealed {
+            // Seal thinking on the first content chunk if Task 13's
+            // reasoning_content path was active (mutually exclusive with tag parser).
+            if self.thinking_started && !self.thinking_sealed && self.tag_parser_disabled {
                 let thinking_text = std::mem::take(&mut self.thinking_buf);
                 out.push(ModelEvent::ThinkingBlockCompleted {
                     block_index: self.thinking_block_index,
@@ -141,15 +171,21 @@ impl Decoder {
                 });
                 self.thinking_sealed = true;
             }
-            if !self.text_started {
-                self.text_started = true;
-            }
-            if !text.is_empty() {
-                self.text_buf.push_str(&text);
-                out.push(ModelEvent::TextDelta {
-                    block_index: self.text_block_index,
-                    chunk: text,
-                });
+
+            if self.tag_parser_disabled {
+                // Plain text path: no tag parsing.
+                if !self.text_started {
+                    self.text_started = true;
+                }
+                if !text.is_empty() {
+                    self.text_buf.push_str(&text);
+                    out.push(ModelEvent::TextDelta {
+                        block_index: self.text_block_index,
+                        chunk: text,
+                    });
+                }
+            } else if !text.is_empty() {
+                self.feed_with_tag_parser(&text, out);
             }
         }
 
@@ -196,6 +232,104 @@ impl Decoder {
         }
     }
 
+    /// Feed one `delta.content` chunk through the `<think>` tag state machine.
+    ///
+    /// Emits zero or more `ModelEvent`s. Updates `tag_state`, `tag_pending`,
+    /// `thinking_started`, `thinking_sealed`, `thinking_buf`, and bumps
+    /// `text_block_index` / `next_tool_block` when entering the first thinking block.
+    fn feed_with_tag_parser(&mut self, chunk: &str, out: &mut Vec<ModelEvent>) {
+        self.tag_pending.push_str(chunk);
+        loop {
+            match self.tag_state {
+                ThinkTagState::Outside => {
+                    if let Some(pos) = self.tag_pending.find(OPEN_TAG) {
+                        // Emit text before the open tag immediately.
+                        let before: String = self.tag_pending.drain(..pos).collect();
+                        self.tag_pending.drain(..OPEN_TAG.len());
+                        if !before.is_empty() {
+                            if !self.text_started {
+                                self.text_started = true;
+                            }
+                            self.text_buf.push_str(&before);
+                            out.push(ModelEvent::TextDelta {
+                                block_index: self.text_block_index,
+                                chunk: before,
+                            });
+                        }
+                        // Entering the first thinking block: bump indices.
+                        if !self.thinking_started {
+                            self.thinking_started = true;
+                            self.text_block_index = 1;
+                            self.next_tool_block = 2;
+                        }
+                        self.tag_state = ThinkTagState::Inside;
+                        // Continue the loop to process any content after <think>.
+                    } else {
+                        // No complete open tag found. Retain from the last `<`
+                        // onward (it could be the start of a split `<think>`);
+                        // everything before it is safe to emit as plain text.
+                        let safe = self
+                            .tag_pending
+                            .rfind('<')
+                            .unwrap_or(self.tag_pending.len());
+                        if safe > 0 {
+                            let emitted: String = self.tag_pending.drain(..safe).collect();
+                            if !self.text_started {
+                                self.text_started = true;
+                            }
+                            self.text_buf.push_str(&emitted);
+                            out.push(ModelEvent::TextDelta {
+                                block_index: self.text_block_index,
+                                chunk: emitted,
+                            });
+                        }
+                        break;
+                    }
+                }
+                ThinkTagState::Inside => {
+                    if let Some(pos) = self.tag_pending.find(CLOSE_TAG) {
+                        // Emit thinking content before the close tag.
+                        let before: String = self.tag_pending.drain(..pos).collect();
+                        self.tag_pending.drain(..CLOSE_TAG.len());
+                        if !before.is_empty() {
+                            self.thinking_buf.push_str(&before);
+                            out.push(ModelEvent::ThinkingDelta {
+                                block_index: self.thinking_block_index,
+                                chunk: before,
+                            });
+                        }
+                        let thinking_text = std::mem::take(&mut self.thinking_buf);
+                        out.push(ModelEvent::ThinkingBlockCompleted {
+                            block_index: self.thinking_block_index,
+                            text: thinking_text,
+                            provider_opaque: None,
+                        });
+                        self.thinking_sealed = true;
+                        self.tag_state = ThinkTagState::Outside;
+                        // Continue the loop to process any content after </think>.
+                    } else {
+                        // No complete close tag found. Retain from the last `<`
+                        // onward (it could be the start of a split `</think>`);
+                        // everything before it is safe to emit as thinking deltas.
+                        let safe = self
+                            .tag_pending
+                            .rfind('<')
+                            .unwrap_or(self.tag_pending.len());
+                        if safe > 0 {
+                            let emitted: String = self.tag_pending.drain(..safe).collect();
+                            self.thinking_buf.push_str(&emitted);
+                            out.push(ModelEvent::ThinkingDelta {
+                                block_index: self.thinking_block_index,
+                                chunk: emitted,
+                            });
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     /// Emit terminal events once the SSE stream has closed. The gateway
     /// MUST call this exactly once after `sse.next()` returns `None`.
     /// Returns `TextBlockCompleted` (when any text was accumulated),
@@ -210,8 +344,37 @@ impl Decoder {
 
         let mut out = Vec::new();
 
-        // Seal any unsealed thinking block (case: reasoning_content arrived
-        // but no delta.content followed — model emitted only reasoning).
+        // Drain leftover pending bytes from the inline-tag parser (e.g.
+        // the safe-prefix tail that was not emitted yet). Treats unclosed
+        // `<think>` as best-effort: whatever was accumulated becomes a
+        // ThinkingBlockCompleted below.
+        if !self.tag_pending.is_empty() {
+            let leftover = std::mem::take(&mut self.tag_pending);
+            match self.tag_state {
+                ThinkTagState::Outside => {
+                    if !self.text_started {
+                        self.text_started = true;
+                    }
+                    self.text_buf.push_str(&leftover);
+                    out.push(ModelEvent::TextDelta {
+                        block_index: self.text_block_index,
+                        chunk: leftover,
+                    });
+                }
+                ThinkTagState::Inside => {
+                    self.thinking_buf.push_str(&leftover);
+                    out.push(ModelEvent::ThinkingDelta {
+                        block_index: self.thinking_block_index,
+                        chunk: leftover,
+                    });
+                }
+            }
+        }
+
+        // Seal any unsealed thinking block.
+        // Covers two cases:
+        // - reasoning_content arrived but no delta.content followed (Task 13).
+        // - an unclosed `<think>` was present in delta.content (Task 14).
         if self.thinking_started && !self.thinking_sealed {
             let thinking_text = std::mem::take(&mut self.thinking_buf);
             out.push(ModelEvent::ThinkingBlockCompleted {
@@ -764,5 +927,180 @@ mod tests {
             Some(0),
             "no reasoning -> text still at block_index 0 (back compat)"
         );
+    }
+
+    #[test]
+    fn inline_think_tag_whole_chunk() {
+        let mut decoder = Decoder::new();
+        let mut events = Vec::new();
+        events.extend(
+            decoder
+                .translate(make_chunk(Some("<think>I should grep.</think>OK."), None))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        events.extend(
+            decoder
+                .translate(make_chunk(None, Some("stop")))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        events.extend(decoder.finalize());
+
+        let kinds: Vec<&'static str> = events
+            .iter()
+            .map(|e| match e {
+                ModelEvent::ThinkingDelta { .. } => "td",
+                ModelEvent::ThinkingBlockCompleted { .. } => "tc",
+                ModelEvent::TextDelta { .. } => "xd",
+                ModelEvent::TextBlockCompleted { .. } => "xc",
+                ModelEvent::MessageCompleted { .. } => "mc",
+                _ => "??",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["td", "tc", "xd", "xc", "mc"]);
+
+        let think_text = events.iter().find_map(|e| match e {
+            ModelEvent::ThinkingBlockCompleted { text, .. } => Some(text.clone()),
+            _ => None,
+        });
+        assert_eq!(think_text.as_deref(), Some("I should grep."));
+
+        let text_text = events.iter().find_map(|e| match e {
+            ModelEvent::TextBlockCompleted { text, .. } => Some(text.clone()),
+            _ => None,
+        });
+        assert_eq!(text_text.as_deref(), Some("OK."));
+    }
+
+    #[test]
+    fn inline_think_tag_split_across_chunks() {
+        let mut decoder = Decoder::new();
+        let mut events = Vec::new();
+        for piece in ["<thi", "nk>I should grep.</thi", "nk>OK."] {
+            events.extend(
+                decoder
+                    .translate(make_chunk(Some(piece), None))
+                    .unwrap_or_else(|e| {
+                        #[allow(clippy::panic)]
+                        {
+                            panic!("decoder error: {e:?}")
+                        }
+                    }),
+            );
+        }
+        events.extend(
+            decoder
+                .translate(make_chunk(None, Some("stop")))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        events.extend(decoder.finalize());
+
+        let think_text = events.iter().find_map(|e| match e {
+            ModelEvent::ThinkingBlockCompleted { text, .. } => Some(text.clone()),
+            _ => None,
+        });
+        assert_eq!(think_text.as_deref(), Some("I should grep."));
+
+        let text_text = events.iter().find_map(|e| match e {
+            ModelEvent::TextBlockCompleted { text, .. } => Some(text.clone()),
+            _ => None,
+        });
+        assert_eq!(text_text.as_deref(), Some("OK."));
+
+        // No spurious TextDelta with partial-tag content (e.g. "<thi" leaking out as text).
+        let leak = events
+            .iter()
+            .any(|e| matches!(e, ModelEvent::TextDelta { chunk, .. } if chunk.contains("<thi")));
+        assert!(!leak, "partial open tag leaked into TextDelta");
+    }
+
+    #[test]
+    fn unclosed_think_tag_at_stream_end_seals_best_effort() {
+        let mut decoder = Decoder::new();
+        let mut events = Vec::new();
+        events.extend(
+            decoder
+                .translate(make_chunk(Some("<think>I never closed"), Some("stop")))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        events.extend(decoder.finalize());
+
+        let completed = events.iter().find_map(|e| match e {
+            ModelEvent::ThinkingBlockCompleted { text, .. } => Some(text.clone()),
+            _ => None,
+        });
+        assert_eq!(
+            completed.as_deref(),
+            Some("I never closed"),
+            "unclosed <think> on stream end must still seal as a thinking block"
+        );
+    }
+
+    #[test]
+    fn reasoning_content_seen_first_disables_tag_parser() {
+        // Mutual exclusion: if reasoning_content arrived first, a later
+        // <think> literal in delta.content is just plain text, not a tag.
+        let mut decoder = Decoder::new();
+        let mut events = Vec::new();
+        events.extend(
+            decoder
+                .translate(make_chunk_with_reasoning("thinking", None))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        // After reasoning_content path is engaged, delta.content with <think>
+        // should be treated as literal text (the reasoning block was already
+        // sealed at the transition to content).
+        events.extend(
+            decoder
+                .translate(make_chunk(Some("<think>not a tag</think>"), Some("stop")))
+                .unwrap_or_else(|e| {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("decoder error: {e:?}")
+                    }
+                }),
+        );
+        events.extend(decoder.finalize());
+
+        // Exactly one ThinkingBlockCompleted (from the reasoning_content path), not two.
+        let think_count = events
+            .iter()
+            .filter(|e| matches!(e, ModelEvent::ThinkingBlockCompleted { .. }))
+            .count();
+        assert_eq!(
+            think_count, 1,
+            "tag parser must not double-emit when reasoning_content was used"
+        );
+
+        // Text block contains the literal `<think>...</think>` verbatim.
+        let text = events.iter().find_map(|e| match e {
+            ModelEvent::TextBlockCompleted { text, .. } => Some(text.clone()),
+            _ => None,
+        });
+        assert_eq!(text.as_deref(), Some("<think>not a tag</think>"));
     }
 }
