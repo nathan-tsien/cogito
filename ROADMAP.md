@@ -6,12 +6,13 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 complete; Sprint 4
-> (MCP sync tools) in flight; Sprints 6–10 reshaped per
+> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 + 6 complete; Sprint 4
+> (MCP sync tools) in flight; Sprints 7–10 reshaped per
 > [2026-05-22 roadmap rebalance](docs/superpowers/specs/2026-05-22-roadmap-rebalance-design.md)
 > (Hook impl + Context C2 trait freeze + Skill loader promoted into
 > v0.1; Async Jobs / Multi-model / TUI / hardening renumbered;
 > Storage+Multimodal deferred from v0.2 to v0.5).
+> **Current sprint: Sprint 7 (Skill loader).**
 
 ## Version plan
 
@@ -147,15 +148,15 @@ Sprint 12) can load hooks from disk.
 2026-05-22 rebalance — enables team-parallel context strategy
 contributions and unblocks Sprint 7 Skill injection into H11.
 
-- [ ] Research carryover: Codex (`run_inline_auto_compact_task`), Claude Code (`/compact` + auto), Manus, other SaaS agent platforms — trigger policies and persisted shape
-- [ ] **ADR-0008**: Context Management — freeze `Compactor` / `HistoryProjector` / `SystemPromptInjector` traits + event variants (`ContextCompacted`, `ContextDecisionRecorded`, `SystemPromptInjected`, `ToolFilterOverridden`) + trigger policy + summarization model selection rules
-- [ ] `cogito-protocol`: additive `EventPayload` variants for context lifecycle (per `#[non_exhaustive]`, no schema_version bump)
-- [ ] **New crate `cogito-context`** (umbrella): hosts all Compactor / HistoryProjector / SystemPromptInjector implementations as modules; future strategies (`compactor::summarize`, `compactor::sliding`, …) are added as modules, not new crates; `build_pipeline(&ContextConfig)` factory lives here
-- [ ] v0.1 ships only `cogito_context::compactor::truncate` as the reference Compactor
-- [ ] `cogito-core::harness`: H11 implementation; H01 `Init → ContextManaged` transition stops being a pass-through
-- [ ] H04 history projection: honor `ContextCompacted` events
-- [ ] H03 Resume Coordinator: crash-mid-compaction recovery
-- [ ] Chaos test: inject crash during summarization model call (skipped if v0.1 reference Compactor is truncate-only)
+- [x] Research carryover: Codex (`run_inline_auto_compact_task`), Claude Code (`/compact` + auto), Manus, other SaaS agent platforms — trigger policies and persisted shape
+- [x] **ADR-0008**: Context Management — freeze `Compactor` / `HistoryProjector` / `SystemPromptInjector` traits + event variants (`ContextCompacted`, `ContextDecisionRecorded`, `SystemPromptInjected`, `ToolFilterOverridden`) + trigger policy + summarization model selection rules
+- [x] `cogito-protocol`: additive `EventPayload` variants for context lifecycle (per `#[non_exhaustive]`, no schema_version bump)
+- [x] **New crate `cogito-context`** (umbrella): hosts all Compactor / HistoryProjector / SystemPromptInjector implementations as modules; future strategies (`compactor::summarize`, `compactor::sliding`, …) are added as modules, not new crates; `build_pipeline(&ContextConfig)` factory lives here
+- [x] v0.1 ships only `cogito_context::compactor::truncate` as the reference Compactor
+- [x] `cogito-core::harness`: H11 implementation; H01 `Init → ContextManaged` transition stops being a pass-through
+- [x] H04 history projection: honor `ContextCompacted` events
+- [x] H03 Resume Coordinator: crash-mid-compaction recovery
+- [x] Chaos test: inject crash during summarization model call (skipped if v0.1 reference Compactor is truncate-only)
 
 #### Sprint 7 · Skill loader (`cogito-skills`) — ADR-0020 (1.5–2 days)
 
