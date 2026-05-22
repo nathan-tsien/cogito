@@ -131,6 +131,7 @@ fn build_openai_compat_gateway() {
         auth_header: "Authorization".into(),
         auth_scheme: "Bearer".into(),
         timeout_secs: None,
+        include_prior_thinking: false,
     };
     let gw: Arc<dyn ModelGateway> = build_gateway(cfg).expect("build");
     assert_eq!(gw.provider_id(), "openai-compat");
@@ -146,4 +147,43 @@ fn provider_config_name_accessor() {
         timeout_secs: None,
     };
     assert_eq!(cfg.name(), "anthropic-prod");
+}
+
+#[test]
+fn openai_compat_include_prior_thinking_defaults_false() {
+    let toml = r#"
+        kind = "openai-compat"
+        name = "local"
+        base_url = "http://localhost:8000/v1"
+    "#;
+    let cfg: ProviderConfig = toml::from_str(toml).expect("parse");
+    match cfg {
+        ProviderConfig::OpenAiCompat {
+            include_prior_thinking,
+            ..
+        } => {
+            assert!(!include_prior_thinking, "default must be false");
+        }
+        ProviderConfig::Anthropic { .. } => panic!("expected OpenAiCompat variant"),
+    }
+}
+
+#[test]
+fn openai_compat_include_prior_thinking_honors_explicit_true() {
+    let toml = r#"
+        kind = "openai-compat"
+        name = "local"
+        base_url = "http://localhost:8000/v1"
+        include_prior_thinking = true
+    "#;
+    let cfg: ProviderConfig = toml::from_str(toml).expect("parse");
+    match cfg {
+        ProviderConfig::OpenAiCompat {
+            include_prior_thinking,
+            ..
+        } => {
+            assert!(include_prior_thinking, "explicit true must propagate");
+        }
+        ProviderConfig::Anthropic { .. } => panic!("expected OpenAiCompat variant"),
+    }
 }

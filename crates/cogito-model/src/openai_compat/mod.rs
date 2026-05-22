@@ -29,6 +29,10 @@ pub struct OpenAiCompatConfig {
     pub auth_scheme: String,
     /// Per-request timeout. Default: 5 minutes.
     pub timeout: Duration,
+    /// Whether to re-feed prior-turn `ContentBlock::Thinking` blocks
+    /// when building outgoing assistant messages. See ADR-0019 §5.3.
+    /// Default `false` — matches DeepSeek-R1 / QwQ convention.
+    pub include_prior_thinking: bool,
 }
 
 impl OpenAiCompatConfig {
@@ -44,6 +48,7 @@ impl OpenAiCompatConfig {
             auth_header: "Authorization".into(),
             auth_scheme: "Bearer".into(),
             timeout: Duration::from_secs(5 * 60),
+            include_prior_thinking: false,
         }
     }
 }
