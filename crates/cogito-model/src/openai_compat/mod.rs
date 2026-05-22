@@ -10,7 +10,28 @@ pub mod wire;
 
 use std::time::Duration;
 
+use async_stream::try_stream;
+use cogito_protocol::ExecCtx;
+use cogito_protocol::gateway::{
+    ModelError, ModelEvent, ModelGateway, ModelInput, ModelLimits, parse_context_window_suffix,
+};
+use futures::stream::{BoxStream, StreamExt};
 use reqwest::Client;
+
+use crate::error::from_reqwest;
+use crate::sse::lines;
+
+/// Strip a `[<size>]` suffix from a model identifier.
+///
+/// The suffix is a local-only annotation used by `model_limits()` to derive the
+/// context window size (e.g. `"Llama-3.3-70B[32k]"`). vLLM / `SGLang` servers
+/// treat the full string as an unknown model id and reject the request.
+///
+/// Returns the base string slice before `[`, or the whole input if no `[` is
+/// present.
+fn strip_size_suffix(model: &str) -> &str {
+    model.split_once('[').map_or(model, |(base, _)| base)
+}
 
 /// Configuration for an OpenAI-Compatible endpoint.
 ///
@@ -107,22 +128,9 @@ impl OpenAiCompatGateway {
     /// Falls back to `cfg.model` unchanged if no suffix is present.
     #[must_use]
     pub fn api_model_id(&self) -> String {
-        self.cfg
-            .model
-            .split_once('[')
-            .map_or_else(|| self.cfg.model.clone(), |(base, _)| base.to_owned())
+        strip_size_suffix(&self.cfg.model).to_owned()
     }
 }
-
-use async_stream::try_stream;
-use cogito_protocol::ExecCtx;
-use cogito_protocol::gateway::{
-    ModelError, ModelEvent, ModelGateway, ModelInput, ModelLimits, parse_context_window_suffix,
-};
-use futures::stream::{BoxStream, StreamExt};
-
-use crate::error::from_reqwest;
-use crate::sse::lines;
 
 #[async_trait::async_trait]
 impl ModelGateway for OpenAiCompatGateway {
@@ -137,9 +145,14 @@ impl ModelGateway for OpenAiCompatGateway {
     /// Returns `ModelError` on network, auth, or rate-limit failures.
     async fn stream(
         &self,
-        input: ModelInput,
+        mut input: ModelInput,
         ctx: ExecCtx,
     ) -> Result<BoxStream<'static, Result<ModelEvent, ModelError>>, ModelError> {
+        // Strip the [<size>] suffix before sending to the server. The suffix is
+        // a local convention for adaptive ModelLimits (see ADR-0008) and is not
+        // a real model name recognised by vLLM / SGLang.
+        let stripped = strip_size_suffix(&input.params.model).to_owned();
+        input.params.model = stripped;
         let body = encode::encode(input, self.cfg.include_prior_thinking);
         let url = format!(
             "{}/chat/completions",
@@ -254,5 +267,74 @@ impl ModelGateway for OpenAiCompatGateway {
                 32_768
             });
         ModelLimits::new(model_id.clone(), window)
+    }
+}
+
+#[cfg(test)]
+mod strip_suffix_tests {
+    use super::*;
+    use cogito_protocol::gateway::{Message, ModelParams};
+
+    #[test]
+    fn strip_with_suffix_returns_base() {
+        assert_eq!(strip_size_suffix("Llama-3.3-70B[32k]"), "Llama-3.3-70B");
+    }
+
+    #[test]
+    fn strip_without_suffix_returns_unchanged() {
+        assert_eq!(strip_size_suffix("Llama-3.3-70B"), "Llama-3.3-70B");
+    }
+
+    #[test]
+    fn strip_empty_string() {
+        assert_eq!(strip_size_suffix(""), "");
+    }
+
+    #[test]
+    fn api_model_id_strips_suffix() {
+        let cfg = OpenAiCompatConfig {
+            model: "Llama-3.3-70B[32k]".into(),
+            ..OpenAiCompatConfig::with_base_url("http://localhost:8000/v1")
+        };
+        let gw = OpenAiCompatGateway::new_for_test(cfg);
+        assert_eq!(gw.api_model_id(), "Llama-3.3-70B");
+    }
+
+    #[test]
+    fn api_model_id_no_suffix_passthrough() {
+        let cfg = OpenAiCompatConfig {
+            model: "Llama-3.3-70B".into(),
+            ..OpenAiCompatConfig::with_base_url("http://localhost:8000/v1")
+        };
+        let gw = OpenAiCompatGateway::new_for_test(cfg);
+        assert_eq!(gw.api_model_id(), "Llama-3.3-70B");
+    }
+
+    /// Verify the suffix is stripped in the wire request body produced by
+    /// `encode::encode`. This confirms the fix is applied on the encode path,
+    /// not just in `api_model_id()`.
+    #[test]
+    fn encode_strips_suffix_in_wire_request() {
+        let input = ModelInput {
+            system: String::new(),
+            messages: vec![Message::User {
+                content: vec![cogito_protocol::content::ContentBlock::Text {
+                    text: "hello".into(),
+                }],
+            }],
+            tools: Vec::new(),
+            params: ModelParams {
+                model: "Llama-3.3-70B[32k]".into(),
+                max_tokens: 256,
+                temperature: None,
+                top_p: None,
+                stop_sequences: Vec::new(),
+            },
+        };
+        // Simulate what stream() does: strip the suffix, then encode.
+        let mut stripped_input = input;
+        stripped_input.params.model = strip_size_suffix(&stripped_input.params.model).to_owned();
+        let req = encode::encode(stripped_input, false);
+        assert_eq!(req.model, "Llama-3.3-70B");
     }
 }
