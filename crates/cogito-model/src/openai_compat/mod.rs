@@ -33,6 +33,10 @@ pub struct OpenAiCompatConfig {
     /// when building outgoing assistant messages. See ADR-0019 §5.3.
     /// Default `false` — matches DeepSeek-R1 / `QwQ` convention.
     pub include_prior_thinking: bool,
+    /// Optional fallback context-window size in tokens. Used by
+    /// `model_limits()` when the model id carries no `[<size>]` suffix.
+    /// `None` causes the gateway to fall back to `32_768` with a warn log.
+    pub context_window_tokens: Option<u64>,
 }
 
 impl OpenAiCompatConfig {
@@ -49,6 +53,7 @@ impl OpenAiCompatConfig {
             auth_scheme: "Bearer".into(),
             timeout: Duration::from_secs(5 * 60),
             include_prior_thinking: false,
+            context_window_tokens: None,
         }
     }
 }

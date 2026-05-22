@@ -73,6 +73,13 @@ pub enum ProviderConfig {
         /// `<think>` context. See ADR-0019 §5.3.
         #[serde(default)]
         include_prior_thinking: bool,
+        /// Optional fallback for `ModelGateway::model_limits().context_window_tokens`
+        /// when the model id does not carry a `[<size>]` suffix. Users typically
+        /// know what their vLLM/SGLang server is configured for; this is the
+        /// place to declare it. When both the suffix and this field are absent,
+        /// the gateway falls back to `32_768` with a warn log.
+        #[serde(default)]
+        context_window_tokens: Option<u64>,
     },
     // OpenAiResponses { ... } lands in Sprint 5 — single-arm addition.
 }
@@ -120,6 +127,7 @@ pub fn build_gateway(cfg: ProviderConfig) -> Result<Arc<dyn ModelGateway>, Model
             auth_scheme,
             timeout_secs,
             include_prior_thinking,
+            context_window_tokens,
             ..
         } => {
             let mut c = OpenAiCompatConfig::with_base_url(base_url);
@@ -127,6 +135,7 @@ pub fn build_gateway(cfg: ProviderConfig) -> Result<Arc<dyn ModelGateway>, Model
             c.auth_header = auth_header;
             c.auth_scheme = auth_scheme;
             c.include_prior_thinking = include_prior_thinking;
+            c.context_window_tokens = context_window_tokens;
             if let Some(s) = timeout_secs {
                 c.timeout = Duration::from_secs(s);
             }

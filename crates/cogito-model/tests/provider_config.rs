@@ -132,6 +132,7 @@ fn build_openai_compat_gateway() {
         auth_scheme: "Bearer".into(),
         timeout_secs: None,
         include_prior_thinking: false,
+        context_window_tokens: None,
     };
     let gw: Arc<dyn ModelGateway> = build_gateway(cfg).expect("build");
     assert_eq!(gw.provider_id(), "openai-compat");
