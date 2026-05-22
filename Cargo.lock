@@ -423,6 +423,7 @@ dependencies = [
  "jsonschema",
  "parking_lot",
  "proptest",
+ "regex",
  "rstest",
  "serde",
  "serde_json",
