@@ -97,6 +97,13 @@ pub enum StoreError {
         /// Human-readable detail.
         message: String,
     },
+
+    /// A write was rejected because a domain invariant would be violated.
+    ///
+    /// Used by `StepRecorder::record_context_compacted` to enforce the
+    /// §5.5 boundary invariants (seq range alignment, uniqueness per turn).
+    #[error("invariant violated: {0}")]
+    InvariantViolated(String),
 }
 
 /// Write-side abstraction used by Context-Management trait implementations

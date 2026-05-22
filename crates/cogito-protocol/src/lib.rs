@@ -50,8 +50,9 @@ pub use context::{
     CompactionApplied, CompactionInput, CompactionKind, CompactionReplacement, Compactor,
     CompactorConfig, ContextConfig, ContextDecisionErrors, ContextError, ContextPipeline,
     HistoryProjector, HistoryProjectorConfig, InjectionInput, ProjectedMessage,
-    SystemPromptInjector, SystemPromptInjectorConfig, TokenThreshold, ToolFilterInput,
-    ToolFilterOverrideMode, ToolFilterOverrider, ToolFilterOverriderConfig, TruncateConfig,
+    SystemPromptInjector, SystemPromptInjectorConfig, TokenEstimates, TokenThreshold,
+    ToolFilterInput, ToolFilterOverrideMode, ToolFilterOverrider, ToolFilterOverriderConfig,
+    TruncateConfig,
 };
 pub use event::{ConversationEvent, EventCategory, EventPayload, SCHEMA_VERSION};
 pub use exec_ctx::ExecCtx;

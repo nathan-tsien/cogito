@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use cogito_protocol::content::ContentBlock;
+use cogito_protocol::context::{CompactionReplacement, TokenEstimates};
 use cogito_protocol::event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
 use cogito_protocol::ids::{EventId, SessionId, TurnId};
 use cogito_protocol::job::{JobId, JobOutcome};
@@ -25,6 +26,7 @@ use cogito_protocol::store::{ConversationStore, StoreError};
 use cogito_protocol::stream::StreamEvent;
 use cogito_protocol::tool::ToolResult;
 use cogito_protocol::turn::{TurnFailureReason, TurnOutcome};
+use futures::StreamExt as _;
 use tokio::sync::broadcast;
 
 /// H02 Step Recorder. Persists [`ConversationEvent`]s to the
@@ -34,6 +36,13 @@ use tokio::sync::broadcast;
 /// Text deltas are buffered until [`StepRecorder::on_text_block_complete`]
 /// to honor the H02 batching contract; every other event is persisted
 /// immediately on its corresponding method.
+///
+/// The recorder keeps a local mirror of all appended events in
+/// `history_cache`. This cache is used by `record_context_compacted` to
+/// validate the §5.5 invariants without issuing an additional store read.
+/// The cache is built from the `seq_start` position onward; events that
+/// existed before the recorder was constructed are loaded on first access
+/// via `load_prior_history`.
 pub struct StepRecorder {
     store: Arc<dyn ConversationStore>,
     events_tx: broadcast::Sender<StreamEvent>,
@@ -41,6 +50,9 @@ pub struct StepRecorder {
     seq_counter: u64,
     current_text_block: Option<TextBlockBuf>,
     current_thinking_block: Option<ThinkingBlockBuf>,
+    /// Mirror of all events persisted through this recorder instance.
+    /// Used for invariant checking in `record_context_compacted`.
+    history_cache: Vec<ConversationEvent>,
 }
 
 /// In-flight text block accumulator. Filled by `on_text_delta` and drained
@@ -64,6 +76,10 @@ impl StepRecorder {
     /// Create a recorder bound to `session_id`. `seq_start` is the seq
     /// number to assign to the next appended event; pass `0` for a fresh
     /// session, or `latest_seq + 1` when resuming.
+    ///
+    /// When `seq_start > 0` (resume path), prior events are NOT pre-loaded
+    /// into `history_cache`. They are fetched lazily on the first call to
+    /// `record_context_compacted` via `load_prior_history`.
     pub fn new(
         store: Arc<dyn ConversationStore>,
         events_tx: broadcast::Sender<StreamEvent>,
@@ -77,6 +93,7 @@ impl StepRecorder {
             seq_counter: seq_start,
             current_text_block: None,
             current_thinking_block: None,
+            history_cache: Vec::new(),
         }
     }
 
@@ -384,6 +401,153 @@ impl StepRecorder {
             .await
     }
 
+    /// Record a compaction event with §5.5 invariant enforcement.
+    ///
+    /// Enforced invariants (returns `StoreError::InvariantViolated` on failure):
+    ///
+    /// 1. `replaced_seq_range.1 < next_seq` — the range must lie entirely in
+    ///    the past; the new event's own seq is not included in its covered range.
+    /// 2. `replaced_seq_range.0 <= replaced_seq_range.1` — the range is
+    ///    well-formed (non-empty, non-inverted).
+    /// 3. `replaced_seq_range.0` must be the seq of a `TurnStarted` event —
+    ///    compaction always starts at a turn boundary.
+    /// 4. The event immediately after `replaced_seq_range.1` (if any) must be
+    ///    a `TurnStarted` or `ContextManageEntered` — compaction covers exactly
+    ///    the tail of one complete turn.
+    /// 5. No `ContextCompacted` event for the same `turn_id` may already exist
+    ///    in the log — the compactor is responsible for idempotency before
+    ///    calling this method.
+    pub async fn record_context_compacted(
+        &mut self,
+        turn_id: TurnId,
+        replaced_seq_range: (u64, u64),
+        produced_by: impl Into<String>,
+        replacement: CompactionReplacement,
+        estimates: TokenEstimates,
+    ) -> Result<EventId, StoreError> {
+        // Ensure prior events (from resume path) are in the cache.
+        self.ensure_prior_history_loaded().await?;
+        let next_seq = self.seq_counter;
+
+        // Invariant 1: range must lie entirely in the past.
+        if replaced_seq_range.1 >= next_seq {
+            return Err(StoreError::InvariantViolated(format!(
+                "ContextCompacted.replaced_seq_range.1 = {} must be < next_seq = {}",
+                replaced_seq_range.1, next_seq,
+            )));
+        }
+
+        // Invariant 2: range is well-formed.
+        if replaced_seq_range.0 > replaced_seq_range.1 {
+            return Err(StoreError::InvariantViolated(format!(
+                "ContextCompacted.replaced_seq_range is malformed: ({}, {})",
+                replaced_seq_range.0, replaced_seq_range.1,
+            )));
+        }
+
+        // Invariant 3: range.0 is a TurnStarted seq.
+        let start_is_turn_boundary = self.history_cache.iter().any(|ev| {
+            ev.seq == replaced_seq_range.0 && matches!(ev.payload, EventPayload::TurnStarted { .. })
+        });
+        if !start_is_turn_boundary {
+            return Err(StoreError::InvariantViolated(format!(
+                "replaced_seq_range.0 = {} is not the seq of a TurnStarted event",
+                replaced_seq_range.0,
+            )));
+        }
+
+        // Invariant 4: range.1 is the last event of its turn (the next event, if
+        // any, must be TurnStarted or ContextManageEntered).
+        if let Some(next_event) = self
+            .history_cache
+            .iter()
+            .find(|ev| ev.seq > replaced_seq_range.1)
+        {
+            let is_valid_boundary = matches!(
+                next_event.payload,
+                EventPayload::TurnStarted { .. } | EventPayload::ContextManageEntered { .. }
+            );
+            if !is_valid_boundary {
+                return Err(StoreError::InvariantViolated(format!(
+                    "replaced_seq_range.1 = {} is not the last event of its turn \
+                     (seq {} follows it with category {:?})",
+                    replaced_seq_range.1,
+                    next_event.seq,
+                    next_event.payload.category(),
+                )));
+            }
+        }
+
+        // Invariant 5: at most one ContextCompacted per turn_id.
+        let already_compacted = self.history_cache.iter().any(|ev| {
+            matches!(
+                &ev.payload,
+                EventPayload::ContextCompacted { turn_id: t, .. } if *t == turn_id
+            )
+        });
+        if already_compacted {
+            return Err(StoreError::InvariantViolated(format!(
+                "ContextCompacted already exists for turn_id {turn_id:?}",
+            )));
+        }
+
+        self.append(
+            Some(turn_id),
+            EventPayload::ContextCompacted {
+                turn_id,
+                replaced_seq_range,
+                produced_by: produced_by.into(),
+                replacement,
+                token_estimate_before: estimates.before,
+                token_estimate_after: estimates.after,
+            },
+        )
+        .await
+    }
+
+    /// Ensure `history_cache` contains all events that predate this recorder
+    /// instance (resume path).
+    ///
+    /// On the fresh-session path (`seq_start == 0`) the cache is always
+    /// complete because every `append` call adds to it. On the resume path
+    /// (`seq_start > 0`) events from prior turns live only in the store. This
+    /// method is called lazily by `record_context_compacted` and is a no-op
+    /// after the first successful load.
+    ///
+    /// `ConversationStore::replay(sid, from_seq)` returns events where
+    /// `seq > from_seq`. Seq-0 is always `SessionStarted`, never `TurnStarted`,
+    /// so starting the stream at `from_seq = 0` (which yields seq >= 1) is safe
+    /// for the turn-boundary invariants checked in `record_context_compacted`.
+    async fn ensure_prior_history_loaded(&mut self) -> Result<(), StoreError> {
+        // Count how many seqs should be in the cache at this point. The cache
+        // holds all events appended through this instance (from seq_start onward).
+        // If seq_start > 0, prior events (seq 0 .. seq_start-1) are missing.
+        let seq_start = self.seq_counter - self.history_cache.len() as u64;
+        if seq_start == 0 {
+            // Fresh session: nothing predates this recorder instance.
+            return Ok(());
+        }
+
+        // Load all events with seq < seq_start from the store. We use
+        // `replay(sid, 0)` which yields seq > 0 (seq-0 is SessionStarted and
+        // is not a TurnStarted boundary, so it is safe to skip).
+        let mut prior: Vec<ConversationEvent> = Vec::new();
+        let mut stream = self.store.replay(self.session_id, 0);
+        while let Some(result) = stream.next().await {
+            let event = result?;
+            if event.seq < seq_start {
+                prior.push(event);
+            }
+        }
+        prior.sort_unstable_by_key(|e| e.seq);
+
+        // Prepend prior events in front of the locally-appended ones.
+        let mut combined = prior;
+        combined.append(&mut self.history_cache);
+        self.history_cache = combined;
+        Ok(())
+    }
+
     /// Build the envelope, persist via the store, and advance the
     /// session-local sequence counter. Returns the [`EventId`] minted for
     /// this event so callers can carry it forward (e.g. into `TurnState::Failed`).
@@ -404,11 +568,13 @@ impl StepRecorder {
         };
         self.store.append(&event).await?;
         self.seq_counter = self.seq_counter.saturating_add(1);
+        self.history_cache.push(event);
         Ok(event_id)
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -594,6 +760,184 @@ mod tests {
             .await?;
 
         assert_eq!(store.latest_seq(sid).await?, Some(2));
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------------------
+    // record_context_compacted tests
+    // ---------------------------------------------------------------------------
+
+    /// Seed a minimal two-turn history:
+    ///   seq 0  `SessionStarted`
+    ///   seq 1  `TurnStarted`  (`turn_a`)
+    ///   seq 2  `AssistantMessageAppended`
+    ///   seq 3  `TurnCompleted`
+    ///   seq 4  `TurnStarted`  (`turn_b`)
+    ///   seq 5  `AssistantMessageAppended`
+    ///   seq 6  `TurnCompleted`
+    ///
+    /// Returns `(recorder, turn_a_id, turn_b_id)`.
+    async fn seed_two_turns(
+        store: &Arc<dyn ConversationStore>,
+        sid: SessionId,
+    ) -> Result<(StepRecorder, TurnId, TurnId), Box<dyn std::error::Error>> {
+        let (tx, _rx) = broadcast::channel(64);
+        let mut rec = StepRecorder::new(Arc::clone(store), tx, sid, 0);
+
+        rec.record_session_started(SessionMeta {
+            cogito_version: "0.1.0".into(),
+            ..Default::default()
+        })
+        .await?;
+
+        let turn_a = TurnId::new();
+        rec.record_turn_started(turn_a, vec![ContentBlock::Text { text: "q1".into() }])
+            .await?;
+        rec.on_text_delta(turn_a, "answer one".into());
+        rec.on_text_block_complete().await?;
+        rec.record_turn_completed(turn_a, TurnOutcome::Completed)
+            .await?;
+
+        let turn_b = TurnId::new();
+        rec.record_turn_started(turn_b, vec![ContentBlock::Text { text: "q2".into() }])
+            .await?;
+        rec.on_text_delta(turn_b, "answer two".into());
+        rec.on_text_block_complete().await?;
+        rec.record_turn_completed(turn_b, TurnOutcome::Completed)
+            .await?;
+
+        // Seqs: 0=SessionStarted 1=TurnStarted(a) 2=AssistantMsg 3=TurnCompleted
+        //       4=TurnStarted(b) 5=AssistantMsg 6=TurnCompleted
+        assert_eq!(store.latest_seq(sid).await?, Some(6));
+        Ok((rec, turn_a, turn_b))
+    }
+
+    #[tokio::test]
+    async fn record_context_compacted_writes_event() -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempfile::tempdir()?;
+        let store = fresh_store_in(tmp.path());
+        let sid = SessionId::new();
+        let (mut rec, turn_a, _turn_b) = seed_two_turns(&store, sid).await?;
+
+        // Compact turn_a (seqs 1-3): range.0 = 1 (TurnStarted), range.1 = 3
+        // (TurnCompleted). The next event is seq 4 (TurnStarted of turn_b) which
+        // satisfies the boundary invariant.
+        let event_id = rec
+            .record_context_compacted(
+                turn_a,
+                (1, 3),
+                "truncate",
+                cogito_protocol::context::CompactionReplacement::Drop,
+                cogito_protocol::context::TokenEstimates {
+                    before: Some(1000),
+                    after: Some(100),
+                },
+            )
+            .await?;
+
+        // Event id is non-zero and event landed at seq 7.
+        let _ = event_id; // EventId is opaque; just assert no error above.
+        assert_eq!(store.latest_seq(sid).await?, Some(7));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn record_context_compacted_rejects_self_referential_range()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempfile::tempdir()?;
+        let store = fresh_store_in(tmp.path());
+        let sid = SessionId::new();
+        let (mut rec, turn_a, _turn_b) = seed_two_turns(&store, sid).await?;
+
+        // next_seq = 7; passing range.1 = 7 (equal to next_seq) should fail.
+        let err = rec
+            .record_context_compacted(
+                turn_a,
+                (1, 7),
+                "truncate",
+                cogito_protocol::context::CompactionReplacement::Drop,
+                cogito_protocol::context::TokenEstimates::default(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                cogito_protocol::store::StoreError::InvariantViolated(_)
+            ),
+            "expected InvariantViolated, got {err:?}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn record_context_compacted_rejects_non_turn_boundary_start()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempfile::tempdir()?;
+        let store = fresh_store_in(tmp.path());
+        let sid = SessionId::new();
+        let (mut rec, _turn_a, turn_b) = seed_two_turns(&store, sid).await?;
+
+        // Seq 2 is AssistantMessageAppended, not TurnStarted — must be rejected.
+        let err = rec
+            .record_context_compacted(
+                turn_b,
+                (2, 3),
+                "truncate",
+                cogito_protocol::context::CompactionReplacement::Drop,
+                cogito_protocol::context::TokenEstimates::default(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                cogito_protocol::store::StoreError::InvariantViolated(_)
+            ),
+            "expected InvariantViolated for non-TurnStarted range.0, got {err:?}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn record_context_compacted_rejects_duplicate_for_turn()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempfile::tempdir()?;
+        let store = fresh_store_in(tmp.path());
+        let sid = SessionId::new();
+        let (mut rec, turn_a, _turn_b) = seed_two_turns(&store, sid).await?;
+
+        // First compaction succeeds.
+        rec.record_context_compacted(
+            turn_a,
+            (1, 3),
+            "truncate",
+            cogito_protocol::context::CompactionReplacement::Drop,
+            cogito_protocol::context::TokenEstimates::default(),
+        )
+        .await?;
+
+        // Second compaction for the same turn_id must be rejected.
+        let err = rec
+            .record_context_compacted(
+                turn_a,
+                (1, 3),
+                "truncate",
+                cogito_protocol::context::CompactionReplacement::Drop,
+                cogito_protocol::context::TokenEstimates::default(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                cogito_protocol::store::StoreError::InvariantViolated(_)
+            ),
+            "expected InvariantViolated for duplicate turn compaction, got {err:?}"
+        );
         Ok(())
     }
 }

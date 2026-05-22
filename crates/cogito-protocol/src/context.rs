@@ -43,6 +43,19 @@ pub enum ContextError {
     Storage(#[from] StoreError),
 }
 
+/// Token estimates attached to a `ContextCompacted` event — informational only.
+///
+/// Both fields are optional because the token count may be unavailable (e.g.
+/// the first turn or when the provider did not return usage in the previous
+/// model call).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TokenEstimates {
+    /// Token count before this compaction.
+    pub before: Option<u64>,
+    /// Token count after this compaction.
+    pub after: Option<u64>,
+}
+
 /// What a `ContextCompacted` event substitutes in for the covered seq range.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
