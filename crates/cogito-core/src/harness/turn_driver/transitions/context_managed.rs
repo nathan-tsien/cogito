@@ -186,10 +186,17 @@ pub async fn transit(ctx: TurnCtx, deps: &TurnDeps) -> TurnState {
         .await;
 
     // --- H05 Tool Surface Builder ---
-    let tool_surface = surface(&ctx.strategy, deps.tools.as_ref());
+    let tool_surface = surface(&ctx.strategy, deps.tools.as_ref(), &history, ctx.turn_id);
 
     // --- H04 Prompt Composer ---
-    let model_input = compose(&history, &ctx.strategy, &tool_surface);
+    // Pass the pipeline's projector so H04 uses compaction-aware projection.
+    let model_input = compose(
+        &history,
+        &ctx.strategy,
+        &tool_surface,
+        pipeline.projector.as_ref(),
+        ctx.turn_id,
+    );
 
     // --- Record PromptComposed ---
     let surface_size = u32::try_from(tool_surface.len()).unwrap_or(u32::MAX);
