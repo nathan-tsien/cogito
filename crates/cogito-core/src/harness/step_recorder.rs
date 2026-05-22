@@ -722,6 +722,26 @@ impl EventRecorder for StepRecorder {
         StepRecorder::record_tool_filter_overridden(self, turn_id, mode, contributors, produced_by)
             .await
     }
+
+    /// Override with the invariant-enforcing version from `StepRecorder`.
+    async fn record_context_compacted(
+        &mut self,
+        turn_id: TurnId,
+        replaced_seq_range: (u64, u64),
+        produced_by: &str,
+        replacement: cogito_protocol::context::CompactionReplacement,
+        estimates: cogito_protocol::context::TokenEstimates,
+    ) -> Result<EventId, StoreError> {
+        StepRecorder::record_context_compacted(
+            self,
+            turn_id,
+            replaced_seq_range,
+            produced_by,
+            replacement,
+            estimates,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]

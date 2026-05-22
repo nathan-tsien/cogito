@@ -129,6 +129,21 @@ pub struct CompactionApplied {
     pub kind: CompactionKind,
 }
 
+impl CompactionApplied {
+    /// Construct a `CompactionApplied` descriptor.
+    ///
+    /// This constructor exists because `#[non_exhaustive]` prevents struct
+    /// literal syntax outside the defining crate.
+    #[must_use]
+    pub fn new(event_id: EventId, replaced_seq_range: (u64, u64), kind: CompactionKind) -> Self {
+        Self {
+            event_id,
+            replaced_seq_range,
+            kind,
+        }
+    }
+}
+
 /// Input handed to `Compactor::maybe_compact` by H11.
 pub struct CompactionInput<'a> {
     /// Session identifier for the current turn.

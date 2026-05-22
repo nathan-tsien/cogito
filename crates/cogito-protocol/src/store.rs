@@ -178,6 +178,35 @@ pub trait EventRecorder: Send {
             .await?;
         Ok(id)
     }
+
+    /// Persist a `ContextCompacted` event for `turn_id`.
+    ///
+    /// Default implementation builds the payload and delegates to
+    /// [`EventRecorder::append_payload`]. Overriding implementations
+    /// (e.g. `StepRecorder`) enforce §5.5 boundary invariants.
+    async fn record_context_compacted(
+        &mut self,
+        turn_id: crate::ids::TurnId,
+        replaced_seq_range: (u64, u64),
+        produced_by: &str,
+        replacement: crate::context::CompactionReplacement,
+        estimates: crate::context::TokenEstimates,
+    ) -> Result<crate::ids::EventId, StoreError> {
+        let (id, _seq) = self
+            .append_payload(
+                turn_id,
+                crate::event::EventPayload::ContextCompacted {
+                    turn_id,
+                    replaced_seq_range,
+                    produced_by: produced_by.to_owned(),
+                    replacement,
+                    token_estimate_before: estimates.before,
+                    token_estimate_after: estimates.after,
+                },
+            )
+            .await?;
+        Ok(id)
+    }
 }
 
 #[cfg(test)]
