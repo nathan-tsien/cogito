@@ -76,6 +76,14 @@ impl Decoder {
                             tool_name: name,
                         }])
                     }
+                    SseContentBlockStart::Thinking {} => {
+                        // TODO: Task 10 implement thinking block buffer
+                        Ok(vec![])
+                    }
+                    SseContentBlockStart::RedactedThinking { data: _ } => {
+                        // TODO: Task 10 implement redacted thinking handling
+                        Ok(vec![])
+                    }
                 }
             }
             SseEvent::ContentBlockDelta { index, delta } => match delta {
@@ -90,6 +98,14 @@ impl Decoder {
                     if let Some(acc) = self.tool_args_buf.get_mut(&index) {
                         acc.partial_json.push_str(&partial_json);
                     }
+                    Ok(vec![])
+                }
+                SseContentBlockDelta::ThinkingDelta { thinking: _ } => {
+                    // TODO: Task 10 implement thinking delta accumulation
+                    Ok(vec![])
+                }
+                SseContentBlockDelta::SignatureDelta { signature: _ } => {
+                    // TODO: Task 10 implement signature handling
                     Ok(vec![])
                 }
             },
