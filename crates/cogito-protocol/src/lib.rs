@@ -14,6 +14,7 @@
 //! - [`hook`]: `HookHandler`, `HookProvider`, `HookDecision`, `HookLifecyclePoint` — H09 policy gate
 //! - [`ids`]: strongly-typed ULID newtypes (`EventId`, `SessionId`, `TurnId`)
 //! - [`job`]: `JobManager` trait, `JobId`, `JobStatus`, `JobCompletionEvent`
+//! - [`metrics`]: `MetricsRecorder` trait + `NoOpMetricsRecorder` — pluggable metrics sink (Sprint 5)
 //! - [`session`]: `SessionMeta` — per-session pass-through metadata
 //! - [`store`]: `ConversationStore` trait + `StoreError` (persisted event log backend contract)
 //! - [`strategy`]: `HarnessStrategy`, `ToolFilter`
@@ -33,6 +34,7 @@ pub mod gateway;
 pub mod hook;
 pub mod ids;
 pub mod job;
+pub mod metrics;
 pub mod session;
 pub mod store;
 pub mod strategy;
@@ -50,6 +52,7 @@ pub use gateway::{
 };
 pub use hook::{HookDecision, HookHandler, HookLifecyclePoint, HookProvider};
 pub use ids::{EventId, SessionId, TurnId};
+pub use metrics::{MetricsRecorder, NoOpMetricsRecorder};
 pub use session::SessionMeta;
 pub use store::{ConversationStore, StoreError};
 pub use strategy::{HarnessStrategy, ToolFilter};
