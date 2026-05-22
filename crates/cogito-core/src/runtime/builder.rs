@@ -158,6 +158,10 @@ impl Runtime {
             ),
         );
 
+        // Build the context pipeline once per session from `strategy.context`.
+        // All turns share this same Arc; no per-turn rebuild is needed.
+        let context_pipeline = Arc::new(cogito_context::build_pipeline(&self.strategy.context));
+
         let state = SessionState {
             session_id: id,
             strategy: self.strategy.clone(),
@@ -171,6 +175,7 @@ impl Runtime {
             store: Arc::clone(&self.store),
             hooks,
             metrics,
+            context_pipeline,
         };
 
         let deps = SessionDeps {
