@@ -48,7 +48,7 @@
 | `type` | string | ✓ | One of the payload variants below (snake_case); 10 shipped as of Sprint 2, with `model_call_completed` pending Sprint 3 P2.2. |
 | `data` | object | ✓ | Variant-specific payload; see "Payload variants" below. |
 
-## Payload variants (10 shipped; 1 planned)
+## Payload variants (11 shipped; 1 planned)
 
 The original 9 variants (`session_started` through `turn_failed`) shipped in Sprint 1.
 Sprint 2 added `model_call_started` (documented below). Sprint 3 P2.2 will add
@@ -81,6 +81,40 @@ metadata (see `SessionMeta` schema in `docs/schemas/conversation-event-v1.json`)
 One per wire-protocol content_block_stop for an assistant text block.
 The recorder does NOT persist individual streaming deltas — they appear
 only on the live `StreamEvent` channel.
+
+### `thinking_block_recorded`
+
+Recorded by H02 when a reasoning/"thinking" content block is sealed by
+the provider. Sibling to `assistant_message_appended` and
+`tool_use_recorded` — one event per completed block, ordered by
+envelope `seq`. Within one assistant turn, `thinking_block_recorded`
+events always precede `assistant_message_appended` and
+`tool_use_recorded` for the same turn (the provider emits thinking
+first; seq order preserves that). H04 walks events in `seq` order to
+rebuild the assistant message's `content` array as
+`[Thinking, Text, ToolUse, …]`.
+
+**Payload**:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | Full reasoning text. Empty string for safety-redacted blocks (e.g. Anthropic `redacted_thinking`). |
+| `provider_opaque` | object \| null | yes (may be null) | Provider-specific round-trip payload. Schema not interpreted by cogito; see provider docs. |
+
+**Concrete `provider_opaque` shapes observed in production**:
+
+- Anthropic plain `thinking`: `{"signature": "<base64>"}`
+- Anthropic `redacted_thinking`: `{"data": "<opaque>"}` (no signature; the reasoning itself is encrypted)
+- OpenAI Responses `reasoning`: `{"item_id": "<id>", "encrypted_content": "<opaque>"}`
+- OpenAI-compat (`chat.completions`-style backends like DeepSeek-R1, QwQ, vLLM with `--enable-reasoning`): `null`
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":11,"ts":"2026-05-22T10:00:01.100Z","type":"thinking_block_recorded","data":{"text":"I should grep for the symbol.","provider_opaque":{"signature":"abc123"}}}
+```
+
+Added: ADR-0019 (`SCHEMA_VERSION` unchanged at 1 — additive variant per ADR-0007 precedent).
 
 ### `model_call_started`
 
