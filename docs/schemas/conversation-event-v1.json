@@ -512,6 +512,236 @@
           ]
         }
       }
+    },
+    {
+      "description": "H11 Compactor decided to compact a portion of the event log.\n\nAdded Sprint 6 as an additive variant under ADR-0007 / ADR-0008. No `SCHEMA_VERSION` bump.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "produced_by",
+            "replaced_seq_range",
+            "replacement",
+            "turn_id"
+          ],
+          "properties": {
+            "produced_by": {
+              "description": "`Compactor::id()` — implementation identity.",
+              "type": "string"
+            },
+            "replaced_seq_range": {
+              "description": "Inclusive seq range that this compaction covers.",
+              "type": "array",
+              "items": [
+                {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                },
+                {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                }
+              ],
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "replacement": {
+              "description": "What replaces the covered range in projection.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CompactionReplacement"
+                }
+              ]
+            },
+            "token_estimate_after": {
+              "description": "Token estimate after this compaction (informational).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "token_estimate_before": {
+              "description": "Token estimate before this compaction (informational).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "turn_id": {
+              "description": "The turn during which this compaction was decided.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "context_compacted"
+          ]
+        }
+      }
+    },
+    {
+      "description": "`SystemPromptInjector` ran for this turn (even if suffix is empty).\n\nAdded Sprint 6 as an additive variant under ADR-0007 / ADR-0008. No `SCHEMA_VERSION` bump.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "contributors",
+            "produced_by",
+            "suffix",
+            "turn_id"
+          ],
+          "properties": {
+            "contributors": {
+              "description": "Tags identifying what contributed (e.g. `[\"date\", \"skill:plan-review\"]`).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "produced_by": {
+              "description": "`Injector::id()`.",
+              "type": "string"
+            },
+            "suffix": {
+              "description": "Text appended after `strategy.system_prompt` (may be empty).",
+              "type": "string"
+            },
+            "turn_id": {
+              "description": "The turn whose system prompt this suffix is for.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "system_prompt_injected"
+          ]
+        }
+      }
+    },
+    {
+      "description": "`ToolFilterOverrider` ran for this turn (Inherit counts as ran).\n\nAdded Sprint 6 as an additive variant under ADR-0007 / ADR-0008. No `SCHEMA_VERSION` bump.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "contributors",
+            "mode",
+            "produced_by",
+            "turn_id"
+          ],
+          "properties": {
+            "contributors": {
+              "description": "Tags identifying what contributed.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "mode": {
+              "description": "What modification to apply on top of `strategy.allowed_tools`.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ToolFilterOverrideMode"
+                }
+              ]
+            },
+            "produced_by": {
+              "description": "`Overrider::id()`.",
+              "type": "string"
+            },
+            "turn_id": {
+              "description": "The turn whose tool surface this override applies to.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool_filter_overridden"
+          ]
+        }
+      }
+    },
+    {
+      "description": "H11 summary at the end of `ContextManaged` — index of what was decided.\n\nAdded Sprint 6 as an additive variant under ADR-0007 / ADR-0008. No `SCHEMA_VERSION` bump.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "compactions",
+            "errors",
+            "system_prompt_event",
+            "tool_filter_event",
+            "turn_id"
+          ],
+          "properties": {
+            "compactions": {
+              "description": "Event ids of `ContextCompacted` events written this turn (0 or 1 for v0.1).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "errors": {
+              "description": "Per-trait error capture for degrade paths.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ContextDecisionErrors"
+                }
+              ]
+            },
+            "system_prompt_event": {
+              "description": "Event id of this turn's `SystemPromptInjected`.",
+              "type": "string"
+            },
+            "tool_filter_event": {
+              "description": "Event id of this turn's `ToolFilterOverridden`.",
+              "type": "string"
+            },
+            "turn_id": {
+              "description": "The turn this decision summary belongs to.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "context_decision_recorded"
+          ]
+        }
+      }
     }
   ],
   "required": [
@@ -556,6 +786,51 @@
     }
   },
   "definitions": {
+    "CompactionReplacement": {
+      "description": "What a `ContextCompacted` event substitutes in for the covered seq range.",
+      "oneOf": [
+        {
+          "description": "Drop the covered range entirely (truncate-style; no replacement message).",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "drop"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Replace with a summary user-role message wrapped in `<conversation_summary>...</conversation_summary>`.",
+          "type": "object",
+          "required": [
+            "kind",
+            "model",
+            "text"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "summary"
+              ]
+            },
+            "model": {
+              "description": "Provider model id that produced the summary (e.g. `\"claude-haiku-4-5\"`).",
+              "type": "string"
+            },
+            "text": {
+              "description": "The summary text. Plain UTF-8.",
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
     "ContentBlock": {
       "description": "One unit of content as defined by the Anthropic / `OpenAI` wire formats.\n\nAdjacently-tagged (`tag = \"type\", content = \"data\"`) for forward compatibility: newtype-with-sequence bodies are allowed (unlike internal tagging), and new variants can be added without bumping `SCHEMA_VERSION` (see ADR-0007).\n\nNote: `PartialEq` is derived but not `Eq` because the `ToolUse.args` field and the embedded `ToolResult` carry `serde_json::Value`, which does not implement `Eq`. This mirrors the rationale in [`crate::tool::ToolResult`].\n\n`JsonSchema` is derived for schema-gen (Plan 2 Task 11). `args`, a raw `serde_json::Value`, uses schemars's built-in impl which renders as an open `true` schema (any JSON allowed).",
       "oneOf": [
@@ -693,6 +968,33 @@
           }
         }
       ]
+    },
+    "ContextDecisionErrors": {
+      "description": "Per-trait error capture for `ContextDecisionRecorded`. Each field is the serialized display of a `ContextError`, or `None` if the trait ran cleanly.",
+      "type": "object",
+      "properties": {
+        "compactor": {
+          "description": "Compactor failure (degrade path); `None` if it succeeded or returned vec![].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "injector": {
+          "description": "`SystemPromptInjector` failure (H11 wrote a fallback empty event).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "overrider": {
+          "description": "`ToolFilterOverrider` failure (H11 wrote a fallback Inherit event).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     },
     "HookLifecyclePoint": {
       "description": "One lifecycle point at which the Hook Pipeline is invoked.\n\nPersisted into `EventPayload::HookRejected` to make rejection events fully reconstructable from the log.",
@@ -928,6 +1230,72 @@
           "enum": [
             "async_failed"
           ]
+        }
+      ]
+    },
+    "ToolFilterOverrideMode": {
+      "description": "How `ToolFilterOverrider` modifies `strategy.allowed_tools` for one turn.",
+      "oneOf": [
+        {
+          "description": "Use `strategy.allowed_tools` unchanged (no-op).",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "inherit"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Intersect `strategy.allowed_tools` with the listed tools.",
+          "type": "object",
+          "required": [
+            "kind",
+            "tools"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "intersect"
+              ]
+            },
+            "tools": {
+              "description": "Tool names to keep.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "description": "Replace `strategy.allowed_tools` entirely (used by Plugin / Subagent).",
+          "type": "object",
+          "required": [
+            "kind",
+            "tools"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "replace"
+              ]
+            },
+            "tools": {
+              "description": "Tool names that become the full surface.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         }
       ]
     },
