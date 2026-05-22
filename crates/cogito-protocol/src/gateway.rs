@@ -240,6 +240,20 @@ pub struct ModelLimits {
     pub context_window_tokens: u64,
 }
 
+impl ModelLimits {
+    /// Construct a `ModelLimits` value. Provided so that crates outside
+    /// `cogito-protocol` can build instances despite the `#[non_exhaustive]`
+    /// attribute (which forbids struct literal syntax outside the defining
+    /// crate).
+    #[must_use]
+    pub fn new(model_id: impl Into<String>, context_window_tokens: u64) -> Self {
+        Self {
+            model_id: model_id.into(),
+            context_window_tokens,
+        }
+    }
+}
+
 /// Boundary contract between Brain and external LLM providers.
 ///
 /// Implementations live in `cogito-model::anthropic` and
