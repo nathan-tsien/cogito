@@ -17,6 +17,7 @@
 //! - [`metrics`]: `MetricsRecorder` trait + `NoOpMetricsRecorder` — pluggable metrics sink (Sprint 5)
 //! - [`session`]: `SessionMeta` — per-session pass-through metadata
 //! - [`store`]: `ConversationStore` trait + `StoreError` (persisted event log backend contract)
+//! - [`context`]: `ContextError` — failure modes for the four Context-Management traits (H11)
 //! - [`strategy`]: `HarnessStrategy`, `ToolFilter`
 //! - [`stream`]: `StreamEvent` enum (real-time fanout to subscribers)
 //! - [`tool`]: `ToolProvider` trait, `ToolDescriptor`, `InvokeOutcome`, `ExecutionClass`
@@ -27,6 +28,7 @@
 //! the Sprint 0 closure plan) and Sprint 1 (`event`, `store`).
 
 pub mod content;
+pub mod context;
 pub mod error;
 pub mod event;
 pub mod exec_ctx;
@@ -44,6 +46,7 @@ pub mod turn;
 pub mod turn_trigger;
 
 pub use content::ContentBlock;
+pub use context::ContextError;
 pub use event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
 pub use exec_ctx::ExecCtx;
 pub use gateway::{
