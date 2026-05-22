@@ -21,3 +21,4 @@ pub mod pipeline;
 pub mod projector;
 
 pub use cogito_protocol::ContextPipeline;
+pub use pipeline::build_pipeline;
