@@ -17,6 +17,7 @@ futures.workspace = true
 async-trait.workspace = true
 dashmap.workspace = true
 parking_lot.workspace = true
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
@@ -36,6 +37,11 @@ rstest.workspace = true
 insta.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "hook_latency"
+harness = false
 
 [lints]
 workspace = true

@@ -86,6 +86,8 @@ pub async fn enter_turn(entry: TurnEntry, ctx: TurnCtx, deps: TurnDeps) -> TurnO
                     // Record the failure event before constructing Failed state.
                     // Mirror the P2.5 pattern: capture EventId from the recorder.
                     let reason = cogito_protocol::turn::TurnFailureReason::ResumeFailed { message };
+                    // Capture reason string before moving `reason` into `record_turn_failed`.
+                    let reason_str = format!("{reason:?}");
                     let event_id = match deps
                         .step
                         .lock()
@@ -96,6 +98,7 @@ pub async fn enter_turn(entry: TurnEntry, ctx: TurnCtx, deps: TurnDeps) -> TurnO
                         Ok(id) => id,
                         Err(_) => EventId::recorder_failure_placeholder(),
                     };
+                    deps.hooks.on_error(&reason_str);
                     TurnState::Failed {
                         reason,
                         recorded_event_id: event_id,
@@ -167,9 +170,13 @@ pub async fn run(initial: TurnState, deps: &TurnDeps) -> TurnOutcome {
             } => {
                 transitions::tool_dispatching::transit(ctx, pending, completed, surface, deps).await
             }
+            // TODO(sprint-6): fire deps.hooks.post_turn() for
+            // TurnState::Paused when it becomes reachable via the async
+            // job path (JobManager wiring). For now Paused shares this
+            // arm because its body is identical to Completed / Failed.
             terminal @ (TurnState::Completed { .. }
-            | TurnState::Paused { .. }
-            | TurnState::Failed { .. }) => {
+            | TurnState::Failed { .. }
+            | TurnState::Paused { .. }) => {
                 return terminal.into_outcome();
             }
         };

@@ -17,7 +17,7 @@ use crate::tool::ToolDescriptor;
 ///
 /// Field set is intentionally minimal in v0.1; provider adapters map only
 /// what the wire format supports.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ModelParams {
     /// Provider-specific model identifier, e.g. `"claude-opus-4-7"` or
     /// `"meta-llama/Llama-3.1-70B-Instruct"`.
@@ -84,7 +84,7 @@ pub enum Message {
 
 /// Fully-formed input to `ModelGateway::stream`. Produced by H04 Prompt
 /// Composer at the `ContextManaged → PromptBuilt` transition.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ModelInput {
     /// System prompt; may be empty.
     pub system: String,

@@ -341,6 +341,30 @@ impl StepRecorder {
         .await
     }
 
+    /// Record that an H09 hook rejected a lifecycle point.
+    ///
+    /// This event is purely an additive audit log entry (ADR-0007). It is
+    /// persisted before the subsequent `TurnFailed` event so the log ordering
+    /// reflects causality. No `StreamEvent` is broadcast — subscribers learn
+    /// about the rejection through the `TurnFailed` broadcast that follows.
+    pub async fn record_hook_rejected(
+        &mut self,
+        turn_id: TurnId,
+        hook_name: String,
+        point: cogito_protocol::hook::HookLifecyclePoint,
+        reason: String,
+    ) -> Result<EventId, StoreError> {
+        self.append(
+            Some(turn_id),
+            EventPayload::HookRejected {
+                hook_name,
+                point,
+                reason,
+            },
+        )
+        .await
+    }
+
     /// Record turn failure and broadcast [`StreamEvent::TurnFailed`] with
     /// a human-readable rendering of the reason.
     ///

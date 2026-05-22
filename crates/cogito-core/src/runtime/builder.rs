@@ -54,6 +54,9 @@ impl Runtime {
     /// - `RuntimeError::SessionAlreadyExists` — `OpenMode::New` but store has events for `id`.
     /// - `RuntimeError::ResumeFailed` — `OpenMode::Resume` but store has no events for `id`.
     /// - `RuntimeError::StoreError` — backend I/O or serde failure while reading the store.
+    // DI container setup inherently lists many wiring steps; the line count is
+    // structural, not complexity that can be usefully extracted.
+    #[allow(clippy::too_many_lines)]
     pub async fn open_session(
         self: &Arc<Self>,
         id: SessionId,
@@ -142,6 +145,19 @@ impl Runtime {
             record_session_started(&recorder, id, &self.strategy).await;
         }
 
+        // Build metrics first so the hook pipeline shares the same Arc rather
+        // than embedding its own private NoOpMetricsRecorder. Sprint 6 (Context
+        // C2) needs to record context-decision metrics directly via
+        // TurnDeps.metrics, not via hooks — so keep both fields in sync here.
+        let metrics: Arc<dyn cogito_protocol::MetricsRecorder> =
+            Arc::new(cogito_protocol::NoOpMetricsRecorder);
+        let hooks = Arc::new(
+            crate::harness::hooks::CompositeHookPipeline::with_handlers_and_metrics(
+                Vec::new(),
+                Arc::clone(&metrics),
+            ),
+        );
+
         let state = SessionState {
             session_id: id,
             strategy: self.strategy.clone(),
@@ -153,6 +169,8 @@ impl Runtime {
             broadcast_tx: broadcast_tx.clone(),
             recorder: Arc::clone(&recorder),
             store: Arc::clone(&self.store),
+            hooks,
+            metrics,
         };
 
         let deps = SessionDeps {

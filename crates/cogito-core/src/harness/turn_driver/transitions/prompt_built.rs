@@ -38,6 +38,8 @@ pub async fn transit(
             let reason = TurnFailureReason::ModelGatewayFailed {
                 message: e.to_string(),
             };
+            // Capture reason string before moving `reason` into `record_turn_failed`.
+            let reason_str = format!("{reason:?}");
             let recorded_event_id = match deps
                 .step
                 .lock()
@@ -49,6 +51,7 @@ pub async fn transit(
                 // Recorder failed while recording the failure itself.
                 Err(_) => EventId::recorder_failure_placeholder(),
             };
+            deps.hooks.on_error(&reason_str);
             TurnState::Failed {
                 reason,
                 recorded_event_id,

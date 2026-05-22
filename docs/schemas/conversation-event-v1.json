@@ -470,6 +470,48 @@
           ]
         }
       }
+    },
+    {
+      "description": "An H09 hook returned `HookDecision::Reject` at the named lifecycle point. The turn that follows transitions to `Failed` with `TurnFailureReason::HookRejected { hook_name, message }`.\n\nAdded Sprint 5 as an additive variant under ADR-0007. No `SCHEMA_VERSION` bump.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "hook_name",
+            "point",
+            "reason"
+          ],
+          "properties": {
+            "hook_name": {
+              "description": "Name of the hook (from `HookHandler::name()`).",
+              "type": "string"
+            },
+            "point": {
+              "description": "Lifecycle point at which the rejection occurred.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/HookLifecyclePoint"
+                }
+              ]
+            },
+            "reason": {
+              "description": "Rejection reason from `HookDecision::Reject`.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "hook_rejected"
+          ]
+        }
+      }
     }
   ],
   "required": [
@@ -649,6 +691,46 @@
               ]
             }
           }
+        }
+      ]
+    },
+    "HookLifecyclePoint": {
+      "description": "One lifecycle point at which the Hook Pipeline is invoked.\n\nPersisted into `EventPayload::HookRejected` to make rejection events fully reconstructable from the log.",
+      "oneOf": [
+        {
+          "description": "Fires at the end of prompt build (`ContextManaged` -> `PromptBuilt`).",
+          "type": "string",
+          "enum": [
+            "pre_prompt"
+          ]
+        },
+        {
+          "description": "Fires before each tool dispatch.",
+          "type": "string",
+          "enum": [
+            "pre_dispatch"
+          ]
+        },
+        {
+          "description": "Fires after model stream completion.",
+          "type": "string",
+          "enum": [
+            "post_model"
+          ]
+        },
+        {
+          "description": "Fires at terminal Completed / Paused states.",
+          "type": "string",
+          "enum": [
+            "post_turn"
+          ]
+        },
+        {
+          "description": "Fires at terminal Failed state.",
+          "type": "string",
+          "enum": [
+            "on_error"
+          ]
         }
       ]
     },

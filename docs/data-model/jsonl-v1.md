@@ -48,11 +48,12 @@
 | `type` | string | ✓ | One of the payload variants below (snake_case); 10 shipped as of Sprint 2, with `model_call_completed` pending Sprint 3 P2.2. |
 | `data` | object | ✓ | Variant-specific payload; see "Payload variants" below. |
 
-## Payload variants (11 shipped; 1 planned)
+## Payload variants (12 shipped; 1 planned)
 
 The original 9 variants (`session_started` through `turn_failed`) shipped in Sprint 1.
 Sprint 2 added `model_call_started` (documented below). Sprint 3 P2.2 will add
-`model_call_completed` (see its section below — marked pending).
+`model_call_completed` (see its section below — marked pending). Sprint 4.7 added
+`thinking_block_recorded`. Sprint 5 added `hook_rejected`.
 
 ### `session_started`
 
@@ -199,6 +200,40 @@ The v0.2 multimodal upgrade will swap this for `Vec<ContentBlock>`
 `TurnOutcome` is internally tagged with `tag = "kind"` and
 `rename_all = "snake_case"`, so even the unit `Completed` variant wears
 the discriminator object `{"kind": "completed"}`.
+
+### `hook_rejected`
+
+Recorded by H01 Turn Driver immediately before the turn transitions to
+`Failed` when an H09 hook returns `HookDecision::Reject`. This event
+gives downstream readers a structured, queryable record of which hook
+fired and why, without having to parse the free-text `reason` field in
+`turn_failed`.
+
+**Ordering**: appears immediately before `turn_failed` in the event log.
+When a `pre_prompt` hook rejects, the sequence is
+`… context_manage_completed → prompt_composed → hook_rejected → turn_failed`.
+`pre_prompt` fires at the end of the `ContextManaged` state, before the FSM
+transitions to `PromptBuilt`; `model_call_started` only fires at the
+`PromptBuilt → ModelCalling` transition and is therefore absent from the
+rejection sequence. When a `pre_dispatch` hook rejects, the sequence is
+`… tool_use_recorded → hook_rejected → turn_failed`.
+
+**Payload**:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hook_name` | string | yes | Stable identifier of the hook that rejected (from `HookHandler::name()`). Kebab-case; unique within a deployment. |
+| `point` | string enum | yes | Lifecycle point at which the rejection occurred. One of: `pre_prompt`, `pre_dispatch`, `post_model`, `post_turn`, `on_error`. |
+| `reason` | string | yes | Human-readable rejection reason provided by the hook. |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":5,"ts":"2026-05-22T10:00:01.200Z","type":"hook_rejected","data":{"hook_name":"sensitive-content","point":"pre_prompt","reason":"AWS key pattern detected in prompt"}}
+```
+
+Added: Sprint 5 as an additive variant under ADR-0007. No
+`SCHEMA_VERSION` bump.
 
 ### `turn_failed`
 
