@@ -181,7 +181,7 @@ pub enum EventPayload {
         /// Full reasoning text for the sealed block. May be empty when
         /// the provider exposes only an opaque encrypted payload.
         text: String,
-        /// Provider-opaque blob (signature / encrypted_content / item
+        /// Provider-opaque blob (signature / `encrypted_content` / item
         /// id) that must round-trip verbatim on the next model call.
         /// Schema is provider-specific; cogito does not interpret it.
         provider_opaque: Option<serde_json::Value>,

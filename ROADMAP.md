@@ -6,7 +6,7 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 + 4.5 complete; Sprint 4 (MCP sync tools) next.
+> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 complete; Sprint 4 (MCP sync tools) next.
 
 ## Version plan
 
@@ -107,6 +107,22 @@ dep (Apache-2.0, `modelcontextprotocol/rust-sdk`).
 
 Closes GitLab Issue #1 sub-needs 1 + 2. Sub-need 3 (OpenAI Responses
 adapter) remains scheduled for Sprint 6.
+
+#### Sprint 4.7 · Thinking content (ADR-0019) (1.5 day)
+
+**Goal**: first-class representation of model reasoning across protocol,
+Brain, and provider adapters without bumping `SCHEMA_VERSION` and without
+rewriting persisted JSONL. Closes the gap before Anthropic extended
+thinking, OpenAI Responses reasoning items, or OpenAI-compat
+`<think>`-tag models are exposed to users.
+
+- [x] `cogito-protocol`: `ContentBlock::Thinking` + `EventPayload::ThinkingBlockRecorded` + `ModelEvent::ThinkingDelta` / `ThinkingBlockCompleted` + `StreamEvent::ThinkingDelta` (all additive, no `SCHEMA_VERSION` bump)
+- [x] `cogito-core::harness`: H02 thinking-block buffer + flush; H06 routing; H04 projection
+- [x] `cogito-model::anthropic`: decode `thinking_delta` + `signature_delta` + `redacted_thinking`; encode `ContentBlock::Thinking` back to wire (plain + redacted)
+- [x] `cogito-model::openai_compat`: `<think>` two-state SSE parser + `reasoning_content` field reader (mutually exclusive); `include_prior_thinking` provider config (default `false`); encode wraps in `<think>...</think>` when opt-in
+- [x] Resume-chaos: new `thinking_then_text_then_tool` scenario; all 4 oracles pass for every crash boundary
+- [x] Docs: H02/H04/H06 component docs + AGENTS.md inviolable rules #8/#9 + `docs/data-model/jsonl-v1.md` additive entry
+- [x] **ADR-0019**: Reasoning content modeling and event scope (Accepted 2026-05-22)
 
 #### Sprint 5 · Async Jobs (2 days)
 - [ ] `cogito-jobs` implements `JobManager` (tokio task + JSONL job log persistence)

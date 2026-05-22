@@ -158,7 +158,7 @@ pub enum ModelEvent {
     },
     /// A thinking block has been sealed by the provider; carries the
     /// full accumulated text plus any provider-opaque payload (signature
-    /// for Anthropic, encrypted_content + item_id for OpenAI Responses,
+    /// for Anthropic, `encrypted_content` + `item_id` for `OpenAI` Responses,
     /// `None` for OpenAI-compat). H06 calls
     /// `recorder.on_thinking_block_complete(...)`.
     ThinkingBlockCompleted {
