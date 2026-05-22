@@ -64,7 +64,14 @@ pub async fn enter_turn(entry: TurnEntry, ctx: TurnCtx, deps: TurnDeps) -> TurnO
             },
         },
         TurnEntry::FromModelCompleted { output } => {
-            let surface = crate::harness::tool_surface::surface(&ctx.strategy, deps.tools.as_ref());
+            // Resume paths do not reload history; pass empty slice so H05
+            // falls back to strategy.allowed_tools with no override applied.
+            let surface = crate::harness::tool_surface::surface(
+                &ctx.strategy,
+                deps.tools.as_ref(),
+                &[],
+                ctx.turn_id,
+            );
             TurnState::ModelCompleted {
                 ctx,
                 output,
@@ -72,7 +79,14 @@ pub async fn enter_turn(entry: TurnEntry, ctx: TurnCtx, deps: TurnDeps) -> TurnO
             }
         }
         TurnEntry::FromToolDispatching { pending, completed } => {
-            let surface = crate::harness::tool_surface::surface(&ctx.strategy, deps.tools.as_ref());
+            // Resume paths do not reload history; pass empty slice so H05
+            // falls back to strategy.allowed_tools with no override applied.
+            let surface = crate::harness::tool_surface::surface(
+                &ctx.strategy,
+                deps.tools.as_ref(),
+                &[],
+                ctx.turn_id,
+            );
             // Re-validate every pending call through H07 against the current
             // tool surface. Any failure → fail the turn cleanly (don't half-resume).
             match resolve_pending(&pending, &surface) {
