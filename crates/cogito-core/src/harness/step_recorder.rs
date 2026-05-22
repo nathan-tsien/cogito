@@ -40,11 +40,22 @@ pub struct StepRecorder {
     session_id: SessionId,
     seq_counter: u64,
     current_text_block: Option<TextBlockBuf>,
+    current_thinking_block: Option<ThinkingBlockBuf>,
 }
 
 /// In-flight text block accumulator. Filled by `on_text_delta` and drained
 /// by `on_text_block_complete` into a single `AssistantMessageAppended`.
 struct TextBlockBuf {
+    turn_id: TurnId,
+    text: String,
+}
+
+/// In-flight thinking block accumulator. Filled by `on_thinking_delta`
+/// and drained by `on_thinking_block_complete` into a single
+/// `ThinkingBlockRecorded` event. `provider_opaque` is supplied at
+/// flush time because adapters pre-aggregate signature/encrypted blobs
+/// and only know the final payload after the wire `content_block_stop`.
+struct ThinkingBlockBuf {
     turn_id: TurnId,
     text: String,
 }
@@ -65,6 +76,7 @@ impl StepRecorder {
             session_id,
             seq_counter: seq_start,
             current_text_block: None,
+            current_thinking_block: None,
         }
     }
 
@@ -121,6 +133,46 @@ impl StepRecorder {
             .append(
                 Some(buf.turn_id),
                 EventPayload::AssistantMessageAppended { text: buf.text },
+            )
+            .await?;
+        Ok(Some(event_id))
+    }
+
+    /// Buffer a streaming reasoning chunk and broadcast it live as
+    /// [`StreamEvent::ThinkingDelta`]. Does NOT persist — call
+    /// [`StepRecorder::on_thinking_block_complete`] when the wire
+    /// protocol signals the block is finished.
+    pub fn on_thinking_delta(&mut self, turn_id: TurnId, chunk: String) {
+        let buf = self
+            .current_thinking_block
+            .get_or_insert_with(|| ThinkingBlockBuf {
+                turn_id,
+                text: String::new(),
+            });
+        buf.text.push_str(&chunk);
+        let _ = self.events_tx.send(StreamEvent::ThinkingDelta { chunk });
+    }
+
+    /// Persist the accumulated thinking block as one
+    /// `ThinkingBlockRecorded` event. `provider_opaque` is taken from
+    /// the gateway's `ThinkingBlockCompleted` event (signature for
+    /// Anthropic, encrypted_content for OpenAI Responses, None for
+    /// OpenAI-compat). No-op when no `on_thinking_delta` calls have
+    /// arrived since the last flush.
+    pub async fn on_thinking_block_complete(
+        &mut self,
+        provider_opaque: Option<serde_json::Value>,
+    ) -> Result<Option<EventId>, StoreError> {
+        let Some(buf) = self.current_thinking_block.take() else {
+            return Ok(None);
+        };
+        let event_id = self
+            .append(
+                Some(buf.turn_id),
+                EventPayload::ThinkingBlockRecorded {
+                    text: buf.text,
+                    provider_opaque,
+                },
             )
             .await?;
         Ok(Some(event_id))
@@ -429,6 +481,72 @@ mod tests {
             .await?;
 
         assert_ne!(event_id_1, event_id_2, "EventIds must be unique");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn thinking_block_flush_persists_thinking_block_recorded()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempfile::tempdir()?;
+        let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+        let (tx, mut rx) = broadcast::channel(64);
+        let session_id = SessionId::new();
+        let turn_id = TurnId::new();
+        let mut recorder = StepRecorder::new(Arc::clone(&store), tx, session_id, 0);
+
+        recorder
+            .record_session_started(SessionMeta {
+                cogito_version: "0.1.0".into(),
+                ..Default::default()
+            })
+            .await?;
+
+        recorder.on_thinking_delta(turn_id, "I should ".into());
+        recorder.on_thinking_delta(turn_id, "grep.".into());
+        let id = recorder
+            .on_thinking_block_complete(Some(serde_json::json!({"signature":"abc"})))
+            .await?;
+        assert!(id.is_some(), "expected an EventId from flush");
+
+        // Two ThinkingDelta StreamEvents broadcast then nothing more.
+        #[allow(clippy::panic)]
+        match rx.try_recv()? {
+            StreamEvent::ThinkingDelta { chunk } => assert_eq!(chunk, "I should "),
+            other => panic!("unexpected stream event: {other:?}"),
+        }
+        #[allow(clippy::panic)]
+        match rx.try_recv()? {
+            StreamEvent::ThinkingDelta { chunk } => assert_eq!(chunk, "grep."),
+            other => panic!("unexpected stream event: {other:?}"),
+        }
+
+        // Persisted shape: read the JSONL file and confirm the payload type.
+        let session_file = std::fs::read_dir(tmp.path())?
+            .next()
+            .ok_or("no session file")?
+            .map_err(|e| format!("{e}"))?
+            .path();
+        let text = tokio::fs::read_to_string(session_file).await?;
+        assert!(
+            text.contains("thinking_block_recorded"),
+            "expected thinking_block_recorded line, got: {text}"
+        );
+        assert!(
+            text.contains(r#""provider_opaque":{"signature":"abc"}"#),
+            "expected provider_opaque payload preserved, got: {text}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn thinking_block_complete_with_no_buffered_deltas_is_noop()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempfile::tempdir()?;
+        let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+        let (tx, _rx) = broadcast::channel(64);
+        let mut recorder = StepRecorder::new(Arc::clone(&store), tx, SessionId::new(), 0);
+        let id = recorder.on_thinking_block_complete(None).await?;
+        assert!(id.is_none(), "no buffered deltas → no event written");
         Ok(())
     }
 
