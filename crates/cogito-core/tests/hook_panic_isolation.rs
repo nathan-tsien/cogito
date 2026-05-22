@@ -70,6 +70,9 @@ async fn hook_panic_in_pre_prompt_yields_turn_failed() -> Result<(), Box<dyn std
         tools,
         hooks,
         metrics: Arc::new(NoOpMetricsRecorder),
+        context_pipeline: Arc::new(cogito_context::build_pipeline(
+            &cogito_protocol::context::ContextConfig::default(),
+        )),
     };
 
     let ctx = TurnCtx {

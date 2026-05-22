@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use cogito_protocol::ContextPipeline;
 use cogito_protocol::MetricsRecorder;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::store::ConversationStore;
@@ -39,4 +40,8 @@ pub struct TurnDeps {
     /// the field is intentionally separate from `hooks.metrics` — both share
     /// the same `Arc` as of Sprint 5 (builder.rs wires them together).
     pub metrics: Arc<dyn MetricsRecorder>,
+    /// H11 context-management pipeline. Built from `strategy.context` at
+    /// session open. Task 31 will move construction to `SessionShared`; for
+    /// Sprint 6 it is built in `spawn_turn_driver` from the per-turn strategy.
+    pub context_pipeline: Arc<ContextPipeline>,
 }

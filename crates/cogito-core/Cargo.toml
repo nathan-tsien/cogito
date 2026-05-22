@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 cogito-protocol.workspace = true
+cogito-context.workspace = true
 jsonschema.workspace = true
 
 tokio.workspace = true
@@ -31,6 +32,7 @@ chrono.workspace = true
 cogito-test-fixtures.workspace = true
 cogito-tools.workspace = true
 cogito-mock-model.workspace = true
+cogito-context.workspace = true
 cogito-store-jsonl.workspace = true
 tokio-test.workspace = true
 rstest.workspace = true

@@ -41,6 +41,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::types::{SessionCommand, ShutdownOutcome, TurnTrigger};
 use crate::harness::hooks::CompositeHookPipeline;
+// cogito-context is wired by the Runtime layer (not the Brain/harness layer),
+// consistent with ADR-0004: the runtime composes the pipeline from config and
+// injects it as a protocol trait object into TurnDeps.
 use crate::harness::resume::{ResumePoint, replay};
 use crate::harness::step_recorder::StepRecorder;
 use crate::harness::turn_driver::{TurnCtx, TurnDeps, TurnEntry, enter_turn};
@@ -327,6 +330,10 @@ fn spawn_turn_driver(
         strategy: state.strategy.clone(),
         consecutive_tool_errors: 0,
     };
+    // Build the context pipeline from the per-session strategy. Task 31 will
+    // lift this into SessionShared so it is constructed once per session
+    // rather than once per turn.
+    let context_pipeline = Arc::new(cogito_context::build_pipeline(&state.strategy.context));
     let turn_deps = TurnDeps {
         step: Arc::clone(&state.recorder),
         store: Arc::clone(&state.store),
@@ -334,6 +341,7 @@ fn spawn_turn_driver(
         tools: Arc::clone(&deps.tools),
         hooks: Arc::clone(&state.hooks),
         metrics: Arc::clone(&state.metrics),
+        context_pipeline,
     };
     let result_tx = state.turn_result_tx.clone();
     tokio::spawn(async move {

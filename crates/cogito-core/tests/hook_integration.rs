@@ -88,6 +88,9 @@ async fn sensitive_content_hook_rejects_tool_with_aws_key() -> Result<(), Box<dy
         tools,
         hooks,
         metrics: Arc::new(NoOpMetricsRecorder),
+        context_pipeline: Arc::new(cogito_context::build_pipeline(
+            &cogito_protocol::context::ContextConfig::default(),
+        )),
     };
 
     let ctx = TurnCtx {
