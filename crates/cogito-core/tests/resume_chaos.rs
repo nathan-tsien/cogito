@@ -608,6 +608,42 @@ fn resumable_boundaries(events: &[ConversationEvent]) -> Vec<u64> {
         .collect()
 }
 
+// === Context-manage pairing oracle ==========================================
+
+/// Assert that every `ContextManageEntered` in the log has a matching
+/// `ContextManageCompleted` (or that the turn ended with `TurnFailed`, which
+/// resets any pending enter). Both variants are empty structs — they carry no
+/// `turn_id` — so pairing is tracked by sequential count rather than by ID.
+///
+/// A well-formed log satisfies:
+/// - `count(ContextManageCompleted) == count(ContextManageEntered)`
+/// - No `ContextManageCompleted` appears before its corresponding `Entered`
+/// - `TurnFailed` may close an open `Entered` (pessimistic reset)
+fn assert_context_managed_pairing(events: &[ConversationEvent]) {
+    let mut entered_without_completed: i64 = 0;
+    for ev in events {
+        match ev.payload {
+            EventPayload::ContextManageEntered { .. } => entered_without_completed += 1,
+            EventPayload::ContextManageCompleted { .. } => {
+                assert!(
+                    entered_without_completed > 0,
+                    "ContextManageCompleted with no preceding Entered"
+                );
+                entered_without_completed -= 1;
+            }
+            EventPayload::TurnFailed { .. } => {
+                // Turn failure closes any pending entered — pessimistic reset.
+                entered_without_completed = 0;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        entered_without_completed, 0,
+        "unclosed ContextManageEntered count: {entered_without_completed}"
+    );
+}
+
 // === Tests ===================================================================
 
 #[tokio::test]
@@ -648,6 +684,9 @@ async fn chaos_y_path_every_event_boundary() {
                 resumed.len()
             );
 
+            // Pairing check runs first so a missing Completed surfaces before
+            // the prefix-immutability diff (which would be harder to diagnose).
+            assert_context_managed_pairing(&resumed);
             assert_prefix_immutable(&golden.events, &resumed, crash_after_n);
             assert_terminal_equivalent(&golden.terminal, terminal_payload(&resumed));
             assert_tool_mapping_equivalent(&golden.events, &resumed);
