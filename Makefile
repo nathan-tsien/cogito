@@ -2,6 +2,8 @@
 #
 # Usage:
 #   make chat              interactive REPL (provider/model from cogito.toml)
+#   make chat SESSION_ID=01K…  resume an existing session (replays history)
+#   make chat MODE=resume SESSION_ID=01K…   strict resume (fails if missing)
 #   make test              run all workspace tests
 #   make test CRATE=cogito-core   run one crate
 #   make ci                full CI gate (fmt-check + clippy + layer-check + test)
@@ -13,10 +15,17 @@
 #   2. ./cogito.toml
 #   3. $XDG_CONFIG_HOME/cogito/config.toml   (defaulted below)
 #
-# CLI args (`--model`, `--provider`, `--base-url`) still work if you
-# need a one-off override; pass them through as `make chat -- --model foo`
-# is NOT supported, run `cargo run -p cogito-cli -- chat --model foo`
-# directly for that.
+# Per-invocation CLI overrides exposed as Make variables (all optional):
+#   MODEL=…        → --model
+#   PROVIDER=…     → --provider
+#   BASE_URL=…     → --base-url
+#   SESSION_ID=…   → --session-id (defaults to attach when set)
+#   MODE=…         → --mode {new,resume,attach}
+#   SESSION_ROOT=… → --session-root  (also used by `sessions-clean`)
+#   SYSTEM=…       → --system   (override the system prompt; quote spaces)
+#   CONFIG=…       → --config   (path to a cogito.toml)
+#
+# Example: `make chat SESSION_ID=01K… MODE=resume MODEL=claude-opus-4-7`
 #
 # Prerequisites: Rust 1.85+, cargo.  Optional: cargo-nextest.
 
@@ -43,6 +52,28 @@ endif
 
 CRATE        ?=
 
+# Per-invocation overrides for `make chat`, exposed as Make variables.
+# Each flag is only forwarded when the variable was set on the make
+# command line (`make chat MODEL=X`) — NOT when it leaks in from the
+# environment / .env. This matters because `.env` already carries
+# `MODEL=…` (for `cogito.toml`'s `${MODEL}` interpolation), and we
+# don't want that to silently become a `--model` CLI override.
+#
+# `origin` returns "command line" only when the user typed `VAR=…`
+# after `make`; everywhere else (env, default, file) we treat the var
+# as unset and let clap fall back to the cogito.toml defaults.
+from_cli = $(if $(filter command line,$(origin $(1))),$(2))
+
+CHAT_FLAGS = \
+  $(call from_cli,CONFIG,--config $(CONFIG)) \
+  $(call from_cli,MODEL,--model $(MODEL)) \
+  $(call from_cli,PROVIDER,--provider $(PROVIDER)) \
+  $(call from_cli,BASE_URL,--base-url $(BASE_URL)) \
+  $(call from_cli,SESSION_ROOT,--session-root $(SESSION_ROOT)) \
+  $(call from_cli,SESSION_ID,--session-id $(SESSION_ID)) \
+  $(call from_cli,MODE,--mode $(MODE)) \
+  $(call from_cli,SYSTEM,--system '$(SYSTEM)')
+
 .PHONY: default help \
         chat \
         test test-integration ci fmt fmt-check fix clippy layer-check \
@@ -59,6 +90,10 @@ help:
 	@echo ""
 	@echo "  Chat / REPL"
 	@echo "    make chat               interactive REPL (config from cogito.toml)"
+	@echo "    make chat SESSION_ID=01K… [MODE=resume|attach|new]"
+	@echo "                            resume an existing session (default MODE=attach)"
+	@echo "    make chat MODEL=… PROVIDER=… BASE_URL=… SYSTEM='…' CONFIG=…"
+	@echo "                            per-invocation overrides (all optional)"
 	@echo ""
 	@echo "  Testing"
 	@echo "    make test               all workspace tests"
@@ -87,10 +122,12 @@ env-check:
 	@echo "ANTHROPIC_API_KEY set: $(if $(ANTHROPIC_API_KEY),yes,no)"
 	@echo "OPENAI_API_KEY set:    $(if $(OPENAI_API_KEY),yes,no)"
 
-# Chat / REPL — provider/model from cogito.toml. Override at the CLI
-# layer by invoking `cargo run -p cogito-cli -- chat --model X` directly.
+# Chat / REPL — provider/model default to cogito.toml; any of the
+# CHAT_FLAGS variables (MODEL, PROVIDER, BASE_URL, SESSION_ID, MODE,
+# SESSION_ROOT, SYSTEM, CONFIG) overrides the corresponding clap flag
+# on this single invocation.
 chat:
-	$(CLI_RUN) chat
+	$(CLI_RUN) chat $(CHAT_FLAGS)
 
 # Tests
 test:
