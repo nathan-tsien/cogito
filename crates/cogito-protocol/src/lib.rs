@@ -47,7 +47,8 @@ pub mod turn_trigger;
 
 pub use content::ContentBlock;
 pub use context::{
-    CompactionReplacement, ContextDecisionErrors, ContextError, ToolFilterOverrideMode,
+    CompactionApplied, CompactionInput, CompactionKind, CompactionReplacement, Compactor,
+    ContextDecisionErrors, ContextError, ToolFilterOverrideMode,
 };
 pub use event::{ConversationEvent, EventCategory, EventPayload, SCHEMA_VERSION};
 pub use exec_ctx::ExecCtx;
@@ -59,7 +60,7 @@ pub use hook::{HookDecision, HookHandler, HookLifecyclePoint, HookProvider};
 pub use ids::{EventId, SessionId, TurnId};
 pub use metrics::{MetricsRecorder, NoOpMetricsRecorder};
 pub use session::SessionMeta;
-pub use store::{ConversationStore, StoreError};
+pub use store::{ConversationStore, EventRecorder, StoreError};
 pub use strategy::{HarnessStrategy, ToolFilter};
 pub use tool::{
     ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,

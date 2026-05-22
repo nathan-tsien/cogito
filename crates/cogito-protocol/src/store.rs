@@ -99,6 +99,28 @@ pub enum StoreError {
     },
 }
 
+/// Write-side abstraction used by Context-Management trait implementations
+/// (H11 Compactor, `SystemPromptInjector`, `ToolFilterOverrider`) to persist
+/// events without taking a direct reference to `cogito_core::StepRecorder`.
+///
+/// Implementations bridge this trait to `StepRecorder::append` (or an
+/// equivalent test double). The interface is intentionally minimal: callers
+/// supply a fully-constructed `EventPayload`; the recorder assigns `seq`,
+/// `ts`, `event_id`, and the session/turn envelope.
+///
+/// `EventRecorder` is dyn-safe and `Send + Sync` so it can be injected as
+/// a `&mut dyn EventRecorder` across await points.
+#[async_trait]
+pub trait EventRecorder: Send {
+    /// Persist one event payload for the given turn. Returns the `EventId`
+    /// assigned to the newly-written event and its monotonic `seq` number.
+    async fn append_payload(
+        &mut self,
+        turn_id: crate::ids::TurnId,
+        payload: crate::event::EventPayload,
+    ) -> Result<(crate::ids::EventId, u64), StoreError>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

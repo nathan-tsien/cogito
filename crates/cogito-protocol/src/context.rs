@@ -3,11 +3,16 @@
 //! See `docs/superpowers/specs/2026-05-23-sprint-6-context-management-design.md`
 //! and ADR-0008 for the full design. Implementations live in `cogito-context`.
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::event::ConversationEvent;
 use crate::gateway::ModelError;
-use crate::store::StoreError;
+use crate::gateway::{ModelGateway, Usage};
+use crate::ids::{EventId, SessionId, TurnId};
+use crate::store::{EventRecorder, StoreError};
+use crate::strategy::HarnessStrategy;
 
 /// Failure mode for any of the four Context-Management traits.
 ///
@@ -80,4 +85,75 @@ pub struct ContextDecisionErrors {
     pub injector: Option<String>,
     /// `ToolFilterOverrider` failure (H11 wrote a fallback Inherit event).
     pub overrider: Option<String>,
+}
+
+/// What kind of compaction was applied. Embedded in `CompactionApplied`
+/// so H11's `ContextDecisionRecorded` summary can describe it textually.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompactionKind {
+    /// Drop the covered seq range with no replacement (sliding-window truncation).
+    Truncate,
+    /// Replace the covered range with a model-generated summary.
+    Summarize,
+    /// Elide large tool result bodies while keeping the call/result structure.
+    ToolBodyElision,
+}
+
+/// Returned from `Compactor::maybe_compact` per `ContextCompacted` event written.
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub struct CompactionApplied {
+    /// The `EventId` of the `ContextCompacted` event that was persisted.
+    pub event_id: EventId,
+    /// Inclusive `(start_seq, end_seq)` range replaced by this compaction.
+    pub replaced_seq_range: (u64, u64),
+    /// The kind of compaction that was applied.
+    pub kind: CompactionKind,
+}
+
+/// Input handed to `Compactor::maybe_compact` by H11.
+pub struct CompactionInput<'a> {
+    /// Session identifier for the current turn.
+    pub session_id: SessionId,
+    /// Turn identifier for the current turn.
+    pub turn_id: TurnId,
+    /// Full event history as loaded by H11 before the turn begins.
+    pub history: &'a [ConversationEvent],
+    /// Per-turn strategy knobs (system prompt, model params, tool filter).
+    pub strategy: &'a HarnessStrategy,
+    /// Token usage from the most recent model call, if available.
+    /// `None` on the very first turn or when the previous turn had no model call.
+    pub last_usage: Option<Usage>,
+    /// Gateway reference used by summarization compactors to issue model calls.
+    pub model_gateway: &'a dyn ModelGateway,
+    /// Event recorder used to persist `ContextCompacted` events. Compactors
+    /// call `recorder.append_payload(turn_id, EventPayload::ContextCompacted { .. })`
+    /// for each compaction they perform.
+    pub recorder: &'a mut dyn EventRecorder,
+}
+
+/// Decide whether (and how) to compact history for the upcoming turn.
+///
+/// Implementations MUST be idempotent on `turn_id`: if a `ContextCompacted`
+/// event already exists in `history` for this turn, return its
+/// `CompactionApplied` without doing further work.
+///
+/// Failures degrade — they do NOT propagate to H01 as fatal. H11 records
+/// the error in `ContextDecisionRecorded.errors.compactor` and continues
+/// the turn without compaction.
+#[async_trait]
+pub trait Compactor: Send + Sync {
+    /// Inspect `input.history` and, if compaction is warranted, write one or
+    /// more `ContextCompacted` events via `input.recorder` and return a
+    /// `CompactionApplied` descriptor for each. Return an empty vec when no
+    /// compaction is needed.
+    async fn maybe_compact(
+        &self,
+        input: CompactionInput<'_>,
+    ) -> Result<Vec<CompactionApplied>, ContextError>;
+
+    /// Stable identifier for this compactor implementation, written into
+    /// `ContextCompacted.produced_by` (e.g. `"truncate"`, `"summarize"`).
+    fn id(&self) -> &'static str;
 }
