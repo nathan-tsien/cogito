@@ -182,6 +182,84 @@ impl<W: Write> Renderer<W> {
             body.to_string()
         }
     }
+
+    /// Print a dim, single-line replay banner (e.g. session metadata).
+    /// Used at the start of a resumed REPL to anchor the history that
+    /// follows.
+    pub fn replay_banner(&mut self, text: &str) -> IoResult<()> {
+        let line = self.paint(DIM, text);
+        writeln!(self.out, "{line}")?;
+        self.in_text = false;
+        Ok(())
+    }
+
+    /// Print a prior user input as it would have appeared at the
+    /// prompt during the original session. `text` is rendered verbatim
+    /// after a cyan `> ` prefix.
+    pub fn replay_user_input(&mut self, text: &str) -> IoResult<()> {
+        let prompt = self.paint(CYAN, "> ");
+        writeln!(self.out, "\n{prompt}{text}")?;
+        self.in_text = false;
+        Ok(())
+    }
+
+    /// Print a prior assistant text block. Unlike live `TextDelta`
+    /// rendering this writes the whole block in one shot and is not
+    /// concatenation-aware — each call produces its own `agent: …`
+    /// line.
+    pub fn replay_assistant_block(&mut self, text: &str) -> IoResult<()> {
+        let label = self.paint(GREEN, "agent: ");
+        writeln!(self.out, "\n{label}{text}")?;
+        self.in_text = false;
+        Ok(())
+    }
+
+    /// Print a prior tool call as a single start/end pair, with the
+    /// same formatting as the live `ToolDispatchStarted` /
+    /// `ToolDispatchEnded` path. `elapsed_ms` is derived from the
+    /// event log's persisted timestamps rather than an in-memory
+    /// `Instant`, so replays reproduce the original timing.
+    pub fn replay_tool_call(
+        &mut self,
+        tool_name: &str,
+        args: &serde_json::Value,
+        elapsed_ms: u128,
+        ok: bool,
+        error_message: Option<&str>,
+    ) -> IoResult<()> {
+        let args_preview = serde_json::to_string(args).map_or_else(
+            |_| "{}".to_string(),
+            |s| truncate_chars(&s, TOOL_ARGS_PREVIEW_MAX),
+        );
+        let start = self.paint(
+            DIM_YELLOW,
+            &format!("[tool] {tool_name} {args_preview} \u{2026}"),
+        );
+        write!(self.out, "\n{start}")?;
+        let status = if ok { "ok" } else { "err" };
+        let body = format!("[tool] {tool_name} {status} ({elapsed_ms}ms)");
+        let end = if ok {
+            self.paint(DIM_YELLOW, &body)
+        } else {
+            self.paint(RED, &body)
+        };
+        writeln!(self.out, "\n{end}")?;
+        if let Some(msg) = error_message {
+            let truncated = truncate_chars(msg, TOOL_ERROR_PREVIEW_MAX);
+            let indented = self.paint(RED, &format!("        {truncated}"));
+            writeln!(self.out, "{indented}")?;
+        }
+        self.in_text = false;
+        Ok(())
+    }
+
+    /// Print a prior turn failure (`[error] <reason>`) during replay.
+    pub fn replay_turn_failed(&mut self, reason: &str) -> IoResult<()> {
+        let line = self.paint(RED, &format!("[error] {reason}"));
+        writeln!(self.out, "\n{line}")?;
+        self.in_text = false;
+        Ok(())
+    }
 }
 
 impl Renderer<std::io::Stdout> {
@@ -481,5 +559,84 @@ mod tests {
             !out.contains('\x1b'),
             "no_color path leaked ESC byte: {out:?}"
         );
+    }
+
+    fn render<F: FnOnce(&mut Renderer<&mut Vec<u8>>) -> IoResult<()>>(f: F) -> String {
+        let mut buf: Vec<u8> = Vec::new();
+        {
+            let mut r = Renderer::new(&mut buf, false);
+            f(&mut r).unwrap();
+        }
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn replay_banner_writes_single_line() {
+        let out = render(|r| r.replay_banner("resumed session abc · 4 turns"));
+        assert_eq!(out, "resumed session abc · 4 turns\n");
+    }
+
+    #[test]
+    fn replay_user_input_prints_prompt_then_text() {
+        let out = render(|r| r.replay_user_input("who are you?"));
+        assert_eq!(out, "\n> who are you?\n");
+    }
+
+    #[test]
+    fn replay_assistant_block_prints_full_text_with_prefix() {
+        let out = render(|r| r.replay_assistant_block("I am cogito."));
+        assert_eq!(out, "\nagent: I am cogito.\n");
+    }
+
+    #[test]
+    fn replay_tool_call_ok_shows_args_and_duration() {
+        let out = render(|r| {
+            r.replay_tool_call(
+                "read_file",
+                &serde_json::json!({"path": "a.rs"}),
+                42,
+                true,
+                None,
+            )
+        });
+        assert!(
+            out.contains(r#"[tool] read_file {"path":"a.rs"} …"#),
+            "missing start line: {out:?}"
+        );
+        assert!(
+            out.contains("[tool] read_file ok (42ms)"),
+            "missing end line with duration: {out:?}"
+        );
+        assert!(
+            !out.contains("\n        "),
+            "ok path should not emit an indented error line: {out:?}"
+        );
+    }
+
+    #[test]
+    fn replay_tool_call_err_shows_indented_message() {
+        let out = render(|r| {
+            r.replay_tool_call(
+                "query_cameras",
+                &serde_json::json!({"fuzzy_keyword": "深圳"}),
+                7,
+                false,
+                Some("backend offline"),
+            )
+        });
+        assert!(
+            out.contains("[tool] query_cameras err (7ms)"),
+            "missing err marker: {out:?}"
+        );
+        assert!(
+            out.contains("\n        backend offline\n"),
+            "missing indented error message: {out:?}"
+        );
+    }
+
+    #[test]
+    fn replay_turn_failed_prints_error_line() {
+        let out = render(|r| r.replay_turn_failed("model gateway timeout"));
+        assert_eq!(out, "\n[error] model gateway timeout\n");
     }
 }
