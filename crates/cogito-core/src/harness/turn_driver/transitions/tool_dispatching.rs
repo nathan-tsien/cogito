@@ -34,12 +34,25 @@ pub async fn transit(
 ) -> TurnState {
     while let Some(inv) = pending.pop_front() {
         // `HookDecision` is `#[non_exhaustive]`; Allow and unknown variants continue.
-        if let HookDecision::Reject { reason, .. } =
+        if let HookDecision::Reject { hook_name, reason } =
             deps.hooks.pre_dispatch(&inv.call_id, &inv.name, &inv.args)
         {
+            // Persist the HookRejected event (additive log entry, ADR-0007)
+            // before the tool error so the log ordering reflects causality.
+            let _ = deps
+                .step
+                .lock()
+                .await
+                .record_hook_rejected(
+                    ctx.turn_id,
+                    hook_name.clone(),
+                    cogito_protocol::hook::HookLifecyclePoint::PreDispatch,
+                    reason.clone(),
+                )
+                .await;
             let result = ToolResult::Error {
                 kind: ToolErrorKind::InvocationFailed,
-                message: format!("rejected by pre_dispatch hook: {reason}"),
+                message: format!("hook '{hook_name}' rejected pre_dispatch: {reason}"),
                 retryable: false,
             };
             // Write tool result before continuing (ADR-0003).

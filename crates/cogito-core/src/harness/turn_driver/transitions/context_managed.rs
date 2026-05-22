@@ -71,6 +71,19 @@ pub async fn transit(ctx: TurnCtx, deps: &TurnDeps) -> TurnState {
     // --- H09 pre_prompt hook ---
     match deps.hooks.pre_prompt(&model_input) {
         HookDecision::Reject { hook_name, reason } => {
+            // Persist the HookRejected event (additive log entry, ADR-0007)
+            // before the TurnFailed event so the log ordering reflects causality.
+            let _ = deps
+                .step
+                .lock()
+                .await
+                .record_hook_rejected(
+                    ctx.turn_id,
+                    hook_name.clone(),
+                    cogito_protocol::hook::HookLifecyclePoint::PrePrompt,
+                    reason.clone(),
+                )
+                .await;
             let failure_reason = TurnFailureReason::HookRejected {
                 hook_name,
                 message: reason,
