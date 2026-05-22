@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use cogito_core::harness::hooks::HookPipeline;
+use cogito_core::harness::hooks::CompositeHookPipeline;
 use cogito_core::harness::step_recorder::StepRecorder;
 use cogito_core::harness::turn_driver::deps::TurnDeps;
 use cogito_core::harness::turn_driver::state::TurnCtx;
@@ -70,7 +70,7 @@ async fn text_only_turn_reaches_completed() -> Result<(), Box<dyn std::error::Er
         store: Arc::clone(&store),
         model: mock,
         tools,
-        hooks: HookPipeline::new(),
+        hooks: Arc::new(CompositeHookPipeline::default()),
     };
 
     let ctx = TurnCtx {

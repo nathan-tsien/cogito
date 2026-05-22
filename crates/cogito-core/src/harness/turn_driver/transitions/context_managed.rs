@@ -70,14 +70,9 @@ pub async fn transit(ctx: TurnCtx, deps: &TurnDeps) -> TurnState {
 
     // --- H09 pre_prompt hook ---
     match deps.hooks.pre_prompt(&model_input) {
-        HookDecision::Allow => TurnState::PromptBuilt {
-            ctx,
-            input: model_input,
-            surface: tool_surface,
-        },
-        HookDecision::Reject { reason } => {
+        HookDecision::Reject { hook_name, reason } => {
             let failure_reason = TurnFailureReason::HookRejected {
-                hook_name: "pre_prompt".into(),
+                hook_name,
                 message: reason,
             };
             let recorded_event_id = match deps
@@ -96,5 +91,11 @@ pub async fn transit(ctx: TurnCtx, deps: &TurnDeps) -> TurnState {
                 recorded_event_id,
             }
         }
+        // `HookDecision` is `#[non_exhaustive]`; Allow and unknown variants continue.
+        _ => TurnState::PromptBuilt {
+            ctx,
+            input: model_input,
+            surface: tool_surface,
+        },
     }
 }

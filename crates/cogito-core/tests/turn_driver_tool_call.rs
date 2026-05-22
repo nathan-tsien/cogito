@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use cogito_core::harness::hooks::HookPipeline;
+use cogito_core::harness::hooks::CompositeHookPipeline;
 use cogito_core::harness::step_recorder::StepRecorder;
 use cogito_core::harness::turn_driver::deps::TurnDeps;
 use cogito_core::harness::turn_driver::state::TurnCtx;
@@ -101,7 +101,7 @@ async fn tool_call_completes_via_second_model_call() -> Result<(), Box<dyn std::
         store: Arc::clone(&store),
         model: Arc::clone(&mock) as Arc<dyn cogito_protocol::gateway::ModelGateway>,
         tools,
-        hooks: HookPipeline::new(),
+        hooks: Arc::new(CompositeHookPipeline::default()),
     };
 
     let ctx = TurnCtx {
@@ -194,7 +194,7 @@ async fn invalid_tool_args_persist_error_result() -> Result<(), Box<dyn std::err
         store: Arc::clone(&store),
         model: Arc::clone(&mock) as Arc<dyn cogito_protocol::gateway::ModelGateway>,
         tools,
-        hooks: HookPipeline::new(),
+        hooks: Arc::new(CompositeHookPipeline::default()),
     };
 
     let ctx = TurnCtx {

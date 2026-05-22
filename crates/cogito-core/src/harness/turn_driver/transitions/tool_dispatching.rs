@@ -33,24 +33,24 @@ pub async fn transit(
     deps: &TurnDeps,
 ) -> TurnState {
     while let Some(inv) = pending.pop_front() {
-        match deps.hooks.pre_dispatch(&inv.call_id, &inv.name) {
-            HookDecision::Allow => {}
-            HookDecision::Reject { reason } => {
-                let result = ToolResult::Error {
-                    kind: ToolErrorKind::InvocationFailed,
-                    message: format!("rejected by pre_dispatch hook: {reason}"),
-                    retryable: false,
-                };
-                // Write tool result before continuing (ADR-0003).
-                let _ = deps
-                    .step
-                    .lock()
-                    .await
-                    .record_tool_result(ctx.turn_id, inv.call_id.clone(), result.clone())
-                    .await;
-                completed.push((inv.call_id, result));
-                continue;
-            }
+        // `HookDecision` is `#[non_exhaustive]`; Allow and unknown variants continue.
+        if let HookDecision::Reject { reason, .. } =
+            deps.hooks.pre_dispatch(&inv.call_id, &inv.name)
+        {
+            let result = ToolResult::Error {
+                kind: ToolErrorKind::InvocationFailed,
+                message: format!("rejected by pre_dispatch hook: {reason}"),
+                retryable: false,
+            };
+            // Write tool result before continuing (ADR-0003).
+            let _ = deps
+                .step
+                .lock()
+                .await
+                .record_tool_result(ctx.turn_id, inv.call_id.clone(), result.clone())
+                .await;
+            completed.push((inv.call_id, result));
+            continue;
         }
 
         let result = match dispatch(inv.clone(), deps.tools.as_ref(), ctx.exec_ctx.clone()).await {

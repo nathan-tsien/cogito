@@ -39,7 +39,7 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::types::{SessionCommand, ShutdownOutcome, TurnTrigger};
-use crate::harness::hooks::HookPipeline;
+use crate::harness::hooks::CompositeHookPipeline;
 use crate::harness::resume::{ResumePoint, replay};
 use crate::harness::step_recorder::StepRecorder;
 use crate::harness::turn_driver::{TurnCtx, TurnDeps, TurnEntry, enter_turn};
@@ -327,7 +327,7 @@ fn spawn_turn_driver(
         store: Arc::clone(&state.store),
         model: Arc::clone(&deps.model),
         tools: Arc::clone(&deps.tools),
-        hooks: HookPipeline::new(),
+        hooks: Arc::new(CompositeHookPipeline::default()),
     };
     let result_tx = state.turn_result_tx.clone();
     tokio::spawn(async move {
