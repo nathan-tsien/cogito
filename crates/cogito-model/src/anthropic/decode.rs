@@ -17,6 +17,15 @@ pub(crate) struct Decoder {
     text_buf: HashMap<u32, String>,
     /// Accumulated partial JSON per `tool_use` block.
     tool_args_buf: HashMap<u32, ToolUseAccum>,
+    /// Accumulates the text portion of an in-flight thinking block,
+    /// keyed by `block_index`. Drained on `content_block_stop`.
+    thinking_text_buf: HashMap<u32, String>,
+    /// Captures the most recent `signature_delta` for the in-flight
+    /// thinking block at the given `block_index`. Drained on
+    /// `content_block_stop`. Per Anthropic protocol, exactly one
+    /// signature arrives per plain thinking block, immediately before
+    /// `content_block_stop`.
+    thinking_sig_buf: HashMap<u32, String>,
     /// Final usage from `message_delta`.
     usage: Usage,
     /// Final stop reason.
@@ -77,12 +86,22 @@ impl Decoder {
                         }])
                     }
                     SseContentBlockStart::Thinking {} => {
-                        // TODO: Task 10 implement thinking block buffer
+                        // Plain thinking block: initialize accumulators.
+                        // Deltas (thinking_delta + signature_delta) follow;
+                        // the block seals at content_block_stop.
+                        self.thinking_text_buf.entry(index).or_default();
                         Ok(vec![])
                     }
-                    SseContentBlockStart::RedactedThinking { data: _ } => {
-                        // TODO: Task 10 implement redacted thinking handling
-                        Ok(vec![])
+                    SseContentBlockStart::RedactedThinking { data } => {
+                        // Redacted thinking is sealed at start — no further
+                        // deltas follow per Anthropic protocol. Emit the
+                        // ThinkingBlockCompleted immediately with data
+                        // packed into provider_opaque under the `data` key.
+                        Ok(vec![ModelEvent::ThinkingBlockCompleted {
+                            block_index: index,
+                            text: String::new(),
+                            provider_opaque: Some(serde_json::json!({"data": data})),
+                        }])
                     }
                 }
             }
@@ -100,12 +119,21 @@ impl Decoder {
                     }
                     Ok(vec![])
                 }
-                SseContentBlockDelta::ThinkingDelta { thinking: _ } => {
-                    // TODO: Task 10 implement thinking delta accumulation
-                    Ok(vec![])
+                SseContentBlockDelta::ThinkingDelta { thinking } => {
+                    self.thinking_text_buf
+                        .entry(index)
+                        .or_default()
+                        .push_str(&thinking);
+                    Ok(vec![ModelEvent::ThinkingDelta {
+                        block_index: index,
+                        chunk: thinking,
+                    }])
                 }
-                SseContentBlockDelta::SignatureDelta { signature: _ } => {
-                    // TODO: Task 10 implement signature handling
+                SseContentBlockDelta::SignatureDelta { signature } => {
+                    // Capture signature into the in-flight thinking-block
+                    // accumulator; emit no event. The signature is
+                    // attached to ThinkingBlockCompleted at content_block_stop.
+                    self.thinking_sig_buf.insert(index, signature);
                     Ok(vec![])
                 }
             },
@@ -127,6 +155,15 @@ impl Decoder {
                         call_id: acc.call_id,
                         tool_name: acc.tool_name,
                         args: parsed,
+                    }]);
+                }
+                if let Some(text) = self.thinking_text_buf.remove(&index) {
+                    let signature = self.thinking_sig_buf.remove(&index);
+                    let provider_opaque = signature.map(|s| serde_json::json!({"signature": s}));
+                    return Ok(vec![ModelEvent::ThinkingBlockCompleted {
+                        block_index: index,
+                        text,
+                        provider_opaque,
                     }]);
                 }
                 Ok(vec![])
