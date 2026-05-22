@@ -455,7 +455,7 @@
           ],
           "properties": {
             "provider_opaque": {
-              "description": "Provider-opaque blob (signature / encrypted_content / item id) that must round-trip verbatim on the next model call. Schema is provider-specific; cogito does not interpret it."
+              "description": "Provider-opaque blob (signature / `encrypted_content` / item id) that must round-trip verbatim on the next model call. Schema is provider-specific; cogito does not interpret it."
             },
             "text": {
               "description": "Full reasoning text for the sealed block. May be empty when the provider exposes only an opaque encrypted payload.",
