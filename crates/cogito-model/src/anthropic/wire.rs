@@ -43,6 +43,19 @@ pub(crate) enum RequestContentBlock {
         #[serde(skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
     },
+    /// Anthropic plain thinking block (extended-thinking mode). Must
+    /// round-trip with the original `signature` for next-turn
+    /// validation to succeed.
+    Thinking {
+        thinking: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        signature: String,
+    },
+    /// Anthropic safety-filtered thinking block. The reasoning text is
+    /// encrypted; only the opaque `data` blob travels.
+    RedactedThinking {
+        data: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
