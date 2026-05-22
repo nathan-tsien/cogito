@@ -15,6 +15,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use chrono::Utc;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::context::{
@@ -24,7 +25,7 @@ use cogito_protocol::event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
 use cogito_protocol::ids::{EventId, SessionId, TurnId};
 use cogito_protocol::job::{JobId, JobOutcome};
 use cogito_protocol::session::SessionMeta;
-use cogito_protocol::store::{ConversationStore, StoreError};
+use cogito_protocol::store::{ConversationStore, EventRecorder, StoreError};
 use cogito_protocol::stream::StreamEvent;
 use cogito_protocol::tool::ToolResult;
 use cogito_protocol::turn::{TurnFailureReason, TurnOutcome};
@@ -667,6 +668,59 @@ impl StepRecorder {
         self.seq_counter = self.seq_counter.saturating_add(1);
         self.history_cache.push(event);
         Ok(event_id)
+    }
+}
+
+/// Bridge `EventRecorder` onto `StepRecorder` so that H11 trait
+/// implementations (`Compactor`, `SystemPromptInjector`, `ToolFilterOverrider`)
+/// can call the recorder via the protocol trait without a concrete dependency
+/// on `cogito-core`.
+///
+/// The convenience methods (`record_system_prompt_injected`,
+/// `record_tool_filter_overridden`) are overridden to delegate to the
+/// checked concrete methods that enforce idempotency invariants.
+#[async_trait]
+impl EventRecorder for StepRecorder {
+    async fn append_payload(
+        &mut self,
+        turn_id: TurnId,
+        payload: EventPayload,
+    ) -> Result<(EventId, u64), StoreError> {
+        // The concrete `append` method does not return the seq. We track it
+        // from the counter before the call.
+        let seq = self.seq_counter;
+        let event_id = self.append(Some(turn_id), payload).await?;
+        Ok((event_id, seq))
+    }
+
+    /// Override with the idempotency-checked version from `StepRecorder`.
+    async fn record_system_prompt_injected(
+        &mut self,
+        turn_id: TurnId,
+        suffix: String,
+        contributors: Vec<String>,
+        produced_by: &str,
+    ) -> Result<EventId, StoreError> {
+        StepRecorder::record_system_prompt_injected(
+            self,
+            turn_id,
+            suffix,
+            contributors,
+            produced_by,
+        )
+        .await
+    }
+
+    /// Override with the idempotency-checked version from `StepRecorder`.
+    async fn record_tool_filter_overridden(
+        &mut self,
+        turn_id: TurnId,
+        mode: ToolFilterOverrideMode,
+        contributors: Vec<String>,
+        produced_by: &str,
+    ) -> Result<EventId, StoreError> {
+        StepRecorder::record_tool_filter_overridden(self, turn_id, mode, contributors, produced_by)
+            .await
     }
 }
 

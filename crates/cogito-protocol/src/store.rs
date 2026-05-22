@@ -126,6 +126,58 @@ pub trait EventRecorder: Send {
         turn_id: crate::ids::TurnId,
         payload: crate::event::EventPayload,
     ) -> Result<(crate::ids::EventId, u64), StoreError>;
+
+    /// Persist a `SystemPromptInjected` event for `turn_id`.
+    ///
+    /// Default implementation builds the payload and delegates to
+    /// [`EventRecorder::append_payload`]. Overriding implementations
+    /// (e.g. `StepRecorder`) may add idempotency checks.
+    async fn record_system_prompt_injected(
+        &mut self,
+        turn_id: crate::ids::TurnId,
+        suffix: String,
+        contributors: Vec<String>,
+        produced_by: &str,
+    ) -> Result<crate::ids::EventId, StoreError> {
+        let (id, _seq) = self
+            .append_payload(
+                turn_id,
+                crate::event::EventPayload::SystemPromptInjected {
+                    turn_id,
+                    suffix,
+                    contributors,
+                    produced_by: produced_by.to_owned(),
+                },
+            )
+            .await?;
+        Ok(id)
+    }
+
+    /// Persist a `ToolFilterOverridden` event for `turn_id`.
+    ///
+    /// Default implementation builds the payload and delegates to
+    /// [`EventRecorder::append_payload`]. Overriding implementations
+    /// (e.g. `StepRecorder`) may add idempotency checks.
+    async fn record_tool_filter_overridden(
+        &mut self,
+        turn_id: crate::ids::TurnId,
+        mode: crate::context::ToolFilterOverrideMode,
+        contributors: Vec<String>,
+        produced_by: &str,
+    ) -> Result<crate::ids::EventId, StoreError> {
+        let (id, _seq) = self
+            .append_payload(
+                turn_id,
+                crate::event::EventPayload::ToolFilterOverridden {
+                    turn_id,
+                    mode,
+                    contributors,
+                    produced_by: produced_by.to_owned(),
+                },
+            )
+            .await?;
+        Ok(id)
+    }
 }
 
 #[cfg(test)]
