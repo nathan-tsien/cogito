@@ -167,6 +167,15 @@ ContextManaged → PromptBuilt sequence" for the canonical walkthrough.
 
 ## Open design questions
 
+- **`post_turn` on `Paused` terminal**: `post_turn` is currently wired
+  only for the `Completed` terminal (fired inside `model_completed.rs`
+  before the FSM returns `TurnState::Completed`). The `Paused` terminal
+  will be wired in Sprint 6 alongside the JobManager / async job path
+  (Context Management, C2). Until that wiring lands, the `Paused` match
+  arm in `turn_driver/mod.rs` carries a `TODO(sprint-6)` comment as a
+  reminder. Cross-reference Sprint 6 (Context Management) and
+  `docs/superpowers/plans/2026-05-22-sprint-5-hook-pipeline.md`.
+
 - **`HookDecision::Modify`**: originally proposed to allow a hook to
   rewrite the in-flight value (prompt slice, tool call args) before the
   pipeline continues. The variant would produce a `HookModified` event

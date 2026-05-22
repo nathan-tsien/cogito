@@ -211,8 +211,11 @@ fired and why, without having to parse the free-text `reason` field in
 
 **Ordering**: appears immediately before `turn_failed` in the event log.
 When a `pre_prompt` hook rejects, the sequence is
-`… model_call_started → hook_rejected → turn_failed`. When a
-`pre_dispatch` hook rejects, the sequence is
+`… context_manage_completed → prompt_composed → hook_rejected → turn_failed`.
+`pre_prompt` fires at the end of the `ContextManaged` state, before the FSM
+transitions to `PromptBuilt`; `model_call_started` only fires at the
+`PromptBuilt → ModelCalling` transition and is therefore absent from the
+rejection sequence. When a `pre_dispatch` hook rejects, the sequence is
 `… tool_use_recorded → hook_rejected → turn_failed`.
 
 **Payload**:

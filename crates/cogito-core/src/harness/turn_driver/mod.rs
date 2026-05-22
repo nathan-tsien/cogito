@@ -170,9 +170,13 @@ pub async fn run(initial: TurnState, deps: &TurnDeps) -> TurnOutcome {
             } => {
                 transitions::tool_dispatching::transit(ctx, pending, completed, surface, deps).await
             }
+            // TODO(sprint-6): fire deps.hooks.post_turn() for
+            // TurnState::Paused when it becomes reachable via the async
+            // job path (JobManager wiring). For now Paused shares this
+            // arm because its body is identical to Completed / Failed.
             terminal @ (TurnState::Completed { .. }
-            | TurnState::Paused { .. }
-            | TurnState::Failed { .. }) => {
+            | TurnState::Failed { .. }
+            | TurnState::Paused { .. }) => {
                 return terminal.into_outcome();
             }
         };

@@ -33,6 +33,10 @@ pub struct TurnDeps {
     pub tools: Arc<dyn ToolProvider>,
     /// Hook pipeline (Sprint 5: lifecycle methods wired in Task 5).
     pub hooks: Arc<CompositeHookPipeline>,
-    /// Metrics sink (Sprint 5: defaults to `NoOpMetricsRecorder`; real adapter wired in v0.4).
+    /// Metrics sink for this turn. Defaults to `NoOpMetricsRecorder`; a real
+    /// adapter will be wired in v0.4. Sprint 6 (Context C2) records
+    /// context-decision metrics directly via this field (not via hooks), so
+    /// the field is intentionally separate from `hooks.metrics` — both share
+    /// the same `Arc` as of Sprint 5 (builder.rs wires them together).
     pub metrics: Arc<dyn MetricsRecorder>,
 }
