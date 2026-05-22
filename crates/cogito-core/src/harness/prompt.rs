@@ -93,6 +93,7 @@ fn flush_assistant(current: &mut Option<Vec<ContentBlock>>, out: &mut Vec<Messag
 }
 
 #[cfg(test)]
+#[allow(clippy::panic, clippy::match_wildcard_for_single_variants)]
 mod tests {
     use super::*;
     use chrono::Utc;

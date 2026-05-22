@@ -50,6 +50,11 @@ enum ThinkTagState {
 /// message to whatever text arrived in the first finish-bearing chunk
 /// while the live `TextDelta` stream continued to deliver the rest.
 #[derive(Debug, Default)]
+// Five bools track orthogonal aspects of the decoder's state machine
+// (text_started, thinking_started, thinking_sealed, tag_parser_disabled,
+// finalized). Collapsing them into a single enum loses the
+// independent-axes meaning and would require more code, not less.
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct Decoder {
     /// Accumulated text for the text block.
     text_buf: String,

@@ -156,7 +156,7 @@ impl StepRecorder {
     /// Persist the accumulated thinking block as one
     /// `ThinkingBlockRecorded` event. `provider_opaque` is taken from
     /// the gateway's `ThinkingBlockCompleted` event (signature for
-    /// Anthropic, encrypted_content for OpenAI Responses, None for
+    /// Anthropic, `encrypted_content` for `OpenAI` Responses, None for
     /// OpenAI-compat). No-op when no `on_thinking_delta` calls have
     /// arrived since the last flush.
     pub async fn on_thinking_block_complete(

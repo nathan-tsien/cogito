@@ -48,6 +48,7 @@ impl Decoder {
     /// Translate one SSE event into zero or more `ModelEvent`s.
     ///
     /// `Ping` and unknown event types yield an empty vector.
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn translate(&mut self, sse: SseEvent) -> Result<Vec<ModelEvent>, ModelError> {
         match sse {
             SseEvent::MessageStart { message } => {

@@ -110,6 +110,7 @@ pub fn synthesize_legacy_provider(
             auth_header: "Authorization".into(),
             auth_scheme: "Bearer".into(),
             timeout_secs: None,
+            include_prior_thinking: false,
         })
     }
 }
@@ -176,6 +177,7 @@ pub fn patch_base_url(cfg: ProviderConfig, new_base_url: String) -> ProviderConf
             auth_header,
             auth_scheme,
             timeout_secs,
+            include_prior_thinking,
             ..
         } => ProviderConfig::OpenAiCompat {
             name,
@@ -184,6 +186,7 @@ pub fn patch_base_url(cfg: ProviderConfig, new_base_url: String) -> ProviderConf
             auth_header,
             auth_scheme,
             timeout_secs,
+            include_prior_thinking,
         },
     }
 }

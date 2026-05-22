@@ -1,7 +1,7 @@
 //! Replay recorded Anthropic SSE fixtures through the decoder and assert
 //! the resulting `ModelEvent` sequence.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use cogito_model::sse::replay_anthropic_into_model_events;
 use cogito_protocol::gateway::{ModelEvent, StopReason};

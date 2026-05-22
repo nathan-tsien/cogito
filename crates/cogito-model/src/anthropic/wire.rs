@@ -128,6 +128,10 @@ pub(crate) enum SseContentBlockStart {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// All variants ARE deltas (mirror of Anthropic's `content_block_delta`
+// SSE event family). The `Delta` suffix carries semantics; stripping it
+// would conflict with non-delta variants like the start types.
+#[allow(clippy::enum_variant_names)]
 pub(crate) enum SseContentBlockDelta {
     TextDelta {
         text: String,
@@ -167,6 +171,7 @@ pub(crate) struct SseError {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod thinking_wire_tests {
     use super::*;
 

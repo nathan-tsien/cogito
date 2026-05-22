@@ -224,7 +224,7 @@ pub fn paused_async_job() -> ChaosScenario {
 }
 
 /// Scenario 5: assistant turn starts with a thinking block (carrying
-/// provider_opaque signature), then text, then a tool call. Verifies
+/// `provider_opaque` signature), then text, then a tool call. Verifies
 /// that H03 resume preserves `ThinkingBlockRecorded` events in the
 /// prefix and that H04's projection rebuilds the assistant
 /// `Message::content` with `Thinking` at index 0. Added for ADR-0019.
