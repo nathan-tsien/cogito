@@ -50,16 +50,22 @@ pub enum ContentBlock {
     /// Model reasoning/"thinking" content. Carried inside the assistant
     /// message's content array; placed before Text / `ToolUse` blocks in
     /// the same message per provider requirements (see ADR-0019 §4).
-    /// `provider_opaque` is None for backends that need no round-trip
-    /// material (OpenAI-compat), Some for Anthropic (signature) and
-    /// `OpenAI` Responses (`encrypted_content` + `item_id`).
     Thinking {
-        /// Human-readable reasoning text. May be empty when the provider
-        /// returns only an encrypted blob (e.g. Anthropic `redacted_thinking`).
+        /// Human-readable reasoning text, when the provider exposes it.
+        /// Empty string for redacted/encrypted-only blocks (e.g.
+        /// Anthropic `redacted_thinking`).
         text: String,
         /// Provider-defined opaque payload required for next-turn
         /// validation. Schema is provider-specific; cogito does not
-        /// interpret the contents.
+        /// interpret the contents. Concrete shapes observed:
+        ///
+        /// - Anthropic plain `thinking`: `{ "signature": "<base64>" }`.
+        /// - Anthropic `redacted_thinking`: `{ "data": "<opaque>" }`
+        ///   (no signature; the reasoning itself is encrypted).
+        /// - `OpenAI` Responses `reasoning`: `{ "item_id": "<id>",
+        ///   "encrypted_content": "<opaque>" }`.
+        /// - `OpenAI`-compat (`chat.completions`-style, no encrypted
+        ///   reasoning state): `None`.
         provider_opaque: Option<serde_json::Value>,
     },
 }
@@ -131,6 +137,30 @@ mod tests {
             provider_opaque: None,
         };
         let json = serde_json::to_string(&cb)?;
+        assert_eq!(
+            json,
+            r#"{"type":"thinking","data":{"text":"implicit reasoning","provider_opaque":null}}"#,
+            "provider_opaque must serialize as JSON null when None (not omitted) — locks ADR-0007 wire-format contract"
+        );
+        let back: ContentBlock = serde_json::from_str(&json)?;
+        assert_eq!(cb, back);
+        Ok(())
+    }
+
+    #[test]
+    fn thinking_roundtrips_with_redacted_data_payload() -> serde_json::Result<()> {
+        // Anthropic `redacted_thinking` shape: empty text, opaque blob
+        // under `data` (not `signature`). Locks the wire contract for
+        // this Anthropic safety-filtered variant.
+        let cb = ContentBlock::Thinking {
+            text: String::new(),
+            provider_opaque: Some(serde_json::json!({"data": "enc_blob"})),
+        };
+        let json = serde_json::to_string(&cb)?;
+        assert_eq!(
+            json,
+            r#"{"type":"thinking","data":{"text":"","provider_opaque":{"data":"enc_blob"}}}"#
+        );
         let back: ContentBlock = serde_json::from_str(&json)?;
         assert_eq!(cb, back);
         Ok(())
