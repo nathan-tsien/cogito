@@ -267,3 +267,185 @@ pub trait ToolFilterOverrider: Send + Sync {
     /// Stable identifier for this overrider implementation (e.g. `"noop"`, `"plugin-overrider"`).
     fn id(&self) -> &'static str;
 }
+
+// ---------------------------------------------------------------------------
+// Configuration types
+// ---------------------------------------------------------------------------
+
+/// Per-trait configuration container; lives in `HarnessStrategy.context`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ContextConfig {
+    /// Configuration for the `Compactor` trait implementation.
+    pub compactor: CompactorConfig,
+    /// Configuration for the `HistoryProjector` trait implementation.
+    pub history_projector: HistoryProjectorConfig,
+    /// Configuration for the `SystemPromptInjector` trait implementation.
+    pub system_prompt_injector: SystemPromptInjectorConfig,
+    /// Configuration for the `ToolFilterOverrider` trait implementation.
+    pub tool_filter_overrider: ToolFilterOverriderConfig,
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            compactor: CompactorConfig::None,
+            history_projector: HistoryProjectorConfig::Standard,
+            system_prompt_injector: SystemPromptInjectorConfig::None,
+            tool_filter_overrider: ToolFilterOverriderConfig::None,
+        }
+    }
+}
+
+/// Selects which `Compactor` implementation H11 instantiates.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CompactorConfig {
+    /// No compaction; H11 passes history to the model unchanged.
+    None,
+    /// Sliding-window truncation compactor.
+    Truncate(TruncateConfig),
+}
+
+/// Per-trait config for `TruncateCompactor`. v0.1 ships only this Compactor.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TruncateConfig {
+    /// Adaptive (ratio of `model_limits().context_window_tokens`) or absolute.
+    #[serde(default)]
+    pub max_tokens: TokenThreshold,
+    /// Preserve the first user message (turn 1)?
+    #[serde(default = "default_true")]
+    pub keep_first_user: bool,
+    /// Always preserve this many most-recent completed turns.
+    #[serde(default = "default_keep_recent")]
+    pub keep_recent_turns: u32,
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+const fn default_keep_recent() -> u32 {
+    5
+}
+
+/// Token budget threshold — either adaptive (relative to the model's context
+/// window) or an absolute hard limit.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TokenThreshold {
+    /// Adaptive: `ratio * context_window_tokens - safety_headroom`.
+    Ratio {
+        /// Fraction of the model's total context window to target (0.0–1.0).
+        of_context_window: f32,
+        /// Tokens reserved for model response and safety margin.
+        safety_headroom: u64,
+    },
+    /// Hard absolute (ignores `model_limits`).
+    Absolute(u64),
+}
+
+impl Default for TokenThreshold {
+    fn default() -> Self {
+        Self::Ratio {
+            of_context_window: 0.75,
+            safety_headroom: 8192,
+        }
+    }
+}
+
+/// Selects which `HistoryProjector` implementation H11 instantiates.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HistoryProjectorConfig {
+    /// Standard compaction-aware projector (the only v0.1 implementation).
+    Standard,
+}
+
+/// Selects which `SystemPromptInjector` implementation H11 instantiates.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SystemPromptInjectorConfig {
+    /// No-op injector; `strategy.system_prompt` is used unchanged.
+    None,
+}
+
+/// Selects which `ToolFilterOverrider` implementation H11 instantiates.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolFilterOverriderConfig {
+    /// No-op overrider; `strategy.allowed_tools` is used unchanged.
+    None,
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::float_cmp
+)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn default_config_is_all_none() {
+        let c = ContextConfig::default();
+        assert!(matches!(c.compactor, CompactorConfig::None));
+        assert!(matches!(
+            c.history_projector,
+            HistoryProjectorConfig::Standard
+        ));
+        assert!(matches!(
+            c.system_prompt_injector,
+            SystemPromptInjectorConfig::None
+        ));
+        assert!(matches!(
+            c.tool_filter_overrider,
+            ToolFilterOverriderConfig::None
+        ));
+    }
+
+    #[test]
+    fn truncate_config_toml_roundtrip() {
+        let toml_input = r#"
+[compactor]
+kind = "truncate"
+keep_first_user = true
+keep_recent_turns = 5
+
+[compactor.max_tokens]
+kind = "ratio"
+of_context_window = 0.75
+safety_headroom = 8192
+
+[history_projector]
+kind = "standard"
+
+[system_prompt_injector]
+kind = "none"
+
+[tool_filter_overrider]
+kind = "none"
+"#;
+        let parsed: ContextConfig = toml::from_str(toml_input).expect("parses");
+        let CompactorConfig::Truncate(t) = &parsed.compactor else {
+            panic!("expected truncate");
+        };
+        assert!(t.keep_first_user);
+        assert_eq!(t.keep_recent_turns, 5);
+        let TokenThreshold::Ratio {
+            of_context_window,
+            safety_headroom,
+        } = t.max_tokens
+        else {
+            panic!("expected ratio");
+        };
+        assert!((of_context_window - 0.75).abs() < 1e-6);
+        assert_eq!(safety_headroom, 8192);
+    }
+}
