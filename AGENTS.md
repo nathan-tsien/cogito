@@ -93,6 +93,30 @@ is served by reading the underlying storage directly (JSONL files in
 v0.1 dev/debug; Postgres tables in v0.4 production). See ADR-0007 for
 the principle and ADR-0014 (v0.4) for the `TenantContext` model.
 
+### 8. Thinking content ordering inside an assistant message
+
+Within one assistant turn's `Message::Assistant.content` array,
+`ContentBlock::Thinking` MUST precede `Text` and `ToolUse` blocks.
+Brain enforces this by walking event-log entries in `seq` order in
+H04 — providers emit `thinking` blocks first, so seq order produces
+the correct ordering automatically. Reordering or dropping
+`Thinking` blocks invalidates the next-turn signature check on
+Anthropic and the reasoning-item continuity on OpenAI Responses.
+Per ADR-0019 §4.
+
+### 9. Persisted JSONL is append-only and never rewritten
+
+cogito never rewrites already-persisted event-log files in place,
+regardless of how the events were originally shaped. This applies
+to backfilling, migration, normalization, and any other server-side
+rewrite. Old sessions with provider-specific quirks (e.g.
+`<think>…</think>` baked into `AssistantMessageAppended.text` from
+pre-ADR-0019 builds) stay byte-for-byte as written. New shapes
+coexist with old shapes in storage; readers handle both. The same
+rule applies if a future ADR introduces yet another reasoning
+representation: cogito appends forward, never rewrites backward.
+Per ADR-0019 §5.3.
+
 ## Coding standards
 
 - **Edition**: Rust 2024, MSRV 1.85 (edition 2024 stabilized in 1.85)

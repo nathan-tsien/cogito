@@ -57,6 +57,17 @@ fn project_history(history: &[ConversationEvent]) -> Vec<Message> {
                         args: args.clone(),
                     });
             }
+            EventPayload::ThinkingBlockRecorded {
+                text,
+                provider_opaque,
+            } => {
+                current_assistant
+                    .get_or_insert_with(Vec::new)
+                    .push(ContentBlock::Thinking {
+                        text: text.clone(),
+                        provider_opaque: provider_opaque.clone(),
+                    });
+            }
             EventPayload::ToolResultRecorded { call_id, result } => {
                 flush_assistant(&mut current_assistant, &mut out);
                 out.push(Message::User {
@@ -78,5 +89,79 @@ fn project_history(history: &[ConversationEvent]) -> Vec<Message> {
 fn flush_assistant(current: &mut Option<Vec<ContentBlock>>, out: &mut Vec<Message>) {
     if let Some(content) = current.take() {
         out.push(Message::Assistant { content });
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::panic, clippy::match_wildcard_for_single_variants)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use cogito_protocol::event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
+    use cogito_protocol::gateway::Message;
+    use cogito_protocol::ids::{EventId, SessionId, TurnId};
+
+    fn evt(seq: u64, payload: EventPayload, turn_id: Option<TurnId>) -> ConversationEvent {
+        ConversationEvent {
+            schema_version: SCHEMA_VERSION,
+            event_id: EventId::new(),
+            session_id: SessionId::new(),
+            turn_id,
+            seq,
+            ts: Utc::now(),
+            payload,
+        }
+    }
+
+    #[test]
+    fn project_history_emits_thinking_before_text_within_assistant_message() {
+        let turn_id = TurnId::new();
+        let history = vec![
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![ContentBlock::Text { text: "go".into() }],
+                },
+                Some(turn_id),
+            ),
+            evt(
+                1,
+                EventPayload::ThinkingBlockRecorded {
+                    text: "I should grep.".into(),
+                    provider_opaque: Some(serde_json::json!({"signature":"sig"})),
+                },
+                Some(turn_id),
+            ),
+            evt(
+                2,
+                EventPayload::AssistantMessageAppended { text: "OK.".into() },
+                Some(turn_id),
+            ),
+            evt(
+                3,
+                EventPayload::ToolUseRecorded {
+                    call_id: "c1".into(),
+                    tool_name: "grep".into(),
+                    args: serde_json::json!({"pattern":"foo"}),
+                },
+                Some(turn_id),
+            ),
+        ];
+
+        let messages = project_history(&history);
+        assert_eq!(messages.len(), 2, "1 user + 1 assistant message");
+        #[allow(clippy::panic)]
+        match &messages[1] {
+            Message::Assistant { content } => {
+                assert_eq!(content.len(), 3);
+                assert!(
+                    matches!(content[0], ContentBlock::Thinking { .. }),
+                    "Thinking must be at index 0 (precedes Text/ToolUse)"
+                );
+                assert!(matches!(content[1], ContentBlock::Text { .. }));
+                assert!(matches!(content[2], ContentBlock::ToolUse { .. }));
+            }
+            other => panic!("expected Assistant message, got {other:?}"),
+        }
     }
 }

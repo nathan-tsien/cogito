@@ -191,6 +191,15 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
                 },
             },
         ),
+        // ADR-0019: exercise the new thinking-block persistence event.
+        envelope(
+            11,
+            Some(turn),
+            EventPayload::ThinkingBlockRecorded {
+                text: "I should grep for the symbol.".into(),
+                provider_opaque: Some(serde_json::json!({"signature": "abc123"})),
+            },
+        ),
     ]
 }
 

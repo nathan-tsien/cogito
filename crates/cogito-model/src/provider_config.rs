@@ -65,6 +65,14 @@ pub enum ProviderConfig {
         /// (5 minutes).
         #[serde(default)]
         timeout_secs: Option<u64>,
+        /// Whether to re-feed prior-turn `ContentBlock::Thinking` blocks
+        /// back into outgoing messages. Most open-source reasoning models
+        /// (DeepSeek-R1, `QwQ`) explicitly drop prior thinking on follow-up
+        /// turns; default `false` matches that convention. Set `true`
+        /// only if the backend model is documented to handle prior
+        /// `<think>` context. See ADR-0019 §5.3.
+        #[serde(default)]
+        include_prior_thinking: bool,
     },
     // OpenAiResponses { ... } lands in Sprint 5 — single-arm addition.
 }
@@ -111,12 +119,14 @@ pub fn build_gateway(cfg: ProviderConfig) -> Result<Arc<dyn ModelGateway>, Model
             auth_header,
             auth_scheme,
             timeout_secs,
+            include_prior_thinking,
             ..
         } => {
             let mut c = OpenAiCompatConfig::with_base_url(base_url);
             c.api_key = api_key;
             c.auth_header = auth_header;
             c.auth_scheme = auth_scheme;
+            c.include_prior_thinking = include_prior_thinking;
             if let Some(s) = timeout_secs {
                 c.timeout = Duration::from_secs(s);
             }

@@ -52,6 +52,32 @@ where
                     })?;
                 content.push((block_index, ContentBlock::Text { text }));
             }
+            ModelEvent::ThinkingDelta {
+                block_index: _,
+                chunk,
+            } => {
+                recorder.on_thinking_delta(turn_id, chunk);
+            }
+            ModelEvent::ThinkingBlockCompleted {
+                block_index,
+                text,
+                provider_opaque,
+            } => {
+                recorder
+                    .on_thinking_block_complete(provider_opaque.clone())
+                    .await
+                    .map_err(|e| ModelError::Provider {
+                        status: 0,
+                        message: format!("recorder thinking flush: {e}"),
+                    })?;
+                content.push((
+                    block_index,
+                    ContentBlock::Thinking {
+                        text,
+                        provider_opaque,
+                    },
+                ));
+            }
             ModelEvent::ToolUseCompleted {
                 block_index,
                 call_id,
@@ -162,6 +188,96 @@ mod tests {
             "expected model_call_completed payload in persisted log, got: {text}"
         );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn demux_routes_thinking_delta_and_completed() -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempfile::tempdir()?;
+        let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+        let (tx, _rx) = broadcast::channel(64);
+        let session_id = SessionId::new();
+        let turn_id = TurnId::new();
+        let mut recorder = StepRecorder::new(Arc::clone(&store), tx, session_id, 0);
+        recorder
+            .record_session_started(cogito_protocol::session::SessionMeta {
+                cogito_version: "0.1.0".into(),
+                ..Default::default()
+            })
+            .await?;
+
+        let events = stream::iter(vec![
+            Ok(ModelEvent::ThinkingDelta {
+                block_index: 0,
+                chunk: "I should ".into(),
+            }),
+            Ok(ModelEvent::ThinkingDelta {
+                block_index: 0,
+                chunk: "grep.".into(),
+            }),
+            Ok(ModelEvent::ThinkingBlockCompleted {
+                block_index: 0,
+                text: "I should grep.".into(),
+                provider_opaque: Some(serde_json::json!({"signature":"sig"})),
+            }),
+            Ok(ModelEvent::TextDelta {
+                block_index: 1,
+                chunk: "ok".into(),
+            }),
+            Ok(ModelEvent::TextBlockCompleted {
+                block_index: 1,
+                text: "ok".into(),
+            }),
+            Ok(ModelEvent::MessageCompleted {
+                stop_reason: StopReason::EndTurn,
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
+            }),
+        ]);
+
+        let output = demux(events, &mut recorder, turn_id).await?;
+
+        // ModelOutput.content carries the Thinking block at index 0, Text at 1.
+        assert_eq!(output.content.len(), 2);
+        #[allow(clippy::panic)]
+        match &output.content[0] {
+            cogito_protocol::content::ContentBlock::Thinking {
+                text,
+                provider_opaque,
+            } => {
+                assert_eq!(text, "I should grep.");
+                assert_eq!(
+                    provider_opaque.as_ref().and_then(|v| v.get("signature")),
+                    Some(&serde_json::json!("sig"))
+                );
+            }
+            other => panic!("expected Thinking at idx 0, got {other:?}"),
+        }
+        #[allow(clippy::panic)]
+        match &output.content[1] {
+            cogito_protocol::content::ContentBlock::Text { text } => assert_eq!(text, "ok"),
+            other => panic!("expected Text at idx 1, got {other:?}"),
+        }
+
+        // Persisted: a thinking_block_recorded event preceded the assistant_message_appended.
+        let session_file = std::fs::read_dir(tmp.path())?
+            .next()
+            .ok_or("no session file")?
+            .map_err(|e| format!("{e}"))?
+            .path();
+        let log = tokio::fs::read_to_string(session_file).await?;
+        let think_pos = log
+            .find("thinking_block_recorded")
+            .ok_or("thinking event missing")?;
+        let text_pos = log
+            .find("assistant_message_appended")
+            .ok_or("text event missing")?;
+        assert!(
+            think_pos < text_pos,
+            "thinking event must precede text event by seq"
+        );
         Ok(())
     }
 }

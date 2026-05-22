@@ -122,6 +122,14 @@ pub(crate) struct ChoiceDelta {
     /// Partial text content from the assistant.
     #[serde(default)]
     pub content: Option<String>,
+    /// Partial reasoning content (`DeepSeek` official API, vLLM
+    /// `--enable-reasoning`, etc.). Mutually exclusive in time with
+    /// `content` per ADR-0019 §5.3.b — reasoning streams first, then
+    /// the backend switches to `content`. See `decode.rs` (Task 13)
+    /// for the state machine.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub reasoning_content: Option<String>,
     /// Partial tool-call fragments; keyed by `index` for multi-call merging.
     #[serde(default)]
     pub tool_calls: Vec<ToolCallDelta>,
@@ -149,4 +157,50 @@ pub(crate) struct ToolCallFunctionDelta {
     /// Partial JSON arguments string to be concatenated across fragments.
     #[serde(default)]
     pub arguments: Option<String>,
+}
+
+#[cfg(test)]
+mod reasoning_content_tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_delta_with_reasoning_content() {
+        let json = r#"{"reasoning_content":"I should grep."}"#;
+        let d: ChoiceDelta = serde_json::from_str(json).unwrap_or_else(|e| {
+            #[allow(clippy::panic)]
+            {
+                panic!("deserialize failed: {e}")
+            }
+        });
+        assert_eq!(d.reasoning_content.as_deref(), Some("I should grep."));
+        assert!(d.content.is_none());
+        assert!(d.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn deserializes_delta_without_reasoning_content_stays_compatible() {
+        let json = r#"{"content":"hi"}"#;
+        let d: ChoiceDelta = serde_json::from_str(json).unwrap_or_else(|e| {
+            #[allow(clippy::panic)]
+            {
+                panic!("deserialize failed: {e}")
+            }
+        });
+        assert_eq!(d.content.as_deref(), Some("hi"));
+        assert!(d.reasoning_content.is_none());
+    }
+
+    #[test]
+    fn deserializes_delta_with_both_content_and_reasoning() {
+        // Some backends may emit both in one chunk (transition frame).
+        let json = r#"{"reasoning_content":"thinking","content":"output"}"#;
+        let d: ChoiceDelta = serde_json::from_str(json).unwrap_or_else(|e| {
+            #[allow(clippy::panic)]
+            {
+                panic!("deserialize failed: {e}")
+            }
+        });
+        assert_eq!(d.reasoning_content.as_deref(), Some("thinking"));
+        assert_eq!(d.content.as_deref(), Some("output"));
+    }
 }

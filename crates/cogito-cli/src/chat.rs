@@ -419,6 +419,9 @@ async fn replay_history(
             EventPayload::AssistantMessageAppended { text } => {
                 renderer.replay_assistant_block(&text)?;
             }
+            EventPayload::ThinkingBlockRecorded { text, .. } => {
+                renderer.replay_thinking_block(&text)?;
+            }
             EventPayload::ToolUseRecorded {
                 call_id,
                 tool_name,

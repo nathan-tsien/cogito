@@ -50,6 +50,14 @@ pub enum StreamEvent {
         chunk: String,
     },
 
+    /// Per-chunk reasoning delta from the model stream. Not persisted
+    /// as-is; the store writer batches into `ThinkingBlockRecorded`
+    /// at the wire-protocol block-completion boundary. See ADR-0019 §3.
+    ThinkingDelta {
+        /// The reasoning chunk emitted by the model.
+        chunk: String,
+    },
+
     /// H08 began dispatching a tool call.
     ToolDispatchStarted {
         /// Opaque identifier for the tool call.
@@ -79,4 +87,24 @@ pub enum StreamEvent {
         /// reading the JSONL log.
         error_message: Option<String>,
     },
+}
+
+#[cfg(test)]
+mod thinking_stream_tests {
+    use super::*;
+
+    #[test]
+    fn thinking_delta_roundtrips() -> serde_json::Result<()> {
+        let evt = StreamEvent::ThinkingDelta {
+            chunk: "thinking...".into(),
+        };
+        let json = serde_json::to_string(&evt)?;
+        assert!(
+            json.contains(r#""kind":"thinking_delta""#),
+            "tag missing: {json}"
+        );
+        let back: StreamEvent = serde_json::from_str(&json)?;
+        assert_eq!(evt, back);
+        Ok(())
+    }
 }

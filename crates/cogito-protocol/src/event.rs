@@ -172,6 +172,20 @@ pub enum EventPayload {
         /// Token usage for this call.
         usage: crate::gateway::Usage,
     },
+
+    /// One reasoning/"thinking" content block has been sealed by the
+    /// provider. Sibling to `AssistantMessageAppended` and
+    /// `ToolUseRecorded` — one event per completed block, ordered by
+    /// envelope `seq`. See ADR-0019 §2. `turn_id` is on the envelope.
+    ThinkingBlockRecorded {
+        /// Full reasoning text for the sealed block. May be empty when
+        /// the provider exposes only an opaque encrypted payload.
+        text: String,
+        /// Provider-opaque blob (signature / `encrypted_content` / item
+        /// id) that must round-trip verbatim on the next model call.
+        /// Schema is provider-specific; cogito does not interpret it.
+        provider_opaque: Option<serde_json::Value>,
+    },
 }
 
 #[cfg(test)]
@@ -217,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn all_fourteen_variants_roundtrip() -> serde_json::Result<()> {
+    fn all_fifteen_variants_roundtrip() -> serde_json::Result<()> {
         // Covers every EventPayload variant. When a new variant is added,
         // add it here too and rename the test to match the new count.
         //
@@ -274,6 +288,10 @@ mod tests {
                     output_tokens: 50,
                 },
             },
+            EventPayload::ThinkingBlockRecorded {
+                text: "I should grep for the symbol.".into(),
+                provider_opaque: Some(serde_json::json!({"signature": "abc123"})),
+            },
         ];
         for v in variants {
             let event = sample_envelope(v.clone());
@@ -281,6 +299,22 @@ mod tests {
             let back: ConversationEvent = serde_json::from_str(&json)?;
             assert_eq!(event, back, "variant {v:?} did not roundtrip");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn thinking_block_recorded_roundtrips() -> serde_json::Result<()> {
+        let event = sample_envelope(EventPayload::ThinkingBlockRecorded {
+            text: "private chain of thought".into(),
+            provider_opaque: Some(serde_json::json!({"item_id": "rs_01"})),
+        });
+        let json = serde_json::to_string(&event)?;
+        assert!(
+            json.contains(r#""type":"thinking_block_recorded""#),
+            "missing tag: {json}"
+        );
+        let back: ConversationEvent = serde_json::from_str(&json)?;
+        assert_eq!(event, back);
         Ok(())
     }
 

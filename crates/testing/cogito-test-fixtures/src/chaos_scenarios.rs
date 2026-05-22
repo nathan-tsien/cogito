@@ -38,6 +38,7 @@ pub fn all() -> Vec<ChaosScenario> {
         no_tool_short_turn(),
         tool_returns_error(),
         paused_async_job(),
+        thinking_then_text_then_tool(),
     ]
 }
 
@@ -219,6 +220,82 @@ pub fn paused_async_job() -> ChaosScenario {
             ],
         ],
         uses_async_job: true,
+    }
+}
+
+/// Scenario 5: assistant turn starts with a thinking block (carrying
+/// `provider_opaque` signature), then text, then a tool call. Verifies
+/// that H03 resume preserves `ThinkingBlockRecorded` events in the
+/// prefix and that H04's projection rebuilds the assistant
+/// `Message::content` with `Thinking` at index 0. Added for ADR-0019.
+#[must_use]
+pub fn thinking_then_text_then_tool() -> ChaosScenario {
+    ChaosScenario {
+        name: "thinking_then_text_then_tool",
+        user_input: vec![ContentBlock::Text {
+            text: "read /etc/hostname".into(),
+        }],
+        model_scripts: vec![
+            vec![
+                ModelEvent::ThinkingDelta {
+                    block_index: 0,
+                    chunk: "I should ".into(),
+                },
+                ModelEvent::ThinkingDelta {
+                    block_index: 0,
+                    chunk: "read the file.".into(),
+                },
+                ModelEvent::ThinkingBlockCompleted {
+                    block_index: 0,
+                    text: "I should read the file.".into(),
+                    provider_opaque: Some(serde_json::json!({"signature": "sig_abc"})),
+                },
+                ModelEvent::TextDelta {
+                    block_index: 1,
+                    chunk: "Reading file...".into(),
+                },
+                ModelEvent::TextBlockCompleted {
+                    block_index: 1,
+                    text: "Reading file...".into(),
+                },
+                ModelEvent::ToolUseStarted {
+                    block_index: 2,
+                    call_id: "c1".into(),
+                    tool_name: "read_file".into(),
+                },
+                ModelEvent::ToolUseCompleted {
+                    block_index: 2,
+                    call_id: "c1".into(),
+                    tool_name: "read_file".into(),
+                    args: serde_json::json!({"path": "/etc/hostname"}),
+                },
+                ModelEvent::MessageCompleted {
+                    stop_reason: StopReason::ToolUse,
+                    usage: Usage {
+                        input_tokens: 50,
+                        output_tokens: 25,
+                    },
+                },
+            ],
+            vec![
+                ModelEvent::TextDelta {
+                    block_index: 0,
+                    chunk: "The hostname is foo.".into(),
+                },
+                ModelEvent::TextBlockCompleted {
+                    block_index: 0,
+                    text: "The hostname is foo.".into(),
+                },
+                ModelEvent::MessageCompleted {
+                    stop_reason: StopReason::EndTurn,
+                    usage: Usage {
+                        input_tokens: 75,
+                        output_tokens: 10,
+                    },
+                },
+            ],
+        ],
+        uses_async_job: false,
     }
 }
 

@@ -50,6 +50,7 @@ pub struct Renderer<W: Write> {
     out: W,
     color: bool,
     in_text: bool,
+    in_thinking: bool,
     tool_timers: HashMap<String, (Instant, String)>,
 }
 
@@ -62,6 +63,7 @@ impl<W: Write> Renderer<W> {
             out,
             color,
             in_text: false,
+            in_thinking: false,
             tool_timers: HashMap::new(),
         }
     }
@@ -79,12 +81,28 @@ impl<W: Write> Renderer<W> {
         match ev {
             StreamEvent::TurnStarted => {
                 self.in_text = false;
+                self.in_thinking = false;
+            }
+            StreamEvent::ThinkingDelta { chunk } => {
+                if !self.in_thinking {
+                    // If a thinking block starts after text/tools, the
+                    // previous line is already terminated by our helpers,
+                    // so `\nthinking: ` lays cleanly. Reset in_text first
+                    // so a subsequent TextDelta repaints `agent:`.
+                    self.in_text = false;
+                    self.write_thinking_label()?;
+                    self.in_thinking = true;
+                }
+                let painted = self.paint(DIM, chunk);
+                write!(self.out, "{painted}")?;
+                self.out.flush()?;
             }
             StreamEvent::TextDelta { chunk } => {
                 if !self.in_text {
                     self.write_agent_label()?;
                     self.in_text = true;
                 }
+                self.in_thinking = false;
                 write!(self.out, "{chunk}")?;
                 self.out.flush()?;
             }
@@ -97,6 +115,7 @@ impl<W: Write> Renderer<W> {
                     .insert(call_id.clone(), (Instant::now(), tool_name.clone()));
                 self.write_tool_start_line(tool_name, args)?;
                 self.in_text = false;
+                self.in_thinking = false;
             }
             StreamEvent::ToolDispatchEnded {
                 call_id,
@@ -109,36 +128,42 @@ impl<W: Write> Renderer<W> {
                 };
                 self.write_tool_end_line(&name, *ok, ms, error_message.as_deref())?;
                 self.in_text = false;
+                self.in_thinking = false;
             }
             StreamEvent::TurnCompleted => {
                 // Only emit a trailing newline when the previous event
                 // didn't already terminate its line (i.e. mid-stream
-                // text). Tool / lifecycle events use `writeln!` and
-                // are self-terminating, so a second newline here would
-                // produce a stray blank line.
-                if self.in_text {
+                // text or thinking). Tool / lifecycle events use
+                // `writeln!` and are self-terminating, so a second
+                // newline here would produce a stray blank line.
+                if self.in_text || self.in_thinking {
                     writeln!(self.out)?;
                 }
                 self.in_text = false;
+                self.in_thinking = false;
             }
             StreamEvent::TurnPaused => {
                 let line = self.paint(DIM, "[paused]");
                 write!(self.out, "\n{line}")?;
                 self.in_text = false;
+                self.in_thinking = false;
             }
             StreamEvent::TurnResumed => {
                 let line = self.paint(DIM, "[resumed]");
                 write!(self.out, "\n{line}")?;
                 self.in_text = false;
+                self.in_thinking = false;
             }
             StreamEvent::TurnCancelled => {
                 let line = self.paint(DIM_YELLOW, "[cancelled]");
                 write!(self.out, "\n{line}")?;
                 self.in_text = false;
+                self.in_thinking = false;
             }
             StreamEvent::TurnFailed { reason } => {
                 self.write_error_line(reason)?;
                 self.in_text = false;
+                self.in_thinking = false;
             }
             // `StreamEvent` is `#[non_exhaustive]`: future variants render as a no-op.
             _ => {}
@@ -168,6 +193,15 @@ impl<W: Write> Renderer<W> {
     /// text content immediately after.
     fn write_agent_label(&mut self) -> IoResult<()> {
         let label = self.paint(GREEN, "agent: ");
+        write!(self.out, "\n{label}")
+    }
+
+    /// `\n` + dim `thinking: ` label. The caller writes the reasoning
+    /// content immediately after (already dim-painted so the whole
+    /// block reads as muted text). See ADR-0019 §3 for the broadcast
+    /// flow this surfaces.
+    fn write_thinking_label(&mut self) -> IoResult<()> {
+        let label = self.paint(DIM, "thinking: ");
         write!(self.out, "\n{label}")
     }
 
@@ -264,6 +298,21 @@ impl<W: Write> Renderer<W> {
         self.write_agent_label()?;
         writeln!(self.out, "{text}")?;
         self.in_text = false;
+        self.in_thinking = false;
+        Ok(())
+    }
+
+    /// Print a prior thinking block in one shot. Renders as a dim
+    /// `thinking: <text>` line; empty text (e.g. Anthropic
+    /// `redacted_thinking`) is shown as `[redacted]` so the block
+    /// stays visible in history. Per ADR-0019 §2.
+    pub fn replay_thinking_block(&mut self, text: &str) -> IoResult<()> {
+        self.write_thinking_label()?;
+        let body = if text.is_empty() { "[redacted]" } else { text };
+        let painted = self.paint(DIM, body);
+        writeln!(self.out, "{painted}")?;
+        self.in_text = false;
+        self.in_thinking = false;
         Ok(())
     }
 
@@ -673,5 +722,98 @@ mod tests {
     fn replay_turn_failed_prints_error_line() {
         let out = render(|r| r.replay_turn_failed("model gateway timeout"));
         assert_eq!(out, "\n[error] model gateway timeout\n");
+    }
+
+    #[test]
+    fn thinking_delta_sequence_no_color() {
+        let out = render_events(&[
+            StreamEvent::TurnStarted,
+            StreamEvent::ThinkingDelta {
+                chunk: "I should ".into(),
+            },
+            StreamEvent::ThinkingDelta {
+                chunk: "grep.".into(),
+            },
+            StreamEvent::TurnCompleted,
+        ]);
+        assert_eq!(out, "\nthinking: I should grep.\n");
+    }
+
+    #[test]
+    fn thinking_then_text_emits_separate_labels() {
+        let out = render_events(&[
+            StreamEvent::TurnStarted,
+            StreamEvent::ThinkingDelta {
+                chunk: "I should grep.".into(),
+            },
+            StreamEvent::TextDelta {
+                chunk: "Looking now.".into(),
+            },
+            StreamEvent::TurnCompleted,
+        ]);
+        assert_eq!(out, "\nthinking: I should grep.\nagent: Looking now.\n");
+    }
+
+    #[test]
+    fn thinking_chunks_are_dim_painted_with_color() {
+        let out = render_events_color(&[StreamEvent::ThinkingDelta {
+            chunk: "reasoning".into(),
+        }]);
+        // DIM = "\x1b[2m"; each chunk wraps in DIM ... reset.
+        assert!(
+            out.contains("\x1b[2mthinking: \x1b[0m"),
+            "expected dim thinking label: {out:?}"
+        );
+        assert!(
+            out.contains("\x1b[2mreasoning\x1b[0m"),
+            "expected dim-painted chunk: {out:?}"
+        );
+    }
+
+    #[test]
+    fn replay_thinking_block_prints_full_text_with_prefix() {
+        let out = render(|r| r.replay_thinking_block("I should grep for the symbol."));
+        assert_eq!(out, "\nthinking: I should grep for the symbol.\n");
+    }
+
+    #[test]
+    fn replay_thinking_block_empty_text_shows_redacted_marker() {
+        let out = render(|r| r.replay_thinking_block(""));
+        assert_eq!(out, "\nthinking: [redacted]\n");
+    }
+
+    #[test]
+    fn thinking_then_tool_dispatch_terminates_thinking_line() {
+        // A turn that thinks, calls a tool, then resumes text. The
+        // thinking line must be terminated by the tool start line's
+        // leading `\n`; the second thinking transition into text must
+        // emit a fresh `agent:` label.
+        let out = render_events(&[
+            StreamEvent::ThinkingDelta {
+                chunk: "let me check".into(),
+            },
+            StreamEvent::ToolDispatchStarted {
+                call_id: "c1".into(),
+                tool_name: "t".into(),
+                args: serde_json::json!({}),
+            },
+            StreamEvent::ToolDispatchEnded {
+                call_id: "c1".into(),
+                ok: true,
+                error_message: None,
+            },
+            StreamEvent::TextDelta {
+                chunk: "done".into(),
+            },
+            StreamEvent::TurnCompleted,
+        ]);
+        assert!(
+            out.starts_with("\nthinking: let me check\n[tool] t "),
+            "expected thinking → tool sequence: {out:?}"
+        );
+        assert!(
+            out.contains("\nagent: done\n"),
+            "expected agent label after tool: {out:?}"
+        );
     }
 }

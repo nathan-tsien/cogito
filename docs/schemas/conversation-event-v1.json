@@ -439,6 +439,37 @@
           ]
         }
       }
+    },
+    {
+      "description": "One reasoning/\"thinking\" content block has been sealed by the provider. Sibling to `AssistantMessageAppended` and `ToolUseRecorded` — one event per completed block, ordered by envelope `seq`. See ADR-0019 §2. `turn_id` is on the envelope.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "provider_opaque": {
+              "description": "Provider-opaque blob (signature / `encrypted_content` / item id) that must round-trip verbatim on the next model call. Schema is provider-specific; cogito does not interpret it."
+            },
+            "text": {
+              "description": "Full reasoning text for the sealed block. May be empty when the provider exposes only an opaque encrypted payload.",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "thinking_block_recorded"
+          ]
+        }
+      }
     }
   ],
   "required": [
@@ -584,6 +615,37 @@
               "type": "string",
               "enum": [
                 "tool_result"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Model reasoning/\"thinking\" content. Carried inside the assistant message's content array; placed before Text / `ToolUse` blocks in the same message per provider requirements (see ADR-0019 §4).",
+          "type": "object",
+          "required": [
+            "data",
+            "type"
+          ],
+          "properties": {
+            "data": {
+              "type": "object",
+              "required": [
+                "text"
+              ],
+              "properties": {
+                "provider_opaque": {
+                  "description": "Provider-defined opaque payload required for next-turn validation. Schema is provider-specific; cogito does not interpret the contents. Concrete shapes observed:\n\n- Anthropic plain `thinking`: `{ \"signature\": \"<base64>\" }`. - Anthropic `redacted_thinking`: `{ \"data\": \"<opaque>\" }` (no signature; the reasoning itself is encrypted). - `OpenAI` Responses `reasoning`: `{ \"item_id\": \"<id>\", \"encrypted_content\": \"<opaque>\" }`. - `OpenAI`-compat (`chat.completions`-style, no encrypted reasoning state): `None`."
+                },
+                "text": {
+                  "description": "Human-readable reasoning text, when the provider exposes it. Empty string for redacted/encrypted-only blocks (e.g. Anthropic `redacted_thinking`).",
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "thinking"
               ]
             }
           }

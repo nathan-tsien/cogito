@@ -35,6 +35,12 @@ consumes this normalized stream:
 | Anthropic `content_block_start { tool_use }` | `ToolUseStarted { block_index, call_id, name }` |
 | Anthropic `content_block_delta { delta: input_json_delta }` | (buffered inside adapter; not emitted) |
 | Anthropic `content_block_stop` (tool_use block) | `ToolUseCompleted { block_index, call_id, name, args }` |
+| Anthropic `content_block_start { thinking }` + `thinking_delta` (ADR-0019 §5.1) | `ThinkingDelta { block_index, chunk }` |
+| Anthropic `signature_delta` | (buffered inside adapter; attached to next `ThinkingBlockCompleted.provider_opaque` as `{"signature": ...}`) |
+| Anthropic `content_block_stop` (thinking block) | `ThinkingBlockCompleted { block_index, text, provider_opaque }` |
+| Anthropic `content_block_start { redacted_thinking, data }` | emits `ThinkingBlockCompleted { text: "", provider_opaque: Some({"data": ...}) }` immediately — no further deltas follow per Anthropic protocol |
+| OpenAI-compat `choices[].delta.reasoning_content` (ADR-0019 §5.3.b) | `ThinkingDelta { block_index, chunk }`; on transition to `delta.content` or at stream end, emit `ThinkingBlockCompleted { provider_opaque: None }` |
+| OpenAI-compat inline `<think>…</think>` in `delta.content` (ADR-0019 §5.3.a) | two-state SSE parser in the adapter splits the stream into `TextDelta` / `ThinkingDelta` / `ThinkingBlockCompleted { provider_opaque: None }`. Tags may straddle SSE chunks; the adapter buffers from the last `<` byte. Mutually exclusive with the `reasoning_content` path — disabled once any `reasoning_content` chunk is observed. |
 | OpenAI `choices[].delta.content` | `TextDelta { block_index: 0, chunk }` |
 | OpenAI `choices[].delta.tool_calls[i]` | buffered per call_id inside adapter |
 | OpenAI `finish_reason: tool_calls` | one `ToolUseCompleted` per buffered call + `MessageCompleted` |

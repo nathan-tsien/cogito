@@ -71,6 +71,7 @@ The function walks events in seq order and projects to `Message`s:
 |---|---|
 | `UserMessageAdded { content: Vec<ContentBlock> }` | `Message::User { content }` |
 | `AssistantMessageAppended { content: Vec<ContentBlock> }` (one per text block sealed by H02) | merged into the in-progress `Message::Assistant { content: [accumulated] }` for the same turn (multiple `AssistantMessageAppended`s within one turn append blocks to the same assistant message) |
+| `ThinkingBlockRecorded { text, provider_opaque }` (ADR-0019 §2) | appended as `ContentBlock::Thinking { text, provider_opaque }` to the current assistant message. Block ordering within one assistant turn is reconstructed by envelope `seq` — Anthropic's "thinking precedes text/tool_use" constraint is automatically satisfied because providers emit thinking blocks first in time. `provider_opaque` rides verbatim from the event log back to the outgoing message; H04 never interprets it. |
 | `ToolUseEmitted { call_id, name, args }` | appended as `ContentBlock::ToolUse { call_id, name, args }` to the current assistant message |
 | `ToolResultRecorded { call_id, result }` | emitted as a fresh `Message::User { content: [ContentBlock::ToolResult { call_id, content, is_error }] }` after the assistant message that requested it |
 | `HookModified { ... }` | (no projection — informational only) |
