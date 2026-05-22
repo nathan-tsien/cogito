@@ -125,6 +125,21 @@ pub trait HookProvider: Send + Sync {
 }
 ```
 
+A `HookProvider` is the aggregation surface used by the Runtime when
+multiple sources contribute hooks. Sprint 5 ships built-in providers
+only (constructed directly in code). v0.2 Plugin (ADR-0021) will let
+plugins declare hooks in `.cogito-plugin/plugin.toml`; the plugin
+loader exposes each plugin as a `HookProvider`, and the Runtime
+combines them via `CompositeHookPipeline::with_handlers(provider_a.list()
+.chain(provider_b.list()).collect())`. Plugin-bundled hooks get a
+namespaced name `<plugin_id>:<hook_name>` (per ADR-0021); the
+`HookHandler::name()` method is responsible for returning the
+namespaced form.
+
+Within a single session, all providers' hooks share the same
+`MetricsRecorder` (the one held by `SessionState.metrics`) — see the
+unified-Arc invariant documented in `TurnDeps.metrics`.
+
 ## Dependencies
 
 Calls (out):
@@ -136,7 +151,52 @@ Called by:
 
 Never called by H02–H11 directly; H09 is invoked by H01 only.
 
-### `pre_prompt` lifecycle position
+## Component relationships
+
+### Lifecycle timeline
+
+```
+TurnStarted
+   │
+   ├─ ContextManaged stage (H10 / H11 / H04 / H05) ──┐
+   │                                                  ▼
+   │                                          [pre_prompt]   ← gate (Allow / Reject)
+   │
+   ├─ ModelCalling stage (H06 stream) ────────────────┐
+   │                                                  ▼
+   │                                          [post_model]   ← observation
+   │
+   ├─ ToolDispatching loop (per tool call)
+   │   ├─ H07 ToolResolve
+   │   ├─ [pre_dispatch]                              ← gate (Allow / Reject)
+   │   └─ H08 Dispatch + H02 Record
+   │
+   ├─ Completed terminal       → [post_turn]          ← observation
+   ├─ Paused terminal          → [post_turn] (TODO sprint-6, see Open design questions)
+   └─ Failed terminal (5 sites) → [on_error]          ← observation
+```
+
+### Hook point mapping
+
+| Point | FSM transition | Triggering file | Components already run | Observable state | Decision |
+|---|---|---|---|---|---|
+| `pre_prompt` | `ContextManaged → PromptBuilt` | `transitions/context_managed.rs` | H10 / H11 / H04 / H05 | `&ModelInput` (complete prompt + tool surface) | Allow / Reject |
+| `pre_dispatch` | inside ToolDispatching loop | `transitions/tool_dispatching.rs` | H06 / H07 | `&call_id`, `&tool_name`, `&args` (per invocation) | Allow / Reject |
+| `post_model` | after H06 stream completion | `transitions/model_calling.rs` | H06 | (no payload — observation only) | observation |
+| `post_turn` | `* → Completed` | `transitions/model_completed.rs` | full turn | (no payload) | observation |
+| `on_error` | `* → Failed` (5 sites — see below) | various | varies by path | `reason: &str` | observation |
+
+### Wired `on_error` sites
+
+`on_error` fires immediately before each `TurnState::Failed { ... }` construction. The 5 current sites:
+
+- `transitions/context_managed.rs:104` — `pre_prompt` hook rejection
+- `transitions/prompt_built.rs:54` — H06 gateway open failure
+- `transitions/model_calling.rs:60` — H06 stream error
+- `transitions/model_completed.rs:113` — max-consecutive-tool-errors abort
+- `turn_driver/mod.rs:101` — resume re-validation failure in `enter_turn`
+
+### `pre_prompt` lifecycle position (post-context-management)
 
 `pre_prompt` fires at the **end** of the prompt-build phase, after the full
 five-component sequence H10 → H11 → H04 → H05 has produced a complete
@@ -151,6 +211,98 @@ itself) is an open question for the Context Management initiative
 (ADR-0008). It is **not** in this design as of the 2026-05-19 PR #6
 amendment. See `docs/components/H01-turn-driver.md` §"Init →
 ContextManaged → PromptBuilt sequence" for the canonical walkthrough.
+
+## Why these five points (and not more)
+
+The five-point surface is a deliberate minimum, not an end state. For
+reference:
+
+| Project | Hook count | Coverage |
+|---|---|---|
+| cogito v0.1 | 5 | prompt gate, tool gate, model observe, turn observe, error observe |
+| Codex CLI | 10 | adds SessionStart/Stop, PreCompact/PostCompact, SubagentStart/Stop, PermissionRequest, PostToolUse |
+| Claude Code | 31 | adds elicitation, file/cwd/worktree events, batch tool, permission-denied, plus per-stage failure variants |
+
+### Design rationale
+
+- Each lifecycle point ties a fixed cost: FSM wiring + a `wrap_*` panic-
+  catch helper + a `CompositeHookPipeline` iteration method + metrics +
+  one or more integration tests. Adding a point without a concrete
+  consumer use case is a YAGNI violation.
+- `HookLifecyclePoint` is `#[non_exhaustive]`, so new variants are
+  additive — they do NOT require a `SCHEMA_VERSION` bump and do NOT
+  break existing `HookHandler` impls (the trait method has a default).
+- Two points (`pre_prompt`, `pre_dispatch`) are gates; three
+  (`post_model`, `post_turn`, `on_error`) are observation-only. Gating
+  is expensive (every consumer must reason about Allow/Reject in their
+  policy); observation is cheap. Keeping the gate count low until we
+  see real consumer needs is intentional.
+
+### Semantic note on `pre_prompt`
+
+cogito's `pre_prompt` fires AFTER prompt composition is complete — the
+hook sees `&ModelInput` (the full assembled prompt + tool surface), not
+the raw user input. Codex / Claude Code's `UserPromptSubmit` fires
+earlier (raw user string, before composition). The two are different
+tools:
+
+- `pre_prompt` (cogito): "this prompt is about to be sent; should it?"
+- `UserPromptSubmit` (Codex / CC): "the user typed this; rewrite or
+  reject before composition begins?"
+
+A `pre_compose` / earlier-stage variant could be added later if a
+prompt-rewriting use case surfaces — see §"Future expansion" below.
+
+## Future expansion
+
+The roadmap reserves additional lifecycle points for upcoming sprints.
+Adding them is additive (no SCHEMA_VERSION bump, no breaking
+`HookHandler` change — defaults absorb the new methods).
+
+### Planned
+
+| Point(s) | Sprint | Trigger |
+|---|---|---|
+| `pre_compact` / `post_compact` | Sprint 6 (Context C2) | wraps the Compactor decision step in H11 |
+| `post_turn` on `Paused` terminal | Sprint 6 (async jobs) | new code path; `TurnState::Paused` becomes reachable |
+| `subagent_start` / `subagent_stop` | Sprint 11 (Subagent S2) | wraps `BrainSpawner::spawn(...)` invocations |
+
+### Considered but not scoped
+
+- `post_tool_use` — observation hook after each tool dispatch completes.
+  Costs: noisier event log if every tool emits, plus careful sequencing
+  with `H02 record_tool_result`. Adopt when a concrete audit / retry
+  use case surfaces.
+- `session_start` / `session_end` — needed for plugin-bundled hooks
+  that hold session-scoped state. Defer until Sprint 12 (Plugin)
+  reveals concrete needs.
+- `permission_request` — gating UI-driven user approval. cogito v0.1
+  has no permission layer; this point lands with the eventual
+  permission system, not on a fixed sprint.
+
+### Recipe: adding a new lifecycle point
+
+When a sprint adds a new point, the additive change is:
+
+1. Add variant to `HookLifecyclePoint` (`cogito-protocol::hook`).
+2. Add a trait method to `HookHandler` with a default `Allow` / no-op
+   body — existing impls compile unchanged.
+3. Add a `wrap_<point>` helper in
+   `cogito-core::harness::hooks::panic_catch`.
+4. Add an iteration method on `CompositeHookPipeline` that times each
+   call, records metrics, and short-circuits (for gate points) or
+   continues (for observation points).
+5. Wire the call site in the appropriate `transitions/*.rs` (or other
+   transition module) BEFORE the state change it observes.
+6. If the point gates, add a `HookRejected` event emission via
+   `StepRecorder::record_hook_rejected` before the followup error /
+   failure event (ADR-0007 causality invariant).
+7. Cover with one unit test (composite) + one integration test
+   (end-to-end).
+
+This recipe is the operational interpretation of the
+`#[non_exhaustive]` annotation: the surface grows by addition, never by
+mutation.
 
 ## Critical invariants
 

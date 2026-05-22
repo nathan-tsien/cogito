@@ -76,7 +76,7 @@ Each component has a dedicated design doc in `docs/components/H0X-*.md`.
 | H06 | Stream Demultiplexer | Split streaming response into typed events |
 | H07 | Tool Call Resolver | Parse and schema-validate model-emitted tool calls |
 | H08 | Tool Dispatcher | Invoke `ToolProvider::invoke`; route on the outcome |
-| H09 | Hook Pipeline | Brain-side policy gates (Allow / Modify / Reject) |
+| H09 | Hook Pipeline | Brain-side policy gates (Allow / Modify / Reject). Lifecycle timeline + extension recipe in `docs/components/H09-hook-pipeline.md` §"Component relationships" / §"Future expansion". |
 | H10 | Strategy Selector | Produce the `HarnessStrategy` value for this turn |
 | H11 | Context Manage | Decide context shape: compaction, system-prompt injection, tool-filter overrides; **only Brain component allowed to do I/O for summarization** (slot reserved 2026-05-19; mechanism pending ADR-0008) |
 
