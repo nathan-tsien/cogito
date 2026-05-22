@@ -46,7 +46,9 @@ pub mod turn;
 pub mod turn_trigger;
 
 pub use content::ContentBlock;
-pub use context::ContextError;
+pub use context::{
+    CompactionReplacement, ContextDecisionErrors, ContextError, ToolFilterOverrideMode,
+};
 pub use event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
 pub use exec_ctx::ExecCtx;
 pub use gateway::{
