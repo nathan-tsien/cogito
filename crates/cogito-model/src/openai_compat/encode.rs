@@ -12,12 +12,14 @@ use cogito_protocol::tool::ToolResult;
 use super::wire::{Request, RequestMessage, RequestTool, ToolCall, ToolCallFunction, ToolDef};
 
 /// Encode a `ModelInput` into an `OpenAI` Chat Completions request body.
-pub(crate) fn encode(input: ModelInput) -> Request {
+pub(crate) fn encode(input: ModelInput, include_prior_thinking: bool) -> Request {
     let mut messages = Vec::new();
     for m in input.messages {
         match m {
             Message::User { content } => encode_user(content, &mut messages),
-            Message::Assistant { content } => encode_assistant(content, &mut messages),
+            Message::Assistant { content } => {
+                encode_assistant(content, include_prior_thinking, &mut messages);
+            }
         }
     }
     Request {
@@ -89,7 +91,11 @@ fn encode_user(content: Vec<ContentBlock>, out: &mut Vec<RequestMessage>) {
 ///
 /// Text blocks are joined into the `content` field; `ToolUse` blocks become
 /// `tool_calls` entries.  An empty `content` is omitted (per the spec).
-fn encode_assistant(content: Vec<ContentBlock>, out: &mut Vec<RequestMessage>) {
+fn encode_assistant(
+    content: Vec<ContentBlock>,
+    include_prior_thinking: bool,
+    out: &mut Vec<RequestMessage>,
+) {
     let mut text_parts: Vec<String> = Vec::new();
     let mut tool_calls: Vec<ToolCall> = Vec::new();
 
@@ -112,6 +118,17 @@ fn encode_assistant(content: Vec<ContentBlock>, out: &mut Vec<RequestMessage>) {
                         arguments,
                     },
                 });
+            }
+            ContentBlock::Thinking { text, .. } => {
+                // Default behavior (ADR-0019 §5.3): drop prior thinking
+                // blocks — DeepSeek-R1 / QwQ are trained to think fresh
+                // each turn. Operators opt in via
+                // `provider.<name>.include_prior_thinking = true` for
+                // backends that benefit from carrying prior reasoning.
+                if include_prior_thinking {
+                    text_parts.push(format!("<think>{text}</think>"));
+                }
+                // else: drop silently.
             }
             // `ToolResult` inside an Assistant message is not valid; other
             // future variants silently dropped for forward compatibility.
@@ -140,5 +157,77 @@ fn encode_tool(d: cogito_protocol::tool::ToolDescriptor) -> RequestTool {
             description: d.description,
             parameters: d.schema,
         },
+    }
+}
+
+#[cfg(test)]
+mod thinking_encode_tests {
+    use super::*;
+    use cogito_protocol::content::ContentBlock;
+    use cogito_protocol::gateway::{Message, ModelInput, ModelParams};
+
+    fn input_with_thinking() -> ModelInput {
+        ModelInput {
+            system: String::new(),
+            messages: vec![Message::Assistant {
+                content: vec![
+                    ContentBlock::Thinking {
+                        text: "I should grep.".into(),
+                        provider_opaque: None,
+                    },
+                    ContentBlock::Text { text: "OK.".into() },
+                ],
+            }],
+            tools: Vec::new(),
+            params: ModelParams {
+                model: "test-model".into(),
+                max_tokens: 100,
+                temperature: None,
+                top_p: None,
+                stop_sequences: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn encode_default_drops_prior_thinking() {
+        let req = encode(
+            input_with_thinking(),
+            /*include_prior_thinking=*/ false,
+        );
+        let json = serde_json::to_string(&req).unwrap_or_else(|e| {
+            #[allow(clippy::panic)]
+            {
+                panic!("serialize failed: {e}")
+            }
+        });
+        assert!(!json.contains("<think>"), "no <think> tags: {json}");
+        assert!(
+            !json.contains("I should grep."),
+            "thinking text must be dropped: {json}"
+        );
+        assert!(
+            json.contains("OK."),
+            "non-thinking text must remain: {json}"
+        );
+    }
+
+    #[test]
+    fn encode_include_prior_thinking_wraps_in_tags() {
+        let req = encode(input_with_thinking(), /*include_prior_thinking=*/ true);
+        let json = serde_json::to_string(&req).unwrap_or_else(|e| {
+            #[allow(clippy::panic)]
+            {
+                panic!("serialize failed: {e}")
+            }
+        });
+        assert!(
+            json.contains(r"<think>I should grep.</think>"),
+            "tags must wrap thinking: {json}"
+        );
+        assert!(
+            json.contains("OK."),
+            "non-thinking text must remain: {json}"
+        );
     }
 }

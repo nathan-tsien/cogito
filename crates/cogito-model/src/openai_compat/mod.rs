@@ -31,7 +31,7 @@ pub struct OpenAiCompatConfig {
     pub timeout: Duration,
     /// Whether to re-feed prior-turn `ContentBlock::Thinking` blocks
     /// when building outgoing assistant messages. See ADR-0019 §5.3.
-    /// Default `false` — matches DeepSeek-R1 / QwQ convention.
+    /// Default `false` — matches DeepSeek-R1 / `QwQ` convention.
     pub include_prior_thinking: bool,
 }
 
@@ -102,7 +102,7 @@ impl ModelGateway for OpenAiCompatGateway {
         input: ModelInput,
         ctx: ExecCtx,
     ) -> Result<BoxStream<'static, Result<ModelEvent, ModelError>>, ModelError> {
-        let body = encode::encode(input);
+        let body = encode::encode(input, self.cfg.include_prior_thinking);
         let url = format!(
             "{}/chat/completions",
             self.cfg.base_url.trim_end_matches('/')
