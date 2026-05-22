@@ -35,7 +35,7 @@ pub async fn transit(
     while let Some(inv) = pending.pop_front() {
         // `HookDecision` is `#[non_exhaustive]`; Allow and unknown variants continue.
         if let HookDecision::Reject { reason, .. } =
-            deps.hooks.pre_dispatch(&inv.call_id, &inv.name)
+            deps.hooks.pre_dispatch(&inv.call_id, &inv.name, &inv.args)
         {
             let result = ToolResult::Error {
                 kind: ToolErrorKind::InvocationFailed,
