@@ -562,6 +562,7 @@ async fn chaos_y_path_every_event_boundary() {
     let scenarios = [
         chaos_scenarios::no_tool_short_turn(),
         chaos_scenarios::single_tool_happy_path(),
+        chaos_scenarios::thinking_then_text_then_tool(),
     ];
 
     for scenario in &scenarios {
