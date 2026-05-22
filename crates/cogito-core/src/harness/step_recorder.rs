@@ -17,7 +17,9 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use cogito_protocol::content::ContentBlock;
-use cogito_protocol::context::{CompactionReplacement, TokenEstimates, ToolFilterOverrideMode};
+use cogito_protocol::context::{
+    CompactionReplacement, ContextDecisionErrors, TokenEstimates, ToolFilterOverrideMode,
+};
 use cogito_protocol::event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
 use cogito_protocol::ids::{EventId, SessionId, TurnId};
 use cogito_protocol::job::{JobId, JobOutcome};
@@ -378,6 +380,33 @@ impl StepRecorder {
                 mode,
                 contributors,
                 produced_by: produced_by.into(),
+            },
+        )
+        .await
+    }
+
+    /// Record the H11 `ContextDecisionRecorded` summary for this turn.
+    ///
+    /// Not idempotent — H11 is responsible for calling this exactly once per
+    /// `ContextManaged` state entry. The event carries cross-references to the
+    /// `SystemPromptInjected` and `ToolFilterOverridden` events written earlier
+    /// in the same turn, so H11 must supply those [`EventId`]s.
+    pub async fn record_context_decision(
+        &mut self,
+        turn_id: TurnId,
+        compactions: Vec<EventId>,
+        system_prompt_event: EventId,
+        tool_filter_event: EventId,
+        errors: ContextDecisionErrors,
+    ) -> Result<EventId, StoreError> {
+        self.append(
+            Some(turn_id),
+            EventPayload::ContextDecisionRecorded {
+                turn_id,
+                compactions,
+                system_prompt_event,
+                tool_filter_event,
+                errors,
             },
         )
         .await
@@ -1095,6 +1124,41 @@ mod tests {
         assert_eq!(first, second, "must return same EventId, must not double-write");
         // Only one event written.
         assert_eq!(store.latest_seq(sid).await?, Some(0));
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------------------
+    // record_context_decision tests
+    // ---------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn record_context_decision_writes_summary() -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempfile::tempdir()?;
+        let store = fresh_store_in(tmp.path());
+        let (tx, _rx) = broadcast::channel(64);
+        let sid = SessionId::new();
+        let mut rec = StepRecorder::new(Arc::clone(&store), tx, sid, 0);
+
+        let turn = TurnId::new();
+        let sys_id = rec
+            .record_system_prompt_injected(turn, String::new(), vec![], "none")
+            .await?;
+        let filter_id = rec
+            .record_tool_filter_overridden(turn, ToolFilterOverrideMode::Inherit, vec![], "none")
+            .await?;
+        let decision_id = rec
+            .record_context_decision(
+                turn,
+                vec![],
+                sys_id,
+                filter_id,
+                ContextDecisionErrors::default(),
+            )
+            .await?;
+
+        // Three events at seqs 0, 1, 2.
+        assert_eq!(store.latest_seq(sid).await?, Some(2));
+        let _ = decision_id;
         Ok(())
     }
 }
