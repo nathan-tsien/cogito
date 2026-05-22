@@ -107,6 +107,8 @@ All `record_*` methods currently return `Result<(), StoreError>`. Sprint 3 P2.5 
 | `record_model_call_started` | `turn_id, model: String` | `Result<(), StoreError>` | H01 at `PromptBuilt → ModelCalling` transition boundary. |
 | `on_text_delta` | `turn_id, chunk: String` | `()` | H06 per text-delta chunk; accumulates buffer + broadcasts. Does not write to store. |
 | `on_text_block_complete` | — | `Result<(), StoreError>` | H06 on `content_block_stop` for a text block; drains buffer to `AssistantMessageAppended`. |
+| `on_thinking_delta` | `turn_id, chunk: String` | `()` | H06 per `ThinkingDelta` chunk; accumulates a per-block thinking buffer and broadcasts `StreamEvent::ThinkingDelta`. Does not write to store. (ADR-0019 §3.) |
+| `on_thinking_block_complete` | `provider_opaque: Option<serde_json::Value>` | `Result<Option<EventId>, StoreError>` | H06 on `content_block_stop` for a thinking block; drains buffer to `ThinkingBlockRecorded` with the provider-opaque payload from the gateway (signature for Anthropic, encrypted_content for OpenAI Responses, `None` for OpenAI-compat). No-op when no deltas have been buffered. (ADR-0019 §2-3.) |
 | `record_tool_use` | `turn_id, call_id: String, tool_name: String, args: serde_json::Value` | `Result<(), StoreError>` | H06 when model emits a complete `tool_use` block. |
 | `record_model_call_completed` *(P2.2 — not yet shipped)* | `turn_id, stop_reason, usage` | `Result<EventId, StoreError>` | H06 demux loop when `MessageCompleted` model event observed. |
 | `record_tool_result` | `turn_id, call_id: String, result: ToolResult` | `Result<(), StoreError>` | H08 after tool dispatch completes. |
