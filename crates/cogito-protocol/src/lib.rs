@@ -17,7 +17,7 @@
 //! - [`metrics`]: `MetricsRecorder` trait + `NoOpMetricsRecorder` — pluggable metrics sink (Sprint 5)
 //! - [`session`]: `SessionMeta` — per-session pass-through metadata
 //! - [`store`]: `ConversationStore` trait + `StoreError` (persisted event log backend contract)
-//! - [`context`]: `ContextError` — failure modes for the four Context-Management traits (H11)
+//! - [`context`]: `ContextError`, `Compactor`, `HistoryProjector`, `ProjectedMessage` — Context-Management traits and types (H11)
 //! - [`strategy`]: `HarnessStrategy`, `ToolFilter`
 //! - [`stream`]: `StreamEvent` enum (real-time fanout to subscribers)
 //! - [`tool`]: `ToolProvider` trait, `ToolDescriptor`, `InvokeOutcome`, `ExecutionClass`
@@ -48,7 +48,8 @@ pub mod turn_trigger;
 pub use content::ContentBlock;
 pub use context::{
     CompactionApplied, CompactionInput, CompactionKind, CompactionReplacement, Compactor,
-    ContextDecisionErrors, ContextError, ToolFilterOverrideMode,
+    ContextDecisionErrors, ContextError, HistoryProjector, ProjectedMessage,
+    ToolFilterOverrideMode,
 };
 pub use event::{ConversationEvent, EventCategory, EventPayload, SCHEMA_VERSION};
 pub use exec_ctx::ExecCtx;

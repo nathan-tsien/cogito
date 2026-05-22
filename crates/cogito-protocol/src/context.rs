@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::content::ContentBlock;
 use crate::event::ConversationEvent;
 use crate::gateway::ModelError;
 use crate::gateway::{ModelGateway, Usage};
@@ -155,5 +156,47 @@ pub trait Compactor: Send + Sync {
 
     /// Stable identifier for this compactor implementation, written into
     /// `ContextCompacted.produced_by` (e.g. `"truncate"`, `"summarize"`).
+    fn id(&self) -> &'static str;
+}
+
+/// One message in a projected history. Roles match the wire-format roles
+/// adapters serialize for Anthropic/OpenAI/etc.
+///
+/// `System` carries the assembled system prompt; `User` carries a plain text
+/// user turn; `Assistant` carries the model's content blocks; `ToolResult`
+/// carries tool output fed back to the model.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProjectedMessage {
+    /// System prompt for the turn.
+    System(String),
+    /// User-role text message.
+    User(String),
+    /// Assistant-role message carrying content blocks (text, tool-use, thinking).
+    Assistant(Vec<ContentBlock>),
+    /// Tool result message fed back to the model after a tool call.
+    ToolResult {
+        /// Opaque call identifier matching the originating `ToolUse.call_id`.
+        call_id: String,
+        /// Content blocks comprising the tool result.
+        result_blocks: Vec<ContentBlock>,
+    },
+}
+
+/// Project events + strategy into the dialogue messages H04 sends to the model.
+///
+/// Pure: implementations MUST be deterministic synchronous functions —
+/// no I/O, no event writes, no clock reads. The covered-set + replacement
+/// algorithm is fully specified in ADR-0008 and must be honored verbatim.
+pub trait HistoryProjector: Send + Sync {
+    /// Build the message list for `current_turn`'s upcoming model call.
+    fn project(
+        &self,
+        events: &[ConversationEvent],
+        strategy: &HarnessStrategy,
+        current_turn: TurnId,
+    ) -> Vec<ProjectedMessage>;
+
+    /// Stable identifier for tracing and logging (e.g. `"default"`, `"compaction-aware"`).
     fn id(&self) -> &'static str;
 }
