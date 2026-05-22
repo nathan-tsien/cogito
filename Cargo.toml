@@ -10,6 +10,7 @@ members = [
     "crates/cogito-jobs",
     "crates/cogito-mcp",
     "crates/cogito-config",
+    "crates/cogito-context",
     "crates/cogito-cli",
     "crates/cogito-tui",
     "crates/testing/cogito-test-fixtures",
@@ -31,6 +32,7 @@ publish = false
 [workspace.dependencies]
 # Internal crates
 cogito-config = { path = "crates/cogito-config" }
+cogito-context = { path = "crates/cogito-context" }
 cogito-core = { path = "crates/cogito-core" }
 cogito-protocol = { path = "crates/cogito-protocol" }
 cogito-store-jsonl = { path = "crates/cogito-store-jsonl" }
