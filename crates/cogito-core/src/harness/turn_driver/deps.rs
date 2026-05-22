@@ -31,5 +31,5 @@ pub struct TurnDeps {
     /// Tool provider exposed to the model.
     pub tools: Arc<dyn ToolProvider>,
     /// Hook pipeline (Sprint 5: composite, stub lifecycle methods until Task 5).
-    pub hooks: std::sync::Arc<CompositeHookPipeline>,
+    pub hooks: Arc<CompositeHookPipeline>,
 }
