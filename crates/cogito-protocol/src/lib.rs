@@ -11,10 +11,12 @@
 //! - [`event`]: `ConversationEvent` + `EventPayload` + `SCHEMA_VERSION` (persisted event log)
 //! - [`exec_ctx`]: `ExecCtx` — per-invocation context handed to every tool and hook
 //! - [`gateway`]: `ModelGateway` trait + value types (`ModelInput`, `ModelOutput`, `ModelEvent`, …)
+//! - [`hook`]: `HookHandler`, `HookProvider`, `HookDecision`, `HookLifecyclePoint` — H09 policy gate
 //! - [`ids`]: strongly-typed ULID newtypes (`EventId`, `SessionId`, `TurnId`)
 //! - [`job`]: `JobManager` trait, `JobId`, `JobStatus`, `JobCompletionEvent`
 //! - [`session`]: `SessionMeta` — per-session pass-through metadata
 //! - [`store`]: `ConversationStore` trait + `StoreError` (persisted event log backend contract)
+//! - [`strategy`]: `HarnessStrategy`, `ToolFilter`
 //! - [`stream`]: `StreamEvent` enum (real-time fanout to subscribers)
 //! - [`tool`]: `ToolProvider` trait, `ToolDescriptor`, `InvokeOutcome`, `ExecutionClass`
 //! - [`turn`]: `TurnOutcome`, `TurnFailureReason`
@@ -28,6 +30,7 @@ pub mod error;
 pub mod event;
 pub mod exec_ctx;
 pub mod gateway;
+pub mod hook;
 pub mod ids;
 pub mod job;
 pub mod session;
@@ -45,6 +48,7 @@ pub use gateway::{
     Message, ModelError, ModelEvent, ModelGateway, ModelInput, ModelOutput, ModelParams,
     StopReason, Usage,
 };
+pub use hook::{HookDecision, HookHandler, HookLifecyclePoint, HookProvider};
 pub use ids::{EventId, SessionId, TurnId};
 pub use session::SessionMeta;
 pub use store::{ConversationStore, StoreError};
