@@ -82,8 +82,7 @@ impl<W: Write> Renderer<W> {
             }
             StreamEvent::TextDelta { chunk } => {
                 if !self.in_text {
-                    let label = self.paint(GREEN, "agent: ");
-                    write!(self.out, "\n{label}")?;
+                    self.write_agent_label()?;
                     self.in_text = true;
                 }
                 write!(self.out, "{chunk}")?;
@@ -96,18 +95,7 @@ impl<W: Write> Renderer<W> {
             } => {
                 self.tool_timers
                     .insert(call_id.clone(), (Instant::now(), tool_name.clone()));
-                // Compact one-line JSON; falls back to `{}` when the
-                // value somehow fails to serialize (shouldn't happen
-                // for valid serde_json::Value but stay defensive).
-                let args_preview = serde_json::to_string(args).map_or_else(
-                    |_| "{}".to_string(),
-                    |s| truncate_chars(&s, TOOL_ARGS_PREVIEW_MAX),
-                );
-                let line = self.paint(
-                    DIM_YELLOW,
-                    &format!("[tool] {tool_name} {args_preview} \u{2026}"),
-                );
-                write!(self.out, "\n{line}")?;
+                self.write_tool_start_line(tool_name, args)?;
                 self.in_text = false;
             }
             StreamEvent::ToolDispatchEnded {
@@ -119,22 +107,7 @@ impl<W: Write> Renderer<W> {
                     Some((started, name)) => (name, started.elapsed().as_millis()),
                     None => ("?".to_string(), 0u128),
                 };
-                let status = if *ok { "ok" } else { "err" };
-                let body = format!("[tool] {name} {status} ({ms}ms)");
-                let line = if *ok {
-                    self.paint(DIM_YELLOW, &body)
-                } else {
-                    self.paint(RED, &body)
-                };
-                writeln!(self.out, "\n{line}")?;
-                if let Some(msg) = error_message.as_deref() {
-                    let truncated = truncate_chars(msg, TOOL_ERROR_PREVIEW_MAX);
-                    // 8-space indent so the message visually attaches
-                    // to the `[tool] … err (…)` line above without
-                    // being mistaken for a new agent / tool line.
-                    let indented = self.paint(RED, &format!("        {truncated}"));
-                    writeln!(self.out, "{indented}")?;
-                }
+                self.write_tool_end_line(&name, *ok, ms, error_message.as_deref())?;
                 self.in_text = false;
             }
             StreamEvent::TurnCompleted => {
@@ -164,9 +137,7 @@ impl<W: Write> Renderer<W> {
                 self.in_text = false;
             }
             StreamEvent::TurnFailed { reason } => {
-                let body = format!("[error] {reason}");
-                let line = self.paint(RED, &body);
-                write!(self.out, "\n{line}")?;
+                self.write_error_line(reason)?;
                 self.in_text = false;
             }
             // `StreamEvent` is `#[non_exhaustive]`: future variants render as a no-op.
@@ -183,9 +154,93 @@ impl<W: Write> Renderer<W> {
         }
     }
 
-    /// Print a dim, single-line replay banner (e.g. session metadata).
-    /// Used at the start of a resumed REPL to anchor the history that
-    /// follows.
+    // -- Shared block formatters --------------------------------------
+    //
+    // Each helper writes one visual block (agent label, tool start,
+    // tool end + optional error indent, `[error] …` line). Both the
+    // live `on_stream_event` path and the `replay_*` API call these so
+    // the formatting of tool args, elapsed-ms rendering, and error
+    // truncation lives in exactly one place. Helpers only deal with
+    // writing — they do NOT touch `self.in_text` or `tool_timers`; the
+    // caller decides those based on whether it's live or replay.
+
+    /// `\n` + green `agent: ` label. The caller writes the actual
+    /// text content immediately after.
+    fn write_agent_label(&mut self) -> IoResult<()> {
+        let label = self.paint(GREEN, "agent: ");
+        write!(self.out, "\n{label}")
+    }
+
+    /// `\n` + dim-yellow `[tool] <name> <args-preview> …` line, no
+    /// trailing newline so the next event (typically the matching
+    /// end line) can lay its own `\n`-prefixed line directly below.
+    fn write_tool_start_line(&mut self, tool_name: &str, args: &serde_json::Value) -> IoResult<()> {
+        // Compact one-line JSON; falls back to `{}` when the value
+        // somehow fails to serialize (shouldn't happen for a valid
+        // `serde_json::Value`, but stay defensive).
+        let args_preview = serde_json::to_string(args).map_or_else(
+            |_| "{}".to_string(),
+            |s| truncate_chars(&s, TOOL_ARGS_PREVIEW_MAX),
+        );
+        let line = self.paint(
+            DIM_YELLOW,
+            &format!("[tool] {tool_name} {args_preview} \u{2026}"),
+        );
+        write!(self.out, "\n{line}")
+    }
+
+    /// `\n` + colored `[tool] <name> ok|err (<ms>ms)` line, then —
+    /// when `error_message` is present — an 8-space-indented red
+    /// message line. Both lines are `writeln!`-terminated so the next
+    /// stdout writer (tracing log, REPL prompt) starts on a fresh
+    /// line; see spec §9.2 for the rationale.
+    fn write_tool_end_line(
+        &mut self,
+        tool_name: &str,
+        ok: bool,
+        elapsed_ms: u128,
+        error_message: Option<&str>,
+    ) -> IoResult<()> {
+        let status = if ok { "ok" } else { "err" };
+        let body = format!("[tool] {tool_name} {status} ({elapsed_ms}ms)");
+        let line = if ok {
+            self.paint(DIM_YELLOW, &body)
+        } else {
+            self.paint(RED, &body)
+        };
+        writeln!(self.out, "\n{line}")?;
+        if let Some(msg) = error_message {
+            let truncated = truncate_chars(msg, TOOL_ERROR_PREVIEW_MAX);
+            // 8-space indent so the message visually attaches to the
+            // `[tool] … err (…)` line above without being mistaken
+            // for a new agent / tool line.
+            let indented = self.paint(RED, &format!("        {truncated}"));
+            writeln!(self.out, "{indented}")?;
+        }
+        Ok(())
+    }
+
+    /// `\n` + red `[error] <reason>` line. No trailing newline; the
+    /// caller appends one when the line must stand alone (replay),
+    /// or leaves it implicit when something else follows (live →
+    /// REPL prompt).
+    fn write_error_line(&mut self, reason: &str) -> IoResult<()> {
+        let line = self.paint(RED, &format!("[error] {reason}"));
+        write!(self.out, "\n{line}")
+    }
+
+    // -- Replay API ---------------------------------------------------
+    //
+    // Thin wrappers used by `chat::replay_history` to re-render the
+    // persisted `ConversationEvent` stream before the first live
+    // prompt. They differ from the live path only in that they're
+    // driven directly by stored data (caller supplies `elapsed_ms`)
+    // and each helper terminates with a newline so successive replay
+    // lines don't glue together.
+
+    /// Print a dim, single-line replay banner (e.g. session
+    /// metadata). Used at the start of a resumed REPL to anchor the
+    /// history that follows.
     pub fn replay_banner(&mut self, text: &str) -> IoResult<()> {
         let line = self.paint(DIM, text);
         writeln!(self.out, "{line}")?;
@@ -194,8 +249,7 @@ impl<W: Write> Renderer<W> {
     }
 
     /// Print a prior user input as it would have appeared at the
-    /// prompt during the original session. `text` is rendered verbatim
-    /// after a cyan `> ` prefix.
+    /// prompt during the original session.
     pub fn replay_user_input(&mut self, text: &str) -> IoResult<()> {
         let prompt = self.paint(CYAN, "> ");
         writeln!(self.out, "\n{prompt}{text}")?;
@@ -203,22 +257,21 @@ impl<W: Write> Renderer<W> {
         Ok(())
     }
 
-    /// Print a prior assistant text block. Unlike live `TextDelta`
-    /// rendering this writes the whole block in one shot and is not
-    /// concatenation-aware — each call produces its own `agent: …`
-    /// line.
+    /// Print a prior assistant text block in one shot. Unlike live
+    /// `TextDelta` rendering this is not concatenation-aware — each
+    /// call produces its own `agent: …` line.
     pub fn replay_assistant_block(&mut self, text: &str) -> IoResult<()> {
-        let label = self.paint(GREEN, "agent: ");
-        writeln!(self.out, "\n{label}{text}")?;
+        self.write_agent_label()?;
+        writeln!(self.out, "{text}")?;
         self.in_text = false;
         Ok(())
     }
 
-    /// Print a prior tool call as a single start/end pair, with the
-    /// same formatting as the live `ToolDispatchStarted` /
-    /// `ToolDispatchEnded` path. `elapsed_ms` is derived from the
-    /// event log's persisted timestamps rather than an in-memory
-    /// `Instant`, so replays reproduce the original timing.
+    /// Print a prior tool call as a single start/end pair, sharing
+    /// formatting with the live `ToolDispatch*` arms. `elapsed_ms`
+    /// comes from the event log's persisted timestamps, so the
+    /// rendered duration matches the original wall-clock — not the
+    /// time the replay itself took.
     pub fn replay_tool_call(
         &mut self,
         tool_name: &str,
@@ -227,36 +280,18 @@ impl<W: Write> Renderer<W> {
         ok: bool,
         error_message: Option<&str>,
     ) -> IoResult<()> {
-        let args_preview = serde_json::to_string(args).map_or_else(
-            |_| "{}".to_string(),
-            |s| truncate_chars(&s, TOOL_ARGS_PREVIEW_MAX),
-        );
-        let start = self.paint(
-            DIM_YELLOW,
-            &format!("[tool] {tool_name} {args_preview} \u{2026}"),
-        );
-        write!(self.out, "\n{start}")?;
-        let status = if ok { "ok" } else { "err" };
-        let body = format!("[tool] {tool_name} {status} ({elapsed_ms}ms)");
-        let end = if ok {
-            self.paint(DIM_YELLOW, &body)
-        } else {
-            self.paint(RED, &body)
-        };
-        writeln!(self.out, "\n{end}")?;
-        if let Some(msg) = error_message {
-            let truncated = truncate_chars(msg, TOOL_ERROR_PREVIEW_MAX);
-            let indented = self.paint(RED, &format!("        {truncated}"));
-            writeln!(self.out, "{indented}")?;
-        }
+        self.write_tool_start_line(tool_name, args)?;
+        self.write_tool_end_line(tool_name, ok, elapsed_ms, error_message)?;
         self.in_text = false;
         Ok(())
     }
 
-    /// Print a prior turn failure (`[error] <reason>`) during replay.
+    /// Print a prior turn failure during replay. Adds the trailing
+    /// newline that the live `TurnFailed` arm leaves to the REPL
+    /// prompt.
     pub fn replay_turn_failed(&mut self, reason: &str) -> IoResult<()> {
-        let line = self.paint(RED, &format!("[error] {reason}"));
-        writeln!(self.out, "\n{line}")?;
+        self.write_error_line(reason)?;
+        writeln!(self.out)?;
         self.in_text = false;
         Ok(())
     }
