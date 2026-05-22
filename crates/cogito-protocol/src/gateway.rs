@@ -258,6 +258,41 @@ pub trait ModelGateway: Send + Sync {
     fn provider_id(&self) -> &'static str;
 }
 
+/// Parse the conventional `[<size>]` suffix from a model id.
+///
+/// Suffix grammar: `\[(\d+)([kKmM])?\]$`; `k` = `1_000`, `m` = `1_000_000`,
+/// no unit = literal value.
+///
+/// Returns `None` if no suffix or suffix is malformed.
+///
+/// # Panics
+///
+/// Never panics in practice. The internal static regex is a compile-time
+/// constant that is provably valid; the `expect` call exists only to satisfy
+/// `OnceLock::get_or_init`'s infallible-initializer requirement.
+///
+/// Examples:
+/// - `"claude-opus-4-7[1m]"` -> `Some(1_000_000)`
+/// - `"Llama-3.3-70B[32k]"` -> `Some(32_000)`
+/// - `"gpt-4o[128000]"` -> `Some(128_000)`
+/// - `"claude-opus-4-7"` -> `None`
+#[must_use]
+pub fn parse_context_window_suffix(model_id: &str) -> Option<u64> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        #[allow(clippy::expect_used)]
+        regex::Regex::new(r"\[(\d+)([kKmM])?\]$").expect("static regex compiles")
+    });
+    let caps = re.captures(model_id)?;
+    let num: u64 = caps.get(1)?.as_str().parse().ok()?;
+    let mult = match caps.get(2).map(|m| m.as_str().to_lowercase()).as_deref() {
+        Some("k") => 1_000,
+        Some("m") => 1_000_000,
+        _ => 1,
+    };
+    num.checked_mul(mult)
+}
+
 #[cfg(test)]
 mod thinking_tests {
     use super::*;
