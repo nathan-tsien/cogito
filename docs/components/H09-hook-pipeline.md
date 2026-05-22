@@ -1,10 +1,8 @@
 # H09-hook · Hook Pipeline
 
-> **Status**: 🚧 Sprint 2 wires the five lifecycle insertion points
-> (`pre_prompt`, `pre_dispatch`, `post_model`, `post_turn`, `on_error`)
-> as no-op slots that always return `HookDecision::Allow`. Real
-> `HookHandler` trait, policy hooks, and `MetricsRecorder` integration
-> land Sprint 7.
+> **Status**: Sprint 5 (2026-05-22): real `HookHandler` trait + 2 example hooks
+> + 5 lifecycle wirings + panic catch + `MetricsRecorder`. `HookDecision::Modify`
+> deferred (see §"Open design questions").
 
 ## Role in Harness
 
@@ -18,7 +16,7 @@ Harness, on the same task as H01.
 Hooks **may not perform I/O**. Concretely, a `HookHandler` may:
 
 - Read the in-flight turn's state (prompt, tool call args, model output)
-- Return one of: `Allow`, `Modify(new_value)`, `Reject(reason)`
+- Return one of: `Allow`, `Reject(hook_name, reason)`
 - Emit a `ConversationEvent` via the Step Recorder (allowed because the
   Step Recorder writes through the Session contract, not the hook itself)
 
@@ -41,12 +39,90 @@ to be enforced in code review and by the `HookHandler` trait signature
 
 ## Interface
 
+The canonical types live in `cogito-protocol::hook`. All four are
+re-exported at the crate root.
+
+### `HookLifecyclePoint`
+
+One of the five points at which the pipeline fires. Serialised as
+`snake_case` in `EventPayload::HookRejected`.
+
 ```rust
-// TODO (Sprint 7): define HookHandler trait in cogito-protocol.
-//
-// The trait must NOT take a generic I/O capability. Inputs are owned
-// values (prompt slice, tool call snapshot); outputs are pure
-// HookDecision values. No &mut World, no impl AsyncWrite, no clients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum HookLifecyclePoint {
+    PrePrompt,
+    PreDispatch,
+    PostModel,
+    PostTurn,
+    OnError,
+}
+```
+
+### `HookDecision`
+
+The value returned by every `HookHandler` method that can gate the
+pipeline. `#[non_exhaustive]` so `Modify` can be added additively in a
+future sprint (see §"Open design questions").
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HookDecision {
+    /// Continue normal pipeline flow.
+    Allow,
+    /// Abort the pipeline with the given reason.
+    Reject {
+        /// Name of the hook (from `HookHandler::name()`).
+        hook_name: String,
+        /// Human-readable rejection reason.
+        reason: String,
+    },
+}
+```
+
+### `HookHandler`
+
+Brain-side policy gate. All methods MUST be free of I/O. Default
+implementations return `Allow` / no-op so implementors override only
+the lifecycle points they care about.
+
+```rust
+pub trait HookHandler: Send + Sync {
+    /// Stable identifier used in events and metrics.
+    /// SHOULD be kebab-case and unique within a deployment.
+    fn name(&self) -> &str;
+
+    fn pre_prompt(&self, _input: &ModelInput) -> HookDecision {
+        HookDecision::Allow
+    }
+
+    fn pre_dispatch(
+        &self,
+        _call_id: &str,
+        _tool_name: &str,
+        _args: &serde_json::Value,
+    ) -> HookDecision {
+        HookDecision::Allow
+    }
+
+    fn post_model(&self) {}
+    fn post_turn(&self) {}
+    fn on_error(&self, _reason: &str) {}
+}
+```
+
+### `HookProvider`
+
+Aggregation surface used by the runtime to build a
+`CompositeHookPipeline` from one or more sources (Sprint 5: built-ins;
+v0.2 Plugin: plugin-bundled hooks).
+
+```rust
+pub trait HookProvider: Send + Sync {
+    fn list(&self) -> Vec<Arc<dyn HookHandler>>;
+}
 ```
 
 ## Dependencies
@@ -80,15 +156,24 @@ ContextManaged → PromptBuilt sequence" for the canonical walkthrough.
 
 1. Hook execution is synchronous and bounded (target P99 < 5ms per hook
    per gate point; measured in Experiment E06).
-2. A hook returning `Reject` produces a `TurnFailed` event with the
-   hook's reason string and aborts the turn.
-3. A hook returning `Modify` produces a `HookModified` event recording
-   the before/after; the modified value flows to the next state.
+2. A hook returning `Reject` produces a `HookRejected` event immediately,
+   then a `TurnFailed` event with the hook's reason string, and aborts
+   the turn.
+3. v0.1 ships `Allow` / `Reject` only. `Modify` is deferred to a future
+   sprint — see §"Open design questions". The `HookDecision` enum is
+   `#[non_exhaustive]` so adding `Modify` is additive.
 4. A panicking hook is treated as `Reject("hook panic: …")` — Brain does
    not crash because a hook author wrote `unwrap()`.
 
 ## Open design questions
 
+- **`HookDecision::Modify`**: originally proposed to allow a hook to
+  rewrite the in-flight value (prompt slice, tool call args) before the
+  pipeline continues. The variant would produce a `HookModified` event
+  recording the before/after, and the modified value would flow to the
+  next state. Deferred because no concrete consumer use case has surfaced
+  yet; the `#[non_exhaustive]` annotation keeps the door open without
+  committing to an API shape prematurely.
 - Hook ordering: declarative priority vs registration order? Lean
   toward declarative priority so config files can reason about it.
 - Should hooks be allowed to insert *new* events (e.g. a "redaction"
@@ -99,8 +184,8 @@ ContextManaged → PromptBuilt sequence" for the canonical walkthrough.
 
 - Unit: pure hook decisions against synthetic turn state.
 - Integration: a turn with a `Reject` hook produces `TurnFailed` and a
-  matching event in the log; a turn with a `Modify` hook produces
-  `HookModified` and the downstream state uses the modified value.
+  matching event in the log; a turn with a panicking hook is isolated and
+  does not crash the session loop.
 - Chaos: hook panics do not propagate to H01.
 
 ## References
@@ -108,3 +193,4 @@ ContextManaged → PromptBuilt sequence" for the canonical walkthrough.
 - ARCHITECTURE.md §"Brain / Hands / Session boundaries"
 - ADR-0004 §6 (Hooks are Brain-side policy only)
 - AGENTS.md §"Inviolable design principles"
+- `docs/superpowers/plans/2026-05-22-sprint-5-hook-pipeline.md`

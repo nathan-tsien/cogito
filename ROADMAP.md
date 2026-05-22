@@ -6,8 +6,8 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 complete; Sprint 4
-> (MCP sync tools) in flight; Sprints 5–10 reshaped per
+> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 complete; Sprint 4
+> (MCP sync tools) in flight; Sprints 6–10 reshaped per
 > [2026-05-22 roadmap rebalance](docs/superpowers/specs/2026-05-22-roadmap-rebalance-design.md)
 > (Hook impl + Context C2 trait freeze + Skill loader promoted into
 > v0.1; Async Jobs / Multi-model / TUI / hardening renumbered;
@@ -135,11 +135,11 @@ thinking, OpenAI Responses reasoning items, or OpenAI-compat
 Hooks need to be real before Skills (Sprint 7) and Plugins (v0.2
 Sprint 12) can load hooks from disk.
 
-- [ ] H09 Hook Pipeline with purity rule enforcement (see `docs/components/H09-hook-pipeline.md`)
-- [ ] Two example hooks (sensitive content, bash audit)
-- [ ] `MetricsRecorder` trait in protocol + default no-op
-- [ ] `HookProvider` trait shape lets v0.2 Plugin add hooks without trait change (provider-aggregation pattern — see rebalance spec §7.2)
-- [ ] Per-hook P99 latency budget verified
+- [x] H09 Hook Pipeline with purity rule enforcement (see `docs/components/H09-hook-pipeline.md`)
+- [x] Two example hooks (sensitive content, bash audit)
+- [x] `MetricsRecorder` trait in protocol + default no-op
+- [x] `HookProvider` trait shape lets v0.2 Plugin add hooks without trait change (provider-aggregation pattern — see rebalance spec §7.2)
+- [x] Per-hook P99 latency budget verified
 
 #### Sprint 6 · Context Management — ADR-0008 + C2 trait freeze + first Compactor (2–2.5 days)
 

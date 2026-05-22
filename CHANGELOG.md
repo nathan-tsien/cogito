@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Sprint 5 (Hook Pipeline 实化)
+
+- `cogito-protocol::hook` — `HookHandler` + `HookProvider` + `HookDecision` + `HookLifecyclePoint` traits/types
+- `cogito-protocol::metrics` — `MetricsRecorder` trait + `NoOpMetricsRecorder` default
+- `EventPayload::HookRejected` event variant (additive, no schema_version bump)
+- `CompositeHookPipeline` in `cogito-core::harness::hooks` with panic catch + metrics
+- Reference hooks: `SensitiveContentHook` (AWS/GitHub/OpenAI key regex), `BashAuditHook` (tool.bash.invocations counter)
+- All 5 H09 lifecycle points now wired in the FSM (pre_prompt + pre_dispatch + post_model + post_turn + on_error)
+- Hook panic isolation: panicked hook → `HookDecision::Reject`, never crashes session loop
+- P99 latency baseline in `docs/quality/v0.1-hook-latency.md`
+
+### Deferred — Sprint 5
+
+- `HookDecision::Modify` (variant reserved via `#[non_exhaustive]`; revisit when consumer use case surfaces)
+- `cogito.toml [[hooks]]` configuration section (Sprint 12 / Plugin work will provide the unified config path)
+
 ### Added — Sprint 4 (MCP sync tools)
 
 - `cogito-mcp` crate: rmcp 1.5 client wrapper + `ToolProvider`
