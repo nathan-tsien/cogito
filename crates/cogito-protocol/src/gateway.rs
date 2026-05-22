@@ -147,6 +147,28 @@ pub enum ModelEvent {
         /// Fully-parsed arguments.
         args: serde_json::Value,
     },
+    /// One streaming reasoning chunk inside an in-flight thinking block.
+    /// Forwarded to the broadcast channel for live UI; persistence
+    /// waits for `ThinkingBlockCompleted`. See ADR-0019 §3.
+    ThinkingDelta {
+        /// Zero-based index of the block within the response.
+        block_index: u32,
+        /// Partial reasoning text for this delta.
+        chunk: String,
+    },
+    /// A thinking block has been sealed by the provider; carries the
+    /// full accumulated text plus any provider-opaque payload (signature
+    /// for Anthropic, encrypted_content + item_id for OpenAI Responses,
+    /// `None` for OpenAI-compat). H06 calls
+    /// `recorder.on_thinking_block_complete(...)`.
+    ThinkingBlockCompleted {
+        /// Zero-based index of the block within the response.
+        block_index: u32,
+        /// Full accumulated reasoning text for the completed block.
+        text: String,
+        /// Provider-opaque round-trip payload (see ADR-0019 §1).
+        provider_opaque: Option<serde_json::Value>,
+    },
     /// Last event on the stream. Carries terminal reason + usage.
     MessageCompleted {
         /// Reason the model stopped generating.
@@ -234,4 +256,38 @@ pub trait ModelGateway: Send + Sync {
     /// Stable identifier for telemetry and logging. Adapters return a
     /// fixed string, not a per-instance value.
     fn provider_id(&self) -> &'static str;
+}
+
+#[cfg(test)]
+mod thinking_tests {
+    use super::*;
+
+    #[test]
+    fn thinking_delta_roundtrips() -> serde_json::Result<()> {
+        let evt = ModelEvent::ThinkingDelta {
+            block_index: 0,
+            chunk: "I should ".into(),
+        };
+        let json = serde_json::to_string(&evt)?;
+        assert!(
+            json.contains(r#""kind":"thinking_delta""#),
+            "tag missing: {json}"
+        );
+        let back: ModelEvent = serde_json::from_str(&json)?;
+        assert_eq!(evt, back);
+        Ok(())
+    }
+
+    #[test]
+    fn thinking_block_completed_roundtrips() -> serde_json::Result<()> {
+        let evt = ModelEvent::ThinkingBlockCompleted {
+            block_index: 0,
+            text: "I should grep.".into(),
+            provider_opaque: Some(serde_json::json!({"signature":"abc"})),
+        };
+        let json = serde_json::to_string(&evt)?;
+        let back: ModelEvent = serde_json::from_str(&json)?;
+        assert_eq!(evt, back);
+        Ok(())
+    }
 }
