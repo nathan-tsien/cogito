@@ -269,6 +269,51 @@ pub enum EventPayload {
     },
 }
 
+/// Coarse classification of `EventPayload` variants. Used by Postgres backends
+/// for optional physical table partitioning (v0.4+) and by analysis tooling
+/// for filtering.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventCategory {
+    /// User / model conversation events — "what was said".
+    Conversation,
+    /// Harness FSM markers and decisions not part of dialog.
+    HarnessMeta,
+    /// Context management decisions (compaction and per-turn injection).
+    ContextDecision,
+}
+
+impl EventPayload {
+    /// Classify this payload into its coarse category. Pure function.
+    #[must_use]
+    pub fn category(&self) -> EventCategory {
+        match self {
+            Self::SessionStarted { .. }
+            | Self::TurnStarted { .. }
+            | Self::AssistantMessageAppended { .. }
+            | Self::ToolUseRecorded { .. }
+            | Self::ToolResultRecorded { .. }
+            | Self::ThinkingBlockRecorded { .. } => EventCategory::Conversation,
+
+            Self::ContextManageEntered { .. }
+            | Self::ContextManageCompleted { .. }
+            | Self::PromptComposed { .. }
+            | Self::ModelCallStarted { .. }
+            | Self::ModelCallCompleted { .. }
+            | Self::TurnPaused { .. }
+            | Self::JobCompletedRecorded { .. }
+            | Self::TurnCompleted { .. }
+            | Self::TurnFailed { .. }
+            | Self::HookRejected { .. } => EventCategory::HarnessMeta,
+
+            Self::ContextCompacted { .. }
+            | Self::SystemPromptInjected { .. }
+            | Self::ToolFilterOverridden { .. }
+            | Self::ContextDecisionRecorded { .. } => EventCategory::ContextDecision,
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::panic, clippy::unreachable)]
 mod tests {
@@ -472,6 +517,27 @@ mod tests {
         let back: ConversationEvent = serde_json::from_str(&json)?;
         assert_eq!(event, back);
         Ok(())
+    }
+
+    #[test]
+    fn category_classifies_all_variants() {
+        let conv = EventPayload::TurnStarted {
+            user_input: vec![ContentBlock::Text { text: "hi".into() }],
+        };
+        assert_eq!(conv.category(), EventCategory::Conversation);
+
+        let meta = EventPayload::ContextManageEntered {};
+        assert_eq!(meta.category(), EventCategory::HarnessMeta);
+
+        let ctx = EventPayload::ContextCompacted {
+            turn_id: TurnId::new(),
+            replaced_seq_range: (1, 2),
+            produced_by: "x".into(),
+            replacement: crate::context::CompactionReplacement::Drop,
+            token_estimate_before: None,
+            token_estimate_after: None,
+        };
+        assert_eq!(ctx.category(), EventCategory::ContextDecision);
     }
 
     #[test]

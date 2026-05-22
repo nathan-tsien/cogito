@@ -49,7 +49,7 @@ pub use content::ContentBlock;
 pub use context::{
     CompactionReplacement, ContextDecisionErrors, ContextError, ToolFilterOverrideMode,
 };
-pub use event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
+pub use event::{ConversationEvent, EventCategory, EventPayload, SCHEMA_VERSION};
 pub use exec_ctx::ExecCtx;
 pub use gateway::{
     Message, ModelError, ModelEvent, ModelGateway, ModelInput, ModelLimits, ModelOutput,
