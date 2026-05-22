@@ -411,9 +411,11 @@ name = "cogito-context"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "cogito-protocol",
  "cogito-test-fixtures",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
