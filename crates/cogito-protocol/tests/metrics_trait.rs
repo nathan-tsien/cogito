@@ -10,7 +10,12 @@ use cogito_protocol::metrics::{MetricsRecorder, NoOpMetricsRecorder};
 #[test]
 fn noop_swallows_all_calls() {
     let rec: Arc<dyn MetricsRecorder> = Arc::new(NoOpMetricsRecorder);
-    rec.record_hook_invocation(HookLifecyclePoint::PrePrompt, "any", Duration::from_micros(10), true);
+    rec.record_hook_invocation(
+        HookLifecyclePoint::PrePrompt,
+        "any",
+        Duration::from_micros(10),
+        true,
+    );
     rec.record_counter("any.counter", &[("k", "v")]);
 }
 
@@ -27,7 +32,12 @@ impl MetricsRecorder for CountingRecorder {
 #[test]
 fn trait_object_dispatch_counts() {
     let rec: Arc<dyn MetricsRecorder> = Arc::new(CountingRecorder(AtomicUsize::new(0)));
-    rec.record_hook_invocation(HookLifecyclePoint::PrePrompt, "h", Duration::from_micros(1), true);
+    rec.record_hook_invocation(
+        HookLifecyclePoint::PrePrompt,
+        "h",
+        Duration::from_micros(1),
+        true,
+    );
     rec.record_counter("c", &[]);
     // Downcast back to verify
     // (without using std::any::Any -- count via re-borrowing the inner.)
