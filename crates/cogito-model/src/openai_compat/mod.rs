@@ -37,6 +37,11 @@ pub struct OpenAiCompatConfig {
     /// `model_limits()` when the model id carries no `[<size>]` suffix.
     /// `None` causes the gateway to fall back to `32_768` with a warn log.
     pub context_window_tokens: Option<u64>,
+    /// Model identifier used for `model_limits()` and to derive the wire-level
+    /// `api_model_id()`. May carry a `[<size>]` suffix (e.g. `"Llama-3.3-70B[32k]"`)
+    /// that is stripped before sending to the server. Empty string means no
+    /// gateway-level model override; callers rely on `ModelInput.params.model`.
+    pub model: String,
 }
 
 impl OpenAiCompatConfig {
@@ -54,6 +59,7 @@ impl OpenAiCompatConfig {
             timeout: Duration::from_secs(5 * 60),
             include_prior_thinking: false,
             context_window_tokens: None,
+            model: String::new(),
         }
     }
 }
@@ -81,11 +87,38 @@ impl OpenAiCompatGateway {
             .map_err(|e| crate::error::from_reqwest(&e))?;
         Ok(Self { cfg, client })
     }
+
+    /// Construct a minimal gateway for unit/integration tests, bypassing
+    /// normal HTTP client configuration. The returned gateway is not
+    /// suitable for real API calls.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new_for_test(cfg: OpenAiCompatConfig) -> Self {
+        // unwrap is safe: default Client::new() cannot fail on a modern system.
+        #[allow(clippy::unwrap_used)]
+        let client = Client::new();
+        Self { cfg, client }
+    }
+
+    /// Return the model identifier to send on the wire, with any `[<size>]`
+    /// suffix stripped. The suffix is a local-only annotation that vLLM /
+    /// `SGLang` servers would reject.
+    ///
+    /// Falls back to `cfg.model` unchanged if no suffix is present.
+    #[must_use]
+    pub fn api_model_id(&self) -> String {
+        self.cfg
+            .model
+            .split_once('[')
+            .map_or_else(|| self.cfg.model.clone(), |(base, _)| base.to_owned())
+    }
 }
 
 use async_stream::try_stream;
 use cogito_protocol::ExecCtx;
-use cogito_protocol::gateway::{ModelError, ModelEvent, ModelGateway, ModelInput};
+use cogito_protocol::gateway::{
+    ModelError, ModelEvent, ModelGateway, ModelInput, ModelLimits, parse_context_window_suffix,
+};
 use futures::stream::{BoxStream, StreamExt};
 
 use crate::error::from_reqwest;
@@ -207,5 +240,19 @@ impl ModelGateway for OpenAiCompatGateway {
 
     fn provider_id(&self) -> &'static str {
         "openai-compat"
+    }
+
+    fn model_limits(&self) -> ModelLimits {
+        let model_id = &self.cfg.model;
+        let window = parse_context_window_suffix(model_id)
+            .or(self.cfg.context_window_tokens)
+            .unwrap_or_else(|| {
+                tracing::warn!(
+                    model = %model_id,
+                    "no context window declared (suffix nor provider config); falling back to 32_768",
+                );
+                32_768
+            });
+        ModelLimits::new(model_id.clone(), window)
     }
 }
