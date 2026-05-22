@@ -19,7 +19,7 @@ use cogito_protocol::gateway::{ModelError, ModelEvent, StopReason, Usage};
 use super::wire::{Choice, StreamChunk};
 
 /// Open-tag sentinel for inline reasoning blocks emitted by open-source models
-/// (e.g. DeepSeek-R1 raw, QwQ, llama.cpp default).
+/// (e.g. DeepSeek-R1 raw, `QwQ`, llama.cpp default).
 const OPEN_TAG: &str = "<think>";
 /// Close-tag sentinel matching `OPEN_TAG`.
 const CLOSE_TAG: &str = "</think>";
@@ -70,7 +70,7 @@ pub(crate) struct Decoder {
     finish_reason: Option<String>,
     /// Whether `finalize` has already run. Idempotent on repeated calls.
     finalized: bool,
-    /// Accumulated reasoning text (DeepSeek `reasoning_content` path).
+    /// Accumulated reasoning text (`DeepSeek` `reasoning_content` path).
     thinking_buf: String,
     /// Whether any `reasoning_content` chunk has been observed.
     thinking_started: bool,

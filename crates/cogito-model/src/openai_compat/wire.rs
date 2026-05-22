@@ -122,7 +122,7 @@ pub(crate) struct ChoiceDelta {
     /// Partial text content from the assistant.
     #[serde(default)]
     pub content: Option<String>,
-    /// Partial reasoning content (DeepSeek official API, vLLM
+    /// Partial reasoning content (`DeepSeek` official API, vLLM
     /// `--enable-reasoning`, etc.). Mutually exclusive in time with
     /// `content` per ADR-0019 §5.3.b — reasoning streams first, then
     /// the backend switches to `content`. See `decode.rs` (Task 13)
