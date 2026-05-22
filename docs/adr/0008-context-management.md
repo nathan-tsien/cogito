@@ -1,8 +1,8 @@
 # ADR-0008: Context Management
 
-**Status**: Accepted (2026-05-23) — Sprint 6
-**Predecessors**: ADR-0004 (Brain/Hands/Session boundaries), ADR-0006 (Runtime + H01 FSM, `ContextManaged` state amendment), ADR-0007 (event log contract)
-**Implementation spec**: [`docs/superpowers/specs/2026-05-23-sprint-6-context-management-design.md`](../superpowers/specs/2026-05-23-sprint-6-context-management-design.md)
+## Status
+
+Accepted (2026-05-23) — Sprint 6
 
 ## Context
 
@@ -46,8 +46,8 @@ four traits with distinct invariants:
 
 H11 orchestrates these four traits in fixed order each `ContextManaged` transition:
 Compactor → SystemPromptInjector → ToolFilterOverrider → H11 writes
-`ContextDecisionRecorded`. A trait failure degrades (error recorded in
-`ContextDecisionErrors`); only a failure of H11's own fallback write propagates up and
+`ContextDecisionRecorded`. A trait failure degrades (error recorded in the `errors` field of
+`ContextDecisionRecorded`); only a failure of H11's own fallback write propagates up and
 causes `TurnFailed`.
 
 Merging any two traits would violate one side's invariant (spec §3): Compactor and
@@ -77,6 +77,10 @@ Projector cannot merge because Injector would be forced to understand history st
 | HistoryProjector | `StandardProjector` | `standard` |
 | SystemPromptInjector | `NoneInjector` | `none` |
 | ToolFilterOverrider | `NoneOverrider` | `none` |
+
+Note: `HistoryProjector` is invoked by H04 (Prompt Composer) at prompt-build time, not
+by H11's orchestration pipeline. The three traits that H11 runs in sequence are
+Compactor, SystemPromptInjector, and ToolFilterOverrider.
 
 Sprint 7 adds `SkillsInjector`; v0.2 Plugin adds more — no ADR amendment needed because
 `CompactorConfig`, `SystemPromptInjectorConfig`, etc. are `#[non_exhaustive]` enums.
