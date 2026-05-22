@@ -16,6 +16,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+cogito-mock-model = { workspace = true }
 cogito-test-fixtures = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 serde_json = { workspace = true }

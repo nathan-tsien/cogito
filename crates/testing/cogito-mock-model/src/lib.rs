@@ -16,7 +16,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use cogito_protocol::ExecCtx;
 use cogito_protocol::content::ContentBlock;
-use cogito_protocol::gateway::{Message, ModelError, ModelEvent, ModelGateway, ModelInput};
+use cogito_protocol::gateway::{
+    Message, ModelError, ModelEvent, ModelGateway, ModelInput, ModelLimits,
+};
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 use parking_lot::Mutex;
@@ -34,6 +36,11 @@ pub enum MockScript {
 #[derive(Debug, Default, Clone)]
 pub struct MockModelGateway {
     scripts: Arc<Mutex<VecDeque<MockScript>>>,
+    /// Optional override for `model_limits().context_window_tokens`.
+    ///
+    /// When `None`, the default implementation returns `32_768`. Set via
+    /// `with_context_window` to test adaptive-threshold logic.
+    context_window_tokens: Option<u64>,
 }
 
 impl MockModelGateway {
@@ -41,6 +48,16 @@ impl MockModelGateway {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Override the context-window size returned by `model_limits()`.
+    ///
+    /// Used to verify that `TruncateCompactor` `Ratio` thresholds scale
+    /// correctly for different provider windows (e.g. 1 M, 200 k, 32 k).
+    #[must_use]
+    pub fn with_context_window(mut self, tokens: u64) -> Self {
+        self.context_window_tokens = Some(tokens);
+        self
     }
 
     /// Queue a successful reply.
@@ -88,6 +105,11 @@ impl ModelGateway for MockModelGateway {
 
     fn provider_id(&self) -> &'static str {
         "mock"
+    }
+
+    fn model_limits(&self) -> ModelLimits {
+        let window = self.context_window_tokens.unwrap_or(32_768);
+        ModelLimits::new("mock", window)
     }
 }
 

@@ -412,6 +412,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "cogito-mock-model",
  "cogito-protocol",
  "cogito-test-fixtures",
  "serde",
