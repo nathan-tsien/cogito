@@ -47,6 +47,21 @@ pub enum ContentBlock {
         /// Structured result.
         result: ToolResult,
     },
+    /// Model reasoning/"thinking" content. Carried inside the assistant
+    /// message's content array; placed before Text / `ToolUse` blocks in
+    /// the same message per provider requirements (see ADR-0019 §4).
+    /// `provider_opaque` is None for backends that need no round-trip
+    /// material (OpenAI-compat), Some for Anthropic (signature) and
+    /// `OpenAI` Responses (`encrypted_content` + `item_id`).
+    Thinking {
+        /// Human-readable reasoning text. May be empty when the provider
+        /// returns only an encrypted blob (e.g. Anthropic `redacted_thinking`).
+        text: String,
+        /// Provider-defined opaque payload required for next-turn
+        /// validation. Schema is provider-specific; cogito does not
+        /// interpret the contents.
+        provider_opaque: Option<serde_json::Value>,
+    },
 }
 
 #[cfg(test)]
@@ -86,6 +101,34 @@ mod tests {
                 "type": "text",
                 "data": {"text": "file contents"}
             })]),
+        };
+        let json = serde_json::to_string(&cb)?;
+        let back: ContentBlock = serde_json::from_str(&json)?;
+        assert_eq!(cb, back);
+        Ok(())
+    }
+
+    #[test]
+    fn thinking_roundtrips_with_provider_opaque() -> serde_json::Result<()> {
+        let cb = ContentBlock::Thinking {
+            text: "let me think...".into(),
+            provider_opaque: Some(serde_json::json!({"signature": "abc123"})),
+        };
+        let json = serde_json::to_string(&cb)?;
+        assert_eq!(
+            json,
+            r#"{"type":"thinking","data":{"text":"let me think...","provider_opaque":{"signature":"abc123"}}}"#
+        );
+        let back: ContentBlock = serde_json::from_str(&json)?;
+        assert_eq!(cb, back);
+        Ok(())
+    }
+
+    #[test]
+    fn thinking_roundtrips_without_provider_opaque() -> serde_json::Result<()> {
+        let cb = ContentBlock::Thinking {
+            text: "implicit reasoning".into(),
+            provider_opaque: None,
         };
         let json = serde_json::to_string(&cb)?;
         let back: ContentBlock = serde_json::from_str(&json)?;
