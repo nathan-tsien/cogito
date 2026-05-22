@@ -6,7 +6,12 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 complete; Sprint 4 (MCP sync tools) next.
+> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 complete; Sprint 4
+> (MCP sync tools) in flight; Sprints 5–10 reshaped per
+> [2026-05-22 roadmap rebalance](docs/superpowers/specs/2026-05-22-roadmap-rebalance-design.md)
+> (Hook impl + Context C2 trait freeze + Skill loader promoted into
+> v0.1; Async Jobs / Multi-model / TUI / hardening renumbered;
+> Storage+Multimodal deferred from v0.2 to v0.5).
 
 ## Version plan
 
@@ -124,7 +129,56 @@ thinking, OpenAI Responses reasoning items, or OpenAI-compat
 - [x] Docs: H02/H04/H06 component docs + AGENTS.md inviolable rules #8/#9 + `docs/data-model/jsonl-v1.md` additive entry
 - [x] **ADR-0019**: Reasoning content modeling and event scope (Accepted 2026-05-22)
 
-#### Sprint 5 · Async Jobs (2 days)
+#### Sprint 5 · Hook Pipeline 实化 (1 day)
+
+**Promoted from old Sprint 7 upper half** by 2026-05-22 rebalance —
+Hooks need to be real before Skills (Sprint 7) and Plugins (v0.2
+Sprint 12) can load hooks from disk.
+
+- [ ] H09 Hook Pipeline with purity rule enforcement (see `docs/components/H09-hook-pipeline.md`)
+- [ ] Two example hooks (sensitive content, bash audit)
+- [ ] `MetricsRecorder` trait in protocol + default no-op
+- [ ] `HookProvider` trait shape lets v0.2 Plugin add hooks without trait change (provider-aggregation pattern — see rebalance spec §7.2)
+- [ ] Per-hook P99 latency budget verified
+
+#### Sprint 6 · Context Management — ADR-0008 + C2 trait freeze + first Compactor (2–2.5 days)
+
+**Promoted from "post-Sprint-2 spike" to numbered sprint** by
+2026-05-22 rebalance — enables team-parallel context strategy
+contributions and unblocks Sprint 7 Skill injection into H11.
+
+- [ ] Research carryover: Codex (`run_inline_auto_compact_task`), Claude Code (`/compact` + auto), Manus, other SaaS agent platforms — trigger policies and persisted shape
+- [ ] **ADR-0008**: Context Management — freeze `Compactor` / `HistoryProjector` / `SystemPromptInjector` traits + event variants (`ContextCompacted`, `ContextDecisionRecorded`, `SystemPromptInjected`, `ToolFilterOverridden`) + trigger policy + summarization model selection rules
+- [ ] `cogito-protocol`: additive `EventPayload` variants for context lifecycle (per `#[non_exhaustive]`, no schema_version bump)
+- [ ] **New crate `cogito-context`** (umbrella): hosts all Compactor / HistoryProjector / SystemPromptInjector implementations as modules; future strategies (`compactor::summarize`, `compactor::sliding`, …) are added as modules, not new crates; `build_pipeline(&ContextConfig)` factory lives here
+- [ ] v0.1 ships only `cogito_context::compactor::truncate` as the reference Compactor
+- [ ] `cogito-core::harness`: H11 implementation; H01 `Init → ContextManaged` transition stops being a pass-through
+- [ ] H04 history projection: honor `ContextCompacted` events
+- [ ] H03 Resume Coordinator: crash-mid-compaction recovery
+- [ ] Chaos test: inject crash during summarization model call (skipped if v0.1 reference Compactor is truncate-only)
+
+#### Sprint 7 · Skill loader (`cogito-skills`) — ADR-0020 (1.5–2 days)
+
+**New sprint** — agentskills.io-compatible Skill loader that lets team
+members ship knowledge packs as markdown + frontmatter, no Rust
+required.
+
+- [ ] **ADR-0020**: Skill loader — locks K5 sigil activation (`$SkillName` + `/skill X` dual channel; no `load_skill` tool), scope precedence (Repo > User > Plugin > System), `SKILL.md` frontmatter schema (`name` / `description` / `disable-model-invocation` / `user-invocable`), bundled-scripts deferral (see ADR-0023)
+- [ ] **New crate `cogito-skills`** (Hands): SkillRegistry + scope-based filesystem discovery + frontmatter parser + sigil regex + `SkillProvider` trait impl
+- [ ] `cogito-protocol`: add `SkillProvider` trait + `EventPayload::SkillActivated { skill_name, source, recorded_event_id }` (additive, no schema_version bump)
+- [ ] H04 Prompt Composer: inject "Available Skills" block (name + description with character cap per skill)
+- [ ] H06 Stream Demultiplexer: detect sigil in `text_delta`; emit `ModelEvent::SkillActivationRequested`
+- [ ] H11 Context Manage: on `SkillActivationRequested`, inject full `SKILL.md` as user-role message before next turn (via `SystemPromptInjector` trait from Sprint 6)
+- [ ] CLI: `/skill <name>` slash command in `cogito chat` REPL
+- [ ] Sigil edge-case guardrails (see rebalance spec §7.1): match only registered skill names + system-prompt escape instruction
+- [ ] Smoke test: skill defined under `.cogito/skills/` activates via sigil + via slash; SKILL.md content reaches model
+- [ ] Resume-chaos: new scenario `text_then_skill_then_tool` — crash injection at boundaries with skill-activated context
+
+#### Sprint 8 · Async Jobs (2 days)
+
+**Renumbered from old Sprint 5** by 2026-05-22 rebalance. Required by
+v0.3 Subagent S1 `wait_agent` semantics and v0.4 multi-replica resume.
+
 - [ ] `cogito-jobs` implements `JobManager` (tokio task + JSONL job log persistence)
 - [ ] `cogito-jobs` provides cross-process job state persistence (mirrors event log structure; required by Sprint 3 ResumePausedJob path — see Sprint 3 spec §5.6)
 - [ ] H08 Tool Dispatcher async path (handles `InvokeOutcome::Async(JobId)`)
@@ -132,73 +186,75 @@ thinking, OpenAI Responses reasoning items, or OpenAI-compat
 - [ ] Loop pauses on async, resumes on completion
 - [ ] Mid-pause user input handling: queued, processed after current turn
 
-#### Sprint 6 · Multi-model Strategy (1 day)
+#### Sprint 9 · Multi-model Strategy + TUI (2 days)
+
+**Merged from old Sprint 6 + old Sprint 7 lower half** by 2026-05-22
+rebalance.
+
 - [ ] OpenAI adapter in `cogito-model` (Responses API; ContentBlock serialization to OpenAI's flat top-level items)
 - [ ] H10 Strategy Selector with YAML config loading from `strategies/*.yaml`
 - [ ] CLI `--model` flag selects strategy
 - [ ] Per-strategy `model_params`, `allowed_tools`, `system_prompt`
-
-#### Sprint 7 · Hook Pipeline + TUI (2 days)
-- [ ] H09 Hook Pipeline with purity rule enforcement (see `docs/components/H09-hook-pipeline.md`)
-- [ ] Two example hooks (sensitive content, bash audit)
-- [ ] `MetricsRecorder` trait in protocol + default no-op
 - [ ] Basic TUI with ratatui (replicates `cogito chat`)
-- [ ] Per-hook P99 latency budget verified
 
-#### Sprint 8 · v0.1 hardening (1 day)
+#### Sprint 10 · v0.1 硬化 + tag v0.1.0 (1 day)
+
+**Renumbered from old Sprint 8.** Includes the standalone
+`cogito-store-jsonl` → `cogito-store` rename PR (see ADR-0024).
+
 - [ ] All component design docs cross-referenced and current
+- [ ] `cogito-store-jsonl` → `cogito-store` rename PR landed (see ADR-0024); JSONL becomes the default Cargo feature
 - [ ] CHANGELOG.md initial entry
 - [ ] Tag `v0.1.0`
 
-### Spike · Context Management (post-Sprint 2; ADR-0008)
+### v0.2 · Extensibility
 
-**Goal**: design and ratify how `H11 Context Manage` actually works. The
-architectural slot is locked by PR #6 (ADR-0006 amendment 2026-05-19);
-the mechanism is still open. This spike is a dedicated initiative, not
-a numbered sprint, because the work cuts across compaction, system
-prompt lifecycle, tool injection, and TurnDriver integration.
+**Theme renamed from "Storage + Multimodal"** by 2026-05-22 rebalance.
+Goal: pack Skills + Subagents + Hooks + MCP into a shippable Plugin
+unit so team members ship domain capabilities as one directory, not as
+scattered config edits. Subagent ships in minimal form (`delegate`
+tool); Plugin ships local-path only.
 
-- [ ] Research: Codex (`run_inline_auto_compact_task`), Claude Code (`/compact` + auto), Manus, other SaaS agent platforms — trigger policies and persisted shape
-- [ ] Spec draft under `docs/superpowers/specs/`: H11 trigger policy, summarization model selection, replacement semantics, cascading compactions
-- [ ] **ADR-0008**: Context Management — locks `ContextManager` trait, event variants (`ContextCompacted`, `ContextDecisionRecorded`, `SystemPromptInjected`, `ToolFilterOverridden`), trigger policy, summarization model selection
-- [ ] `cogito-protocol`: additive `EventPayload` variants for context lifecycle (per `#[non_exhaustive]`, no schema_version bump)
-- [ ] `cogito-core::harness`: H11 implementation; H01 `Init → ContextManaged` transition stops being a pass-through
-- [ ] H04 history projection: honor `ContextCompacted` events
-- [ ] Optional: `pre_context` / `post_context` hook lifecycle points if needed
-- [ ] H03 Resume Coordinator: crash-mid-compaction recovery
-- [ ] Chaos test: inject crash during summarization model call
-- [ ] No version tag — feature lands into whichever v0.x is current when ready
+#### Sprint 11 · Subagent (S2 minimal) — ADR-0011 v0.2 scope (1–1.5 days)
 
-### v0.2 · Storage + Multimodal
+- [ ] **ADR-0011 v0.2 amendment**: Subagent minimal scope — `delegate(role, input) → output` tool; child session is an independent top-level session (no `parent_session_id` event tree); failure semantics = child failure → `ToolResult::Error`; no child-session state persisted in parent's event log
+- [ ] **No new crate** — module lives in `cogito-core::runtime::subagent` (~200 LoC)
+- [ ] `cogito-protocol`: add `BrainSpawner` trait (the v0.3 full surface is amendment-only)
+- [ ] `cogito-core::runtime`: implement `BrainSpawner` (recursive task hosting; sync child-completion path only)
+- [ ] `cogito-core::runtime::subagent`: `DelegateToolProvider` (impl `ToolProvider`) holding `Arc<dyn BrainSpawner>` via `ExecCtx`
+- [ ] Strategy YAML loading: `delegate` arg `role` maps to a known strategy
+- [ ] Integration test: parent session invokes `delegate`, child session runs to completion, parent receives final text
 
-**Goal**: introduce `StorageSystem` as the third protocol pillar; lay the
-foundation for multimodal content (`ContentBlock::Image`); ship one
-multimedia tool to validate the full path.
+#### Sprint 12 · Plugin (P1 local-only) — ADR-0021 (1.5–2 days)
 
-- [ ] **ADR-0009**: `StorageSystem` trait + URI scheme + `ContentBlock::Image` variant _(renumbered from ADR-0007 by PR #6 — ADR-0007 now reserved for "Event log as cross-language contract", ADR-0008 for "Context Management")_
-- [ ] **ADR-0010**: multimedia tool conventions (mime types, `outputs_model_visible_multimodal` flag, etc.) _(renumbered from ADR-0008)_
-- [ ] `cogito-protocol`: add `StorageSystem` trait + `ContentBlock::Image`
-- [ ] `cogito-storage-local` crate: `file://` + `http(s)://` (with local cache) + `blob://` (mapped to local dir)
-- [ ] `ExecCtx.storage: Arc<dyn StorageSystem>` field
-- [ ] `cogito-tools-multimedia` crate: `transcribe_audio` tool (uses Whisper API or local model — TBD)
-- [ ] TUI surface (if not landed in v0.1)
-- [ ] Default secret redactor implementation
+- [ ] **ADR-0021**: Plugin manifest + loader — locks TOML primary (`.cogito-plugin/plugin.toml`) + Claude-plugin JSON compat read (`.claude-plugin/plugin.json`); default artifact paths (`skills/` / `agents/` / `hooks/hooks.toml` / `mcp.toml` / `commands/`); `<plugin_id>:<artifact_name>` namespace for ALL bundled artifacts; per-plugin / per-artifact enable/disable; **v0.2 distribution scope = local path only**
+- [ ] **New crate `cogito-plugin`** (Hands): manifest parsers (TOML + JSON compat) + filesystem scan + provider composition (SkillProvider + HookProvider + McpToolProvider + slash-command registry + strategy registry)
+- [ ] `cogito-config`: `[[plugins]] path = "..."` entries; per-plugin `enabled` flag; `[[plugins.artifact_overrides]]` block
+- [ ] Plugin id uniqueness check at startup (fatal if duplicate; same shape as MCP server name uniqueness from ADR-0018)
+- [ ] `cogito-cli chat`: load plugins via existing `--config` path; wire into existing provider composites
+- [ ] Integration test: local plugin contributing 1 skill + 1 hook + 1 MCP server + 1 subagent role → all four artifacts callable from Brain through normal provider abstractions
+
+#### Sprint 13 · v0.2 硬化 + tag v0.2.0 (1 day)
+
+- [ ] Cross-scope same-name collision tests (Repo-skill vs Plugin-namespaced skill)
+- [ ] Resume-chaos: new scenario `plugin_skill_then_tool` — crash injection while a plugin-loaded skill is mid-activation
+- [ ] CHANGELOG.md v0.2 entry
 - [ ] Tag `v0.2.0`
 
-### v0.3 · Subagent
+### v0.3 · Distributed Collaboration
 
-**Goal**: support recursive Brain instances (subagent pattern) for
-complex multi-role tasks.
+**Theme renamed from "Subagent"** by 2026-05-22 rebalance — v0.3 now
+covers both the Subagent full upgrade AND Plugin git distribution.
 
-- [ ] **ADR-0011**: Subagent execution model _(renumbered from ADR-0009)_
-- [ ] `cogito-protocol`: add `BrainSpawner` trait + `SubagentSpawned` / `SubagentInputSent` / `SubagentCompleted` event variants
-- [ ] `cogito-protocol`: extend `HarnessStrategy` with `spawnable_as_subagent`, `max_subagent_depth`
-- [ ] `cogito-protocol`: extend session metadata with `parent_session_id`, `depth`, `role`
-- [ ] `cogito-core::runtime`: implement `BrainSpawner` (recursive task hosting)
-- [ ] `cogito-subagent` crate: `SubagentToolProvider` with 4 tools (`spawn_agent`, `wait_agent`, `send_input`, `cancel_agent`)
-- [ ] Crash recovery: parent crash → child continues; child crash → parent gets `AsyncFailed`
-- [ ] Depth limit enforcement
+- [ ] **ADR-0011 v0.3 amendment**: Subagent full — `BrainSpawner` trait + 4 tools (`spawn_agent` / `wait_agent` / `send_input` / `cancel_agent`) + `parent_session_id` / `depth` / `role` session metadata + parent-child crash semantics + `SubagentSpawned` / `SubagentInputSent` / `SubagentCompleted` event variants + depth-limit enforcement
+- [ ] `delegate` tool retained as syntactic sugar for `spawn_agent` + sync `wait_agent` (no behavior change for v0.2 consumers)
+- [ ] Decision point: whether to extract `cogito-subagent` crate from `cogito-core::runtime::subagent` (criterion: LoC > 1k + low dep overlap with rest of runtime)
 - [ ] Example strategies: `planner.yaml`, `coder.yaml`, `critic.yaml`
+- [ ] Crash recovery chaos scenarios: parent crash → child continues; child crash → parent gets `AsyncFailed`
+- [ ] **ADR-0022**: Plugin distribution — git URL + commit/tag pin, `cogito.lock` file, `cogito plugin sync` command, network-failure-non-fatal-if-cached semantics
+- [ ] `cogito-plugin`: git fetch + cache layout (`~/.cache/cogito/plugins/<content-hash>/`)
+- [ ] `cogito-cli`: `cogito plugin sync` + `cogito plugin sync --check` + `cogito plugin list` + `cogito plugin update <id>`
+- [ ] Lock-file schema (TOML)
 - [ ] Tag `v0.3.0`
 
 ### v0.4 · SaaS-ready
@@ -208,7 +264,7 @@ complex multi-role tasks.
 - [ ] **ADR-0012**: Sandbox lifecycle (lazy provisioning, pets-vs-cattle) _(renumbered from ADR-0010)_
 - [ ] **ADR-0013**: Credential isolation (sandbox proxy pattern) _(renumbered from ADR-0011)_
 - [ ] **ADR-0014**: TenantContext propagation _(renumbered from ADR-0012)_
-- [ ] `cogito-store-postgres` crate: production multi-replica backend
+- [ ] `cogito-store --features postgres`: production multi-replica backend (folded into umbrella `cogito-store` crate per ADR-0024; was originally `cogito-store-postgres`)
 - [ ] `cogito-storage-s3` crate: object storage backend
 - [ ] `cogito-protocol`: add `TenantContext` optional field on `ExecCtx`
 - [ ] `cogito-protocol`: add `MetricsRecorder` trait
@@ -217,12 +273,20 @@ complex multi-role tasks.
 - [ ] `cogito-sandbox` redesign: lazy provisioning + credential proxy
 - [ ] Tag `v0.4.0`
 
-### v0.5 · Multimedia breadth
+### v0.5 · Storage + Multimodal
 
-**Goal**: full multimedia tool catalog; `model_visible` content path lit
-end-to-end.
+**Theme absorbed from old v0.2 + old v0.5** by 2026-05-22 rebalance.
+Goal: introduce `StorageSystem` as the third protocol pillar, light
+up `ContentBlock::Image` end-to-end, and ship the full multimedia
+tool catalog in one cohesive version.
 
-- [ ] `cogito-tools-multimedia` expansion:
+- [ ] **ADR-0009**: `StorageSystem` trait + URI scheme + `ContentBlock::Image` variant — moved from v0.2 to v0.5 by 2026-05-22 rebalance (URL-as-text via tools covered v0.1–v0.4)
+- [ ] **ADR-0010**: multimedia tool conventions (mime types, `outputs_model_visible_multimodal` flag, etc.) — moved from v0.2 to v0.5
+- [ ] `cogito-protocol`: add `StorageSystem` trait + `ContentBlock::Image`
+- [ ] `cogito-storage-local` crate: `file://` + `http(s)://` (with local cache) + `blob://` (mapped to local dir)
+- [ ] `ExecCtx.storage: Arc<dyn StorageSystem>` field
+- [ ] `cogito-tools-multimedia` crate, full catalog:
+  - [ ] `transcribe_audio(audio_uri) -> text`
   - [ ] `extract_frames(video_uri) -> Vec<image_uri>`
   - [ ] `summarize_video(video_uri) -> text`
   - [ ] `describe_image(image_uri) -> text`
@@ -230,12 +294,14 @@ end-to-end.
   - [ ] `synthesize_speech(text) -> audio_uri`
 - [ ] `ContentBlock::Image` wired through `ModelGateway` adapters (Anthropic native; OpenAI image_url)
 - [ ] `outputs_model_visible_multimodal` flag honored by H05 (filters tools incompatible with selected model)
+- [ ] Default secret redactor implementation
 - [ ] Tag `v0.5.0`
 
-### v0.6 · Hardening
+### v0.6 · Hardening + Plugin Marketplace spike
 
-**Goal**: production-grade depth — load testing, migration tooling,
-storage HTTP backend.
+**Theme micro-extended** by 2026-05-22 rebalance to include the P3
+marketplace spike (after v0.3 P2 git fetch had a release cycle of
+real use).
 
 - [ ] Hook policy maturity: per-strategy hook config, hook composition rules
 - [ ] Load test scaffolding: 1000 concurrent sessions per process target
@@ -243,6 +309,7 @@ storage HTTP backend.
 - [ ] Event log migration tooling (v(N-1) → vN converter, with `replay_equivalence` test)
 - [ ] **ADR-0015**: Storage HTTP wire protocol _(renumbered from ADR-0013 by PR #6)_
 - [ ] `cogito-storage-http` crate: HTTP backend adapter
+- [ ] Plugin marketplace (P3) design spike — `marketplace.json` index protocol, HTTP marketplace backend, `cogito plugin install <name>@<marketplace>`, signing model (optional, can defer to v0.7)
 - [ ] Tag `v0.6.0`
 
 ### v1.0 · API freeze

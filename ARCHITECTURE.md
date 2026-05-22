@@ -8,11 +8,12 @@ cogito is **the core of an agent runtime — the brain of an agent — packaged
 as an embeddable Rust workspace** that another Rust service depends on and
 runs in-process. cogito provides:
 
-- **Brain**: the Harness (H01–H10) that drives one iteration of the agent loop
-- **Session contract**: the `ConversationStore` trait (event-sourced log) and a v0.1 backend (`cogito-store-jsonl`)
-- **Hand / Boundary contracts**: `ToolProvider`, `JobManager`, `ModelGateway`, `HookHandler`, `StorageSystem`, `BrainSpawner` traits with reference implementations
-- **Multimodal content**: `Vec<ContentBlock>` payloads (Anthropic Messages API shape) with URI-addressed bulk storage
-- **Subagent**: recursive Brain hosting via a 4-tool `ToolProvider` (v0.3+)
+- **Brain**: the Harness (H01–H11) that drives one iteration of the agent loop, including Context Management (H11) since v0.1 Sprint 6
+- **Session contract**: the `ConversationStore` trait (event-sourced log) and a v0.1 backend (`cogito-store --features jsonl`, default)
+- **Hand / Boundary contracts**: `ToolProvider`, `JobManager`, `ModelGateway`, `HookHandler`, `Compactor` / `HistoryProjector` / `SystemPromptInjector`, `SkillProvider`, `StorageSystem`, `BrainSpawner` traits with reference implementations
+- **Extensibility surface**: agentskills.io-compatible Skills (v0.1 Sprint 7) + Plugin bundles (v0.2) packaging Skills + Subagents + Hooks + MCP servers as one shippable unit
+- **Multimodal content**: `Vec<ContentBlock>` payloads (Anthropic Messages API shape) with URI-addressed bulk storage (`ContentBlock::Image` + `StorageSystem` land in v0.5)
+- **Subagent**: minimal `delegate` tool in v0.2 → full recursive Brain hosting via a 4-tool `ToolProvider` in v0.3
 
 cogito does **not** provide: deployment artifacts (Docker / Helm), inbound
 HTTP/gRPC transport, end-user authentication, multi-tenant isolation, quota
@@ -351,8 +352,11 @@ Hands has **three internal levels**. Only Level 1 is visible to Brain.
    │    · cogito-tools  → BuiltinToolProvider          │
    │    · cogito-mcp    → McpToolProvider              │
    │    · cogito-jobs   → JobManager impls             │
-   │    · cogito-subagent → SubagentToolProvider (0.3) │
-   │    · cogito-tools-multimedia (0.2+)               │
+   │    · cogito-skills → SkillProvider (0.1 Sprint 7) │
+   │    · cogito-plugin → composed providers (0.2)     │
+   │    · cogito-core::runtime::subagent (0.2 minimal) │
+   │      or cogito-subagent crate (0.3 if extracted)  │
+   │    · cogito-tools-multimedia (0.5)                │
    └─────────────────────────┬──────────────────────────┘
                              │ internally use
                              ▼
@@ -508,13 +512,14 @@ and **output type** (what the result is shaped like):
 | **Delayed** (min–hr) | **D** `run_tests`, `transcribe_audio` | **E** `build_release` (binary + huge log) | **F** `provision_vm` |
 
 **v0.1 covers A + D.** Classes B / E (large outputs) are unlocked by
-**v0.2** when `StorageSystem` lands (blob outputs reference URIs). Classes
-C / F (long-lived resources) are deferred to **v1.x** via a future
-`ResourceRegistry` (P4 plane).
+**v0.5** when `StorageSystem` lands (blob outputs reference URIs;
+moved from v0.2 by 2026-05-22 rebalance). Classes C / F (long-lived
+resources) are deferred to **v1.x** via a future `ResourceRegistry`
+(P4 plane).
 
-v0.1's compromise for class B is **inline truncation**: payloads above 1
-MiB must be truncated by the tool implementation, with a
-`truncation_marker` left in the event. v0.2 lifts this by routing big
+v0.1–v0.4's compromise for class B is **inline truncation**: payloads
+above 1 MiB must be truncated by the tool implementation, with a
+`truncation_marker` left in the event. v0.5 lifts this by routing big
 outputs through `StorageSystem::create()` and returning a `blob://` URI.
 
 ## State storage planes
@@ -526,7 +531,7 @@ lifecycle. Confusing them is a common source of design bugs.
 |---|---|---|---|---|
 | **P1 · Event log** | All events + small `ToolResult::Output` (inline text + URIs) | `ConversationStore` (JSONL in v0.1; Postgres / HTTP later) | ✅ | ✅ |
 | **P2 · Job state** | Async job lifecycle (Pending / Running / Completed / Failed) + final result | `JobManager` (local in v0.1; distributed in v0.4+) | ✅ | ✅ |
-| **P3 · Storage system** | Non-text bulk content (audio / video / large blobs) addressed by URI | `StorageSystem` (cogito-storage-local in v0.2; S3 / HTTP later) | depends on backend | depends on backend |
+| **P3 · Storage system** | Non-text bulk content (audio / video / large blobs) addressed by URI | `StorageSystem` (cogito-storage-local in v0.5; S3 in v0.4 storage-side; HTTP in v0.6) | depends on backend | depends on backend |
 | **P4 · Resource registry** | Long-lived resource handles (running processes, attached workspaces) | **Deferred to v1.x** (new trait + new ADR) | ✅ | partial |
 | **P5 · Workspace files** | Files the agent edits / creates in the working tree | **Consumer / filesystem (never cogito)** | ✅ | ✅ |
 
@@ -541,7 +546,13 @@ From the parent's perspective, the subagent is exposed as a `ToolProvider`
 with four tools. From cogito's perspective, the subagent's lifecycle is
 managed entirely by Runtime + `JobManager` — no new top-level concept.
 
-### Tools exposed to the LLM (via `cogito-subagent`)
+### Tools exposed to the LLM (v0.3 full surface — `cogito-subagent` or `cogito-core::runtime::subagent`)
+
+> **v0.2 ships only `delegate(role, input) → output`** as a minimal
+> form (Subagent S2; lives in `cogito-core::runtime::subagent`). The
+> four-tool table below describes the v0.3 S1 full upgrade per
+> ADR-0011 amendment.
+
 
 | Tool | Outcome | Pauses parent? |
 |---|---|---|
@@ -630,50 +641,55 @@ for a strategy by name.
 | Crate | Layer | When | Role |
 |---|---|---|---|
 | `cogito-protocol` | Protocol | v0.1 | All traits, `ConversationEvent`, `ContentBlock`, `ExecCtx`, `ToolDescriptor`, `InvokeOutcome`, value types. No internal cogito deps. |
-| `cogito-core` | Brain + Runtime | v0.1 | `harness/` is Brain (H01–H10), may only `use cogito_protocol::*`. `runtime/` is the hosting platform (DI, panic catch, resource budget, `BrainSpawner` impl). |
-| `cogito-store-jsonl` | Session | v0.1 | First backend: per-session JSONL files, `fsync` per event. Layout: `<root>/sessions/<session_id>.jsonl`. |
-| `cogito-store-postgres` | Session | v0.4 | Production multi-replica backend. |
-| `cogito-store-http` | Session | v0.6 | Generic HTTP-backed adapter against the Storage HTTP wire protocol (ADR-0015). |
+| `cogito-core` | Brain + Runtime | v0.1 | `harness/` is Brain (H01–H11), may only `use cogito_protocol::*`. `runtime/` is the hosting platform (DI, panic catch, resource budget, `BrainSpawner` impl, `runtime::subagent` module since v0.2 — see ADR-0011). |
+| `cogito-store` | Session | v0.1 | Umbrella crate for `ConversationStore` backends. Default Cargo feature `jsonl` ships v0.1 (per-session JSONL files, `fsync` per event; layout `<root>/sessions/<session_id>.jsonl`). Future features: `postgres` (v0.4), `http` (v0.6). **Renamed from `cogito-store-jsonl`** before v0.1.0 tag per ADR-0024. |
+| `cogito-context` | Brain-internal (Protocol-companion) | v0.1 (Sprint 6) | Umbrella crate for `Compactor` / `HistoryProjector` / `SystemPromptInjector` impls (per ADR-0008). v0.1 ships `compactor::truncate`; future strategies (`compactor::summarize`, `projector::tool_elision`, …) land as modules, not new crates. `build_pipeline(&ContextConfig)` factory lives here. |
 | `cogito-model` | Boundary | v0.1 | `ModelGateway` impls (Anthropic + OpenAI). Handles ContentBlock ↔ provider format serialization. |
 | `cogito-tools` | Hands | v0.1 | `BuiltinToolProvider` + `CompositeToolProvider` utility. |
-| `cogito-tools-multimedia` | Hands | v0.2+ | Audio / video / image tools (transcribe, summarize, extract_frames, describe_image, ...). |
+| `cogito-skills` | Hands | v0.1 (Sprint 7) | Skill loader (`cogito-skills`): scope-based discovery, SKILL.md frontmatter parser, sigil regex, `SkillProvider` impl. agentskills.io-compatible. See ADR-0020. |
+| `cogito-plugin` | Hands | v0.2 (Sprint 12) | Plugin manifest + loader. Parses `.cogito-plugin/plugin.toml` (primary) and `.claude-plugin/plugin.json` (compat). Composes bundled Skills / Subagents / Hooks / MCP servers / slash commands into existing providers. v0.2 = local path only; v0.3 adds git fetch (ADR-0022). See ADR-0021. |
+| `cogito-tools-multimedia` | Hands | v0.5 | Audio / video / image tools (transcribe, summarize, extract_frames, describe_image, ...). **Moved from v0.2 to v0.5** by 2026-05-22 rebalance. |
 | `cogito-sandbox` | Hands (internal primitive) | v0.1 | `Sandbox` trait + subprocess impl. **Not visible to Brain**. |
-| `cogito-jobs` | Hands | v0.1 | `JobManager` impl: tokio task + JSONL job log. |
-| `cogito-mcp` | Hands | v0.2 | MCP `ToolProvider` adapter. |
-| `cogito-subagent` | Hands | v0.3 | `SubagentToolProvider` implementing the 4 subagent tools. |
-| `cogito-storage-local` | Hands (Storage) | v0.2 | First `StorageSystem` backend: local FS + HTTP fetch with cache + `blob://` mapped to local cache dir. |
+| `cogito-jobs` | Hands | v0.1 (Sprint 8) | `JobManager` impl: tokio task + JSONL job log. |
+| `cogito-mcp` | Hands | v0.1 (Sprint 4) | MCP `ToolProvider` adapter. **Pulled forward from v0.2 to v0.1** (ADR-0018). |
+| `cogito-subagent` | Hands | v0.3 (potential extraction) | `SubagentToolProvider` with 4 tools. **v0.2 lives as a module in `cogito-core::runtime::subagent`** (~200 LoC, `delegate` tool only). At v0.3 S1 upgrade (full `BrainSpawner` + 4 tools + parent-child event tree), decision point: extract crate if LoC > 1k and dep overlap with rest of runtime is low; otherwise stays in `cogito-core::runtime`. |
+| `cogito-storage-local` | Hands (Storage) | v0.5 | First `StorageSystem` backend: local FS + HTTP fetch with cache + `blob://` mapped to local cache dir. **Moved from v0.2 to v0.5** by 2026-05-22 rebalance. |
 | `cogito-storage-s3` | Hands (Storage) | v0.4 | S3-compatible object storage backend. |
 | `cogito-storage-http` | Hands (Storage) | v0.6 | Generic HTTP-backed storage adapter. |
 | `cogito-cli` | Surface | v0.1 | CLI binary; wires runtime + store + gateway. |
-| `cogito-tui` | Surface | v0.2 | TUI. |
+| `cogito-tui` | Surface | v0.1 (Sprint 9) | TUI. **Pulled forward from v0.2 to v0.1** (merged into Sprint 9 with multi-model strategy). |
 | `cogito-observability-otel` | Surface (optional) | v0.4 | OpenTelemetry adapter that ships `MetricsRecorder` impl + trace exporter. |
 | `crates/testing/cogito-test-fixtures` | Testing | v0.1 | Shared fixtures, tmp JSONL store helper. |
 | `crates/testing/cogito-mock-model` | Testing | v0.1 | `ModelGateway` mock with scripted responses. |
 
 Notes:
 
-- `cogito-conversation` (a placeholder in earlier drafts) is **superseded** by `cogito-store-jsonl`. The trait lives in `cogito-protocol`; no separate "session machinery" crate remains.
+- `cogito-conversation` (a placeholder in earlier drafts) is **superseded** by `cogito-store` (originally introduced as `cogito-store-jsonl`; renamed per ADR-0024 to remove the backend name from the crate name).
+- `cogito-store-postgres` (previously a separate planned v0.4 crate) is **folded into `cogito-store --features postgres`** per ADR-0024.
 - `cogito-core` will split into `cogito-core` (Brain) + `cogito-runtime` (Runtime) when ADR-0004 §4 triggers fire (e.g., a second Runtime is needed, or Brain is tempted to peek into Runtime internals). Today the boundary is enforced by module discipline.
+- **Crate-naming principle (ADR-0024)**: crate names label layers / roles, not implementations. Multiple impls live as modules or Cargo features inside one umbrella crate (`cogito-store`, `cogito-context`). Surface crates (`cogito-cli`, `cogito-tui`) and single-purpose crates (`cogito-protocol`, `cogito-sandbox`, `cogito-jobs`) are exempt.
 
 ## Trait contracts in `cogito-protocol`
 
 | Trait | Implemented by | Defines | When |
 |---|---|---|---|
-| `ConversationStore` | `cogito-store-*` crates + consumer | Append-only event log read / append / range / tail | v0.1 |
+| `ConversationStore` | `cogito-store` (feature-gated backends: `jsonl` default, `postgres` v0.4, `http` v0.6) + consumer | Append-only event log read / append / range / tail | v0.1 |
 | `ConversationEvent` (type) | (value type) | Wire format of every event, with `schema_version: u32` and `Vec<ContentBlock>` content | v0.1 |
-| `ContentBlock` (type) | (value type) | Tagged union of `Text` / `ToolUse` / `ToolResult` / `Image` / ... | v0.1 (Text + ToolUse + ToolResult); `Image` lands v0.2 |
+| `ContentBlock` (type) | (value type) | Tagged union of `Text` / `ToolUse` / `ToolResult` / `Thinking` / `Image` / ... | v0.1 (Text + ToolUse + ToolResult; `Thinking` added Sprint 4.7 per ADR-0019); `Image` lands v0.5 (moved from v0.2 by 2026-05-22 rebalance) |
 | `ModelGateway` | `cogito-model::anthropic` + `cogito-model::openai_compat` (v0.1 Sprint 2); future provider adapters | `async fn stream(input, ctx) -> BoxStream<Result<ModelEvent, ModelError>>`; provider adapter pre-aggregates per-content-block sealed events (`TextBlockCompleted`, `ToolUseCompleted`, `MessageCompleted`). See `cogito-protocol::gateway`. | v0.1 |
 | `ModelInput` / `ModelOutput` / `ModelEvent` / `Message` / `ModelParams` / `StopReason` / `Usage` / `ModelError` (types) | (value types in `cogito-protocol::gateway`) | Provider-agnostic shapes consumed by `ModelGateway`; `Message` is `User { content: Vec<ContentBlock> }` ｜ `Assistant { content: Vec<ContentBlock> }` — tool_result lives inside `Message::User` per Anthropic semantics | v0.1 |
 | `HarnessStrategy` / `ToolFilter` (types) | (value types in `cogito-protocol::strategy`) | Per-turn behavior knobs: name, system_prompt, allowed_tools, tool_order, model_params, max_turns. v0.1 Sprint 2 ships `default_with_model` factory; Sprint 6 adds YAML registry. | v0.1 |
-| `ExecCtx` (type) | (value type in `cogito-protocol::exec_ctx`) | Per-invocation context handed to every tool/hook: `session_id`, `turn_id`, `deadline: Option<Instant>`, `cancel: CancellationToken`. v0.2 adds `storage`; v0.4 adds `tenant`. | v0.1 |
-| `ToolProvider` | `cogito-tools` / `cogito-mcp` / `cogito-subagent` / consumer | Tool catalog + `invoke(name, args, ctx) → InvokeOutcome` | v0.1 |
+| `ExecCtx` (type) | (value type in `cogito-protocol::exec_ctx`) | Per-invocation context handed to every tool/hook: `session_id`, `turn_id`, `deadline: Option<Instant>`, `cancel: CancellationToken`. v0.2 adds `brain_spawner` (for Subagent S2 delegate); v0.4 adds `tenant`; v0.5 adds `storage`. | v0.1 |
+| `ToolProvider` | `cogito-tools` / `cogito-mcp` / `cogito-skills` (Skill activation) / `cogito-core::runtime::subagent` / `cogito-plugin` (composed) / consumer | Tool catalog + `invoke(name, args, ctx) → InvokeOutcome` | v0.1 |
 | `JobManager` | `cogito-jobs` / consumer | Async work state tracking (`status` / `result` / `cancel`) plus mailbox-injected completion callback (`on_complete`). Submission lives on the concrete `LocalJobManager` type per ADR-0004 (Hands-internal). | v0.1 |
-| `HookHandler` | (Sprint 7) | Brain-side policy gates (see H09) | v0.1 |
+| `HookHandler` / `HookProvider` | `cogito-core::harness::hook` impls + `cogito-plugin` (composed) + consumer | Brain-side policy gates (see H09) | v0.1 (Sprint 5) |
+| `Compactor` / `HistoryProjector` / `SystemPromptInjector` | `cogito-context::compactor::*` / `cogito-context::projector::*` / `cogito-context::injector::*` + consumer | Context lifecycle:  when to compact, how to project history into the prompt, how to inject system prompts / skill descriptions / tool-filter overrides. See ADR-0008. | v0.1 (Sprint 6) |
+| `SkillProvider` | `cogito-skills` + `cogito-plugin` (composed) + consumer | Skill registry (`list()` → name+description+source for "Available Skills" block; `load(name)` → full SKILL.md text on activation). See ADR-0020. | v0.1 (Sprint 7) |
 | `StreamEvent` (type) | (value type) | Real-time event stream observable via `SessionHandle::subscribe()`; broadcast fanout; per-chunk text deltas; not persisted (see spec §7) | v0.1 |
 | `ExecutionClass` (type) | (value type) | `ToolDescriptor.execution_class` ∈ {`AlwaysSync`, `AlwaysAsync`, `Adaptive`}; H08 uses it to validate `InvokeOutcome` variant (see spec §6) | v0.1 |
 | `TurnOutcome` / `TurnFailureReason` (types) | (value types) | Terminal turn states + structured failure reasons returned by the actor (see spec §9) | v0.1 |
-| `StorageSystem` | `cogito-storage-*` / consumer | Non-text I/O via URI strings: `resolve` / `open` / `create` | v0.2 |
-| `BrainSpawner` | `cogito-core::runtime` | Recursive Brain spawning — used only by `cogito-subagent` | v0.3 |
+| `StorageSystem` | `cogito-storage-*` / consumer | Non-text I/O via URI strings: `resolve` / `open` / `create` | v0.5 (moved from v0.2 by 2026-05-22 rebalance) |
+| `BrainSpawner` | `cogito-core::runtime` | Recursive Brain spawning — used by `cogito-core::runtime::subagent` in v0.2 (S2 minimal) and by `cogito-subagent` if extracted in v0.3 (S1 full) | v0.2 (sync only) → v0.3 (full lifecycle: spawn / wait / send_input / cancel + parent-child event tree) |
 | `MetricsRecorder` | `cogito-observability-otel` / consumer | Pluggable metrics sink (no hard Prometheus dep) | v0.4 |
 
 > **Harness-internal value types** (`TurnState`, `TurnCtx`, `TurnDeps`,
@@ -696,12 +712,12 @@ adds a specific capability without breaking prior protocol guarantees
 
 | Version | Theme | What's added |
 |---|---|---|
-| **v0.1** | Foundation | 7 core crates + JSONL store + Anthropic gateway + minimal tools (`read_file`, etc.) + 11-component Brain skeleton + state machine + chaos test |
-| **v0.2** | Storage + Multimodal | `StorageSystem` trait + `cogito-storage-local` + full `Vec<ContentBlock>` upgrade + `ExecCtx.storage` field + `cogito-tools-multimedia` starter (one tool: `transcribe_audio`) + MCP adapter |
-| **v0.3** | Subagent | `BrainSpawner` trait + `cogito-subagent` crate + 4 subagent tools + session metadata (`parent_session_id`, `depth`) + new `ConversationEvent` variants |
-| **v0.4** | SaaS-ready | `cogito-store-postgres` + `cogito-storage-s3` + `TenantContext` (optional field on `ExecCtx`) + `MetricsRecorder` trait + `cogito-observability-otel` + resource budget enforcement + ADR-0012 / 0013 (sandbox lifecycle, credential isolation) |
-| **v0.5** | Multimedia breadth | Expand `cogito-tools-multimedia` (extract_frames, summarize_video, describe_image, analyze_frame, synthesize_speech) + opt-in `model_visible` ContentBlock wired through ModelGateway adapters |
-| **v0.6** | Hardening | Hook policy maturity + load tests + soak tests + migration tooling docs + `cogito-storage-http` + Storage HTTP wire protocol (ADR-0015) |
+| **v0.1** | Foundation | Brain skeleton + state machine + `cogito-store` (JSONL default) + Anthropic + OpenAI-compat gateways + MCP (Sprint 4) + Hook impl (Sprint 5) + Context Management trait freeze + first Compactor (Sprint 6) + Skill loader (Sprint 7) + Async Jobs (Sprint 8) + Multi-model strategy + TUI (Sprint 9) + chaos tests |
+| **v0.2** | Extensibility | Subagent S2 minimal (`delegate` tool, lives in `cogito-core::runtime::subagent`; `BrainSpawner` trait added to protocol) + `cogito-plugin` crate (manifest parsing + bundle loading + provider composition; local-path-only distribution) |
+| **v0.3** | Distributed Collaboration | Subagent S1 full (`BrainSpawner` 4-tool surface, parent-child event tree, crash semantics, depth limits) + Plugin git distribution (`cogito.lock` + `cogito plugin sync` + commit pinning) |
+| **v0.4** | SaaS-ready | `cogito-store --features postgres` + `cogito-storage-s3` + `TenantContext` (optional field on `ExecCtx`) + `MetricsRecorder` trait + `cogito-observability-otel` + resource budget enforcement + ADR-0012 / 0013 (sandbox lifecycle, credential isolation) |
+| **v0.5** | Storage + Multimodal | `StorageSystem` trait + `cogito-storage-local` + full multimedia tool catalog (`cogito-tools-multimedia`: transcribe_audio, extract_frames, summarize_video, describe_image, analyze_frame, synthesize_speech) + `ContentBlock::Image` end-to-end through `ModelGateway` adapters + `outputs_model_visible_multimodal` flag in H05. **Theme absorbs original v0.2 + original v0.5** per 2026-05-22 rebalance. |
+| **v0.6** | Hardening + Marketplace spike | Hook policy maturity + load tests + soak tests + migration tooling docs + `cogito-storage-http` + Storage HTTP wire protocol (ADR-0015) + Plugin marketplace (P3) design spike |
 | **v1.0** | API freeze | Public API stability commitment + event log forward-compat strict mode + 1.0 GA release |
 | **v1.x+** | Advanced | Resource Registry (P4) + cross-brain hand sharing + real-time video + generative video + MCP resources/prompts/sampling |
 
@@ -716,39 +732,54 @@ adds a specific capability without breaking prior protocol guarantees
 | **ADR-0005** | **Production scope, quality gates, SLO posture, compatibility commitments** | **Accepted (v0.1)** |
 | **ADR-0006** | **Runtime + H01 Turn Driver execution model** | **Accepted (v0.1); amended 2026-05-19 (PR #6) — `ContextManaged` FSM state added** |
 | **ADR-0007** | **Event log as cross-language storage contract** | **In flight (PR #6, v0.1 Sprint 1)** |
-| ADR-0008 | Context Management (`H11 Context Manage` mechanism: compaction, system-prompt injection, tool-filter overrides) | TBD — initiative post-Sprint 2; architectural slot locked by ADR-0006 amendment |
-| ADR-0009 | `StorageSystem` trait + URI scheme + `ContentBlock` upgrade | TBD (v0.2) — renumbered from ADR-0007 by PR #6 |
-| ADR-0010 | Multimedia tool conventions (MIME, `model_visible` flag, etc.) | TBD (v0.2) — renumbered from ADR-0008 |
-| ADR-0011 | Subagent execution model (BrainSpawner + 4 tools + session tree) | TBD (v0.3) — renumbered from ADR-0009 |
-| ADR-0012 | Sandbox lifecycle (lazy provisioning, pets-vs-cattle) | TBD (v0.4) — renumbered from ADR-0010 |
-| ADR-0013 | Credential isolation (sandbox proxy pattern, vault integration) | TBD (v0.4) — renumbered from ADR-0011 |
-| ADR-0014 | TenantContext propagation + multi-tenant SaaS conventions | TBD (v0.4) — renumbered from ADR-0012 |
-| ADR-0015 | Storage HTTP wire protocol (originally ADR-0006 → ADR-0013 → ADR-0015 across renumberings) | TBD (v0.6) |
+| ADR-0008 | Context Management (Compactor / HistoryProjector / SystemPromptInjector trait freeze + event variants + first Compactor impl) | TBD — **promoted from spike to v0.1 Sprint 6** by 2026-05-22 rebalance |
+| ADR-0009 | `StorageSystem` trait + URI scheme + `ContentBlock::Image` | TBD — **moved from v0.2 to v0.5** by 2026-05-22 rebalance |
+| ADR-0010 | Multimedia tool conventions (MIME, `model_visible` flag, etc.) | TBD — **moved from v0.2 to v0.5** by 2026-05-22 rebalance |
+| ADR-0011 | Subagent execution model | TBD — **split** by 2026-05-22 rebalance: v0.2 Sprint 11 ships minimal `delegate` tool (no parent-child event tree); v0.3 amendment adds full `BrainSpawner` + 4-tool surface |
+| ADR-0012 | Sandbox lifecycle (lazy provisioning, pets-vs-cattle) | TBD (v0.4) |
+| ADR-0013 | Credential isolation (sandbox proxy pattern, vault integration) | TBD (v0.4) |
+| ADR-0014 | TenantContext propagation + multi-tenant SaaS conventions | TBD (v0.4) |
+| ADR-0015 | Storage HTTP wire protocol | TBD (v0.6) |
+| [ADR-0016](docs/adr/0016-turn-trigger-abstraction.md) | Turn-trigger abstraction | Accepted (v0.1) |
+| [ADR-0017](docs/adr/0017-cogito-runtime-configuration-model.md) | Cogito Runtime configuration model | Accepted (v0.1 Sprint 4.5) |
+| [ADR-0018](docs/adr/0018-mcp-integration.md) | MCP integration (`cogito-mcp` + `rmcp` 1.5) | Accepted (v0.1 Sprint 4) |
+| [ADR-0019](docs/adr/0019-reasoning-content-modeling.md) | Reasoning content modeling + event scope | Accepted (v0.1 Sprint 4.7) |
+| [ADR-0020](docs/adr/0020-skill-loader.md) | Skill loader (`cogito-skills`, K5 sigil activation, scope precedence, SKILL.md frontmatter, scripts deferred) | Proposed — finalized in v0.1 Sprint 7 |
+| [ADR-0021](docs/adr/0021-plugin-manifest-and-loader.md) | Plugin manifest + loader (`cogito-plugin`, TOML primary + Claude-plugin JSON compat read, namespace, local-path-only v0.2) | Proposed — finalized in v0.2 Sprint 12 |
+| [ADR-0022](docs/adr/0022-plugin-distribution.md) | Plugin distribution (git fetch + lock file + `cogito plugin sync`) | Proposed — finalized in v0.3 |
+| [ADR-0023](docs/adr/0023-bundled-script-execution.md) | Bundled-script execution in Skills | **Deliberately deferred** — records design space, revisit when concrete use case surfaces or Subagent v0.3 lands |
+| [ADR-0024](docs/adr/0024-crate-naming-consolidation.md) | Crate naming consolidation (`cogito-store-jsonl` → `cogito-store` rename, name-by-layer/role principle) | Proposed — finalized in rename PR pre-v0.1.0 tag |
 
 ## v0.1 scope (IN / OUT)
 
 | Concern | v0.1 in | later 0.x | permanently out | notes |
 |---|:---:|:---:|:---:|---|
-| Brain (H01–H10) | ✅ | | | sprint 1–6 range |
+| Brain (H01–H11) | ✅ | | | H11 Context Manage real (not pass-through) since Sprint 6 |
 | Event sourcing + `ConversationEvent::schema_version` | ✅ | | | day 1 |
-| `cogito-store-jsonl` backend | ✅ | | | sole v0.1 store |
-| Postgres / HTTP storage backends | | ✅ | | v0.4 / v0.6 |
-| `Vec<ContentBlock>` (Text + ToolUse + ToolResult) | ✅ | | | day 1 |
-| `ContentBlock::Image` + opt-in multimodal | | ✅ | | v0.2 / v0.5 |
-| `StorageSystem` trait | | ✅ | | v0.2 (ADR-0007) |
-| Anthropic + OpenAI gateways | ✅ | | | reference Boundary impls |
+| `cogito-store` (JSONL default feature) | ✅ | | | renamed from `cogito-store-jsonl` before v0.1.0 tag per ADR-0024 |
+| Postgres / HTTP storage backends | | ✅ | | v0.4 / v0.6 as `cogito-store --features postgres/http` |
+| `Vec<ContentBlock>` (Text + ToolUse + ToolResult + Thinking) | ✅ | | | Thinking added Sprint 4.7 (ADR-0019) |
+| `ContentBlock::Image` + opt-in multimodal | | ✅ | | **v0.5** (moved from v0.2 by 2026-05-22 rebalance) |
+| `StorageSystem` trait | | ✅ | | **v0.5** (moved from v0.2 by 2026-05-22 rebalance; ADR-0009) |
+| Anthropic + OpenAI-compat gateways | ✅ | | | reference Boundary impls; OpenAI Responses API in Sprint 9 |
 | Builtin tools + subprocess sandbox | ✅ | | | reference Hands impls |
-| Async `JobManager` (local) | ✅ | | | sprint 4 |
-| MCP client as `ToolProvider` | | ✅ | | v0.2 |
-| Subagent layer (`cogito-subagent`) | | ✅ | | v0.3 (ADR-0011) |
-| Hooks (H09) | ✅ | | | sprint 6 |
-| TUI surface | | ✅ | | may slide to v0.2 |
+| MCP client as `ToolProvider` | ✅ | | | Sprint 4 (ADR-0018) — **pulled forward from v0.2** |
+| Hooks (H09) real implementation | ✅ | | | Sprint 5 — **promoted from Sprint 7 upper half** |
+| Context Management (`cogito-context` + Compactor / Projector / Injector traits) | ✅ | | | Sprint 6 (ADR-0008) — **promoted from post-Sprint-2 spike** |
+| Skill loader (`cogito-skills`, agentskills.io-compatible) | ✅ | | | Sprint 7 (ADR-0020) — **new in v0.1** per 2026-05-22 rebalance |
+| Async `JobManager` (local) | ✅ | | | Sprint 8 (renumbered from old Sprint 5) |
+| Multi-model strategy registry + TUI | ✅ | | | Sprint 9 (merged from old Sprint 6 + old Sprint 7 lower half) |
+| Subagent layer — minimal `delegate` tool | | ✅ | | **v0.2** Sprint 11 (lives in `cogito-core::runtime::subagent`; no new crate) |
+| Subagent layer — full `BrainSpawner` (4 tools, event tree) | | ✅ | | **v0.3** (ADR-0011 amendment) |
+| Plugin loader (`cogito-plugin`, local-path) | | ✅ | | **v0.2** Sprint 12 (ADR-0021) |
+| Plugin distribution (git fetch + lock) | | ✅ | | **v0.3** (ADR-0022) |
+| Plugin marketplace (HTTP index, signing) | | ✅ | | v0.6+ spike (ADR-0023+) |
 | Observability (`tracing` + `MetricsRecorder` trait) | ✅ | | | day 1 |
 | OTel / Prometheus adapters | | ✅ | | v0.4 |
 | Per-session resource budget (timeout / mem) | ✅ | | | day 1 |
 | Process-level panic catch boundary | ✅ | | | day 1 |
-| Secret / PII redaction | trait + default no-op | full policy | | trait day-1; default redactor v0.2 |
-| Blob store (P3) — via `StorageSystem` | | ✅ | | v0.2 |
+| Secret / PII redaction | trait + default no-op | full policy | | trait day-1; default redactor moved to v0.5 with multimodal |
+| Blob store (P3) — via `StorageSystem` | | ✅ | | v0.5 (moved with `StorageSystem`) |
 | Resource registry (P4) | | tbd | | v1.x; ADR pending |
 | Multi-tenant isolation | | | ❌ | consumer / future SaaS |
 | End-user authentication | | | ❌ | consumer |
