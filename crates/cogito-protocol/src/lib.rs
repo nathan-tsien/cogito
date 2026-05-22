@@ -48,8 +48,8 @@ pub mod turn_trigger;
 pub use content::ContentBlock;
 pub use context::{
     CompactionApplied, CompactionInput, CompactionKind, CompactionReplacement, Compactor,
-    ContextDecisionErrors, ContextError, HistoryProjector, ProjectedMessage,
-    ToolFilterOverrideMode,
+    ContextDecisionErrors, ContextError, HistoryProjector, InjectionInput, ProjectedMessage,
+    SystemPromptInjector, ToolFilterInput, ToolFilterOverrideMode, ToolFilterOverrider,
 };
 pub use event::{ConversationEvent, EventCategory, EventPayload, SCHEMA_VERSION};
 pub use exec_ctx::ExecCtx;

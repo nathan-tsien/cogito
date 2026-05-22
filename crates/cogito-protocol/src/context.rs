@@ -9,6 +9,7 @@ use thiserror::Error;
 
 use crate::content::ContentBlock;
 use crate::event::ConversationEvent;
+use crate::exec_ctx::ExecCtx;
 use crate::gateway::ModelError;
 use crate::gateway::{ModelGateway, Usage};
 use crate::ids::{EventId, SessionId, TurnId};
@@ -198,5 +199,71 @@ pub trait HistoryProjector: Send + Sync {
     ) -> Vec<ProjectedMessage>;
 
     /// Stable identifier for tracing and logging (e.g. `"default"`, `"compaction-aware"`).
+    fn id(&self) -> &'static str;
+}
+
+/// Input handed to `SystemPromptInjector::inject`.
+pub struct InjectionInput<'a> {
+    /// Session identifier for the current turn.
+    pub session_id: SessionId,
+    /// Turn identifier for the current turn.
+    pub turn_id: TurnId,
+    /// Per-turn strategy knobs (system prompt, model params, tool filter).
+    pub strategy: &'a HarnessStrategy,
+    /// Full event history as loaded by H11 before the turn begins.
+    pub history: &'a [ConversationEvent],
+    /// Per-invocation execution context handed to every component.
+    pub exec_ctx: &'a ExecCtx,
+    /// Event recorder used to persist `SystemPromptInjected` events.
+    pub recorder: &'a mut dyn EventRecorder,
+}
+
+/// Produce per-turn additions to `strategy.system_prompt`.
+///
+/// MUST write a `SystemPromptInjected` event every turn (even when the
+/// suffix is empty). MUST be idempotent on `turn_id` for resume safety:
+/// if a `SystemPromptInjected` event already exists in history for this
+/// turn, return its `EventId` without writing a new one.
+#[async_trait]
+pub trait SystemPromptInjector: Send + Sync {
+    /// Compute this turn's suffix and persist a `SystemPromptInjected` event.
+    ///
+    /// Returns the `EventId` of the written (or already-existing) event.
+    async fn inject(&self, input: InjectionInput<'_>) -> Result<EventId, ContextError>;
+
+    /// Stable identifier for this injector implementation (e.g. `"noop"`, `"date-injector"`).
+    fn id(&self) -> &'static str;
+}
+
+/// Input handed to `ToolFilterOverrider::override_filter`.
+pub struct ToolFilterInput<'a> {
+    /// Session identifier for the current turn.
+    pub session_id: SessionId,
+    /// Turn identifier for the current turn.
+    pub turn_id: TurnId,
+    /// Per-turn strategy knobs (system prompt, model params, tool filter).
+    pub strategy: &'a HarnessStrategy,
+    /// Full event history as loaded by H11 before the turn begins.
+    pub history: &'a [ConversationEvent],
+    /// Per-invocation execution context handed to every component.
+    pub exec_ctx: &'a ExecCtx,
+    /// Event recorder used to persist `ToolFilterOverridden` events.
+    pub recorder: &'a mut dyn EventRecorder,
+}
+
+/// Decide per-turn tool-filter override on top of `strategy.allowed_tools`.
+///
+/// MUST write a `ToolFilterOverridden` event every turn (`Inherit` counts
+/// as ran). MUST be idempotent on `turn_id` for resume safety: if a
+/// `ToolFilterOverridden` event already exists in history for this turn,
+/// return its `EventId` without writing a new one.
+#[async_trait]
+pub trait ToolFilterOverrider: Send + Sync {
+    /// Compute this turn's mode and persist a `ToolFilterOverridden` event.
+    ///
+    /// Returns the `EventId` of the written (or already-existing) event.
+    async fn override_filter(&self, input: ToolFilterInput<'_>) -> Result<EventId, ContextError>;
+
+    /// Stable identifier for this overrider implementation (e.g. `"noop"`, `"plugin-overrider"`).
     fn id(&self) -> &'static str;
 }
