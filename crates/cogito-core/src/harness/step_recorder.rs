@@ -327,13 +327,11 @@ impl StepRecorder {
         produced_by: impl Into<String>,
     ) -> Result<EventId, StoreError> {
         self.ensure_prior_history_loaded().await?;
-        if let Some(existing_id) = self.history_cache.iter().find_map(|ev| {
-            match &ev.payload {
-                EventPayload::SystemPromptInjected { turn_id: t, .. } if *t == turn_id => {
-                    Some(ev.event_id)
-                }
-                _ => None,
+        if let Some(existing_id) = self.history_cache.iter().find_map(|ev| match &ev.payload {
+            EventPayload::SystemPromptInjected { turn_id: t, .. } if *t == turn_id => {
+                Some(ev.event_id)
             }
+            _ => None,
         }) {
             return Ok(existing_id);
         }
@@ -363,13 +361,11 @@ impl StepRecorder {
         produced_by: impl Into<String>,
     ) -> Result<EventId, StoreError> {
         self.ensure_prior_history_loaded().await?;
-        if let Some(existing_id) = self.history_cache.iter().find_map(|ev| {
-            match &ev.payload {
-                EventPayload::ToolFilterOverridden { turn_id: t, .. } if *t == turn_id => {
-                    Some(ev.event_id)
-                }
-                _ => None,
+        if let Some(existing_id) = self.history_cache.iter().find_map(|ev| match &ev.payload {
+            EventPayload::ToolFilterOverridden { turn_id: t, .. } if *t == turn_id => {
+                Some(ev.event_id)
             }
+            _ => None,
         }) {
             return Ok(existing_id);
         }
@@ -1087,7 +1083,10 @@ mod tests {
             .record_system_prompt_injected(turn, "b".into(), vec![], "none")
             .await?;
 
-        assert_eq!(first, second, "must return same EventId, must not double-write");
+        assert_eq!(
+            first, second,
+            "must return same EventId, must not double-write"
+        );
         // Only one event written.
         assert_eq!(store.latest_seq(sid).await?, Some(0));
         Ok(())
@@ -1121,7 +1120,10 @@ mod tests {
             )
             .await?;
 
-        assert_eq!(first, second, "must return same EventId, must not double-write");
+        assert_eq!(
+            first, second,
+            "must return same EventId, must not double-write"
+        );
         // Only one event written.
         assert_eq!(store.latest_seq(sid).await?, Some(0));
         Ok(())
