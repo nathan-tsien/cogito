@@ -37,6 +37,11 @@ rstest.workspace = true
 insta.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "hook_latency"
+harness = false
 
 [lints]
 workspace = true

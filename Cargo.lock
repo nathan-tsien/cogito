@@ -417,6 +417,7 @@ dependencies = [
  "cogito-store-jsonl",
  "cogito-test-fixtures",
  "cogito-tools",
+ "criterion",
  "dashmap",
  "futures",
  "insta",
