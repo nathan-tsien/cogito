@@ -99,14 +99,26 @@ pub struct ChatArgs {
     pub system: Option<String>,
 }
 
-/// Resolve the open mode from CLI flags. Returns an error when the
-/// combination is incoherent (e.g. `--mode new` with `--session-id`,
-/// which would always collide).
+/// Resolve the open mode from CLI flags. Rejects incoherent
+/// combinations early — `--mode resume` / `--mode attach` without a
+/// `--session-id` would otherwise silently try to resume a freshly
+/// minted ULID and bottom out in an opaque
+/// `ResumeFailed("no such session in store")` from the runtime.
 fn resolve_mode(args: &ChatArgs) -> Result<ChatMode> {
     let has_id = args.session_id.is_some();
     match (args.mode, has_id) {
         (Some(ChatMode::New), true) => Err(anyhow!(
             "--mode new conflicts with --session-id; drop one or use --mode attach"
+        )),
+        (Some(ChatMode::Resume), false) => Err(anyhow!(
+            "--mode resume requires --session-id (the session to resume). \
+             Tip: when invoking via `make chat`, the Make variable is \
+             `SESSION_ID=…` (underscore), not `SESSION-ID=…`."
+        )),
+        (Some(ChatMode::Attach), false) => Err(anyhow!(
+            "--mode attach requires --session-id (the session to attach to). \
+             Tip: when invoking via `make chat`, the Make variable is \
+             `SESSION_ID=…` (underscore), not `SESSION-ID=…`."
         )),
         (Some(m), _) => Ok(m),
         (None, true) => Ok(ChatMode::Attach),
@@ -538,6 +550,30 @@ mod tests {
         let msg = format!("{err}");
         assert!(
             msg.contains("--mode new conflicts with --session-id"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn resolve_mode_resume_without_session_id_is_an_error() {
+        let err = resolve_mode(&args_with(Some(ChatMode::Resume), None)).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("--mode resume requires --session-id"),
+            "unexpected error: {msg}"
+        );
+        assert!(
+            msg.contains("SESSION_ID") && msg.contains("SESSION-ID"),
+            "error should hint about the SESSION_ID vs SESSION-ID Make-variable pitfall: {msg}"
+        );
+    }
+
+    #[test]
+    fn resolve_mode_attach_without_session_id_is_an_error() {
+        let err = resolve_mode(&args_with(Some(ChatMode::Attach), None)).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("--mode attach requires --session-id"),
             "unexpected error: {msg}"
         );
     }
