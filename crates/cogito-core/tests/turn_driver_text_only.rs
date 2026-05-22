@@ -14,6 +14,7 @@ use cogito_core::harness::turn_driver::state::TurnCtx;
 use cogito_core::harness::turn_driver::{TurnEntry, enter_turn};
 use cogito_mock_model::MockModelGateway;
 use cogito_protocol::ExecCtx;
+use cogito_protocol::NoOpMetricsRecorder;
 use cogito_protocol::gateway::{ModelEvent, StopReason, Usage};
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::strategy::HarnessStrategy;
@@ -71,6 +72,7 @@ async fn text_only_turn_reaches_completed() -> Result<(), Box<dyn std::error::Er
         model: mock,
         tools,
         hooks: Arc::new(CompositeHookPipeline::default()),
+        metrics: Arc::new(NoOpMetricsRecorder),
     };
 
     let ctx = TurnCtx {

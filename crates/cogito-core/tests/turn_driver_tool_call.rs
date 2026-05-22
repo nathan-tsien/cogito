@@ -14,6 +14,7 @@ use cogito_core::harness::turn_driver::state::TurnCtx;
 use cogito_core::harness::turn_driver::{TurnEntry, enter_turn};
 use cogito_mock_model::MockModelGateway;
 use cogito_protocol::ExecCtx;
+use cogito_protocol::NoOpMetricsRecorder;
 use cogito_protocol::event::EventPayload;
 use cogito_protocol::gateway::{ModelEvent, StopReason, Usage};
 use cogito_protocol::ids::{SessionId, TurnId};
@@ -102,6 +103,7 @@ async fn tool_call_completes_via_second_model_call() -> Result<(), Box<dyn std::
         model: Arc::clone(&mock) as Arc<dyn cogito_protocol::gateway::ModelGateway>,
         tools,
         hooks: Arc::new(CompositeHookPipeline::default()),
+        metrics: Arc::new(NoOpMetricsRecorder),
     };
 
     let ctx = TurnCtx {
@@ -195,6 +197,7 @@ async fn invalid_tool_args_persist_error_result() -> Result<(), Box<dyn std::err
         model: Arc::clone(&mock) as Arc<dyn cogito_protocol::gateway::ModelGateway>,
         tools,
         hooks: Arc::new(CompositeHookPipeline::default()),
+        metrics: Arc::new(NoOpMetricsRecorder),
     };
 
     let ctx = TurnCtx {

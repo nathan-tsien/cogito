@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cogito_protocol::ExecCtx;
+use cogito_protocol::MetricsRecorder;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::{SessionId, TurnId};
@@ -92,6 +93,10 @@ pub(super) struct SessionState {
     pub(super) recorder: Arc<Mutex<StepRecorder>>,
     /// Store handle for replay and recorder construction.
     pub(super) store: Arc<dyn ConversationStore>,
+    /// Hook pipeline shared across all turns in this session.
+    pub(super) hooks: Arc<CompositeHookPipeline>,
+    /// Metrics sink for this session (defaults to `NoOpMetricsRecorder` until v0.4 wires a real adapter).
+    pub(super) metrics: Arc<dyn MetricsRecorder>,
 }
 
 /// External dependencies injected at spawn time.
@@ -327,7 +332,8 @@ fn spawn_turn_driver(
         store: Arc::clone(&state.store),
         model: Arc::clone(&deps.model),
         tools: Arc::clone(&deps.tools),
-        hooks: Arc::new(CompositeHookPipeline::default()),
+        hooks: Arc::clone(&state.hooks),
+        metrics: Arc::clone(&state.metrics),
     };
     let result_tx = state.turn_result_tx.clone();
     tokio::spawn(async move {

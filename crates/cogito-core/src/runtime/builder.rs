@@ -153,6 +153,8 @@ impl Runtime {
             broadcast_tx: broadcast_tx.clone(),
             recorder: Arc::clone(&recorder),
             store: Arc::clone(&self.store),
+            hooks: Arc::new(crate::harness::hooks::CompositeHookPipeline::default()),
+            metrics: Arc::new(cogito_protocol::NoOpMetricsRecorder),
         };
 
         let deps = SessionDeps {

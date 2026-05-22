@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use cogito_protocol::MetricsRecorder;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::tool::ToolProvider;
@@ -30,6 +31,8 @@ pub struct TurnDeps {
     pub model: Arc<dyn ModelGateway>,
     /// Tool provider exposed to the model.
     pub tools: Arc<dyn ToolProvider>,
-    /// Hook pipeline (Sprint 5: composite, stub lifecycle methods until Task 5).
+    /// Hook pipeline (Sprint 5: lifecycle methods wired in Task 5).
     pub hooks: Arc<CompositeHookPipeline>,
+    /// Metrics sink (Sprint 5: defaults to `NoOpMetricsRecorder`; real adapter wired in v0.4).
+    pub metrics: Arc<dyn MetricsRecorder>,
 }
