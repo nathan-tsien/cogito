@@ -186,6 +186,21 @@ pub enum EventPayload {
         /// Schema is provider-specific; cogito does not interpret it.
         provider_opaque: Option<serde_json::Value>,
     },
+
+    /// An H09 hook returned `HookDecision::Reject` at the named
+    /// lifecycle point. The turn that follows transitions to `Failed`
+    /// with `TurnFailureReason::HookRejected { hook_name, message }`.
+    ///
+    /// Added Sprint 5 as an additive variant under ADR-0007. No
+    /// `SCHEMA_VERSION` bump.
+    HookRejected {
+        /// Name of the hook (from `HookHandler::name()`).
+        hook_name: String,
+        /// Lifecycle point at which the rejection occurred.
+        point: crate::hook::HookLifecyclePoint,
+        /// Rejection reason from `HookDecision::Reject`.
+        reason: String,
+    },
 }
 
 #[cfg(test)]
@@ -231,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn all_fifteen_variants_roundtrip() -> serde_json::Result<()> {
+    fn all_sixteen_variants_roundtrip() -> serde_json::Result<()> {
         // Covers every EventPayload variant. When a new variant is added,
         // add it here too and rename the test to match the new count.
         //
@@ -291,6 +306,11 @@ mod tests {
             EventPayload::ThinkingBlockRecorded {
                 text: "I should grep for the symbol.".into(),
                 provider_opaque: Some(serde_json::json!({"signature": "abc123"})),
+            },
+            EventPayload::HookRejected {
+                hook_name: "sensitive-content".into(),
+                point: crate::hook::HookLifecyclePoint::PreDispatch,
+                reason: "AWS key in args".into(),
             },
         ];
         for v in variants {
