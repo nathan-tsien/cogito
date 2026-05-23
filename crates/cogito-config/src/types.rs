@@ -77,6 +77,7 @@ pub struct RuntimeConfigPartial {
 
 /// `[skills]` cogito.toml section.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SkillsConfig {
     /// Master switch. When `false`, `RuntimeBuilder` receives no `SkillProvider`
     /// and selecting `SystemPromptInjectorConfig::Skill` fails at build time.
@@ -240,6 +241,24 @@ mod tests {
             panic!("expected ConfigParse");
         };
         assert_eq!(*index, 1);
+    }
+
+    #[test]
+    fn skills_config_rejects_unknown_field() {
+        // A typo like `userdir` (missing underscore) must surface rather
+        // than silently degrade to the default.
+        let toml_str = r#"
+            [skills]
+            enabled = true
+            userdir = "/tmp/skills"
+        "#;
+        let err = toml::from_str::<RuntimeConfigPartial>(toml_str)
+            .expect_err("unknown [skills] field must error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("userdir") || msg.contains("unknown"),
+            "error should mention the offending field, got: {msg}"
+        );
     }
 
     #[test]

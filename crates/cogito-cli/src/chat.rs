@@ -39,6 +39,12 @@ pub enum SlashError {
     /// fall back to `UserText` to avoid surprising the user.
     #[error("unknown skill: {0}")]
     UnknownSkill(String),
+    /// Skill is registered but its SKILL.md set `user-invocable: false`,
+    /// so the slash channel must not activate it. Surface as a
+    /// distinct error so the REPL can tell the user *why* the slash
+    /// invocation was rejected.
+    #[error("skill not user-invocable: {0}")]
+    NotUserInvocable(String),
     /// User typed bare `/skill` with no arguments.
     #[error("missing skill name after /skill")]
     Empty,
@@ -59,22 +65,26 @@ pub enum SlashError {
 /// MUST be registered; otherwise we return
 /// [`SlashError::UnknownSkill`].
 ///
-/// `is_registered` is a closure over the
-/// [`cogito_protocol::skill::SkillProvider::is_registered`] check so
+/// `is_registered` and `is_user_invocable` are closures over the
+/// corresponding [`cogito_protocol::skill::SkillProvider`] checks so
 /// the parser stays decoupled from the registry's concrete type and
 /// can be exercised with stub registries in tests.
 ///
 /// # Errors
 ///
 /// Returns [`SlashError::Empty`] when the line is exactly `/skill`,
-/// and [`SlashError::UnknownSkill`] when the first token after
-/// `/skill ` is not registered.
-pub fn parse_slash_skill<F>(
+/// [`SlashError::UnknownSkill`] when the first token after `/skill `
+/// is not registered, and [`SlashError::NotUserInvocable`] when the
+/// first token is registered but its `SKILL.md` set
+/// `user-invocable: false`.
+pub fn parse_slash_skill<F, G>(
     line: &str,
     is_registered: &F,
+    is_user_invocable: &G,
 ) -> Result<cogito_protocol::turn_trigger::TurnTrigger, SlashError>
 where
     F: Fn(&str) -> bool,
+    G: Fn(&str) -> bool,
 {
     use cogito_protocol::turn_trigger::TurnTrigger;
     let trimmed = line.trim_start();
@@ -91,6 +101,14 @@ where
     let mut names: Vec<String> = Vec::new();
     let mut text_start: Option<usize> = None;
     let mut cursor = 0usize;
+    // Track the first registered-but-blocked token so we can return a
+    // precise `NotUserInvocable` error after the scan. The blocked
+    // token is treated as a hard reject only when it is the first
+    // token; a blocked token *after* an already-accepted name is
+    // treated as the start of user_text (consistent with how an
+    // unregistered token is handled), since the user's preceding
+    // accepted names are valid activations on their own.
+    let mut first_blocked: Option<String> = None;
     for tok in rest.split_whitespace() {
         // Locate `tok` inside `rest` starting at `cursor` so we can
         // preserve the original spacing of the trailing user text.
@@ -98,16 +116,24 @@ where
         // otherwise lose the user's "do  this" double-spacing.
         let abs = rest[cursor..].find(tok).map_or(cursor, |p| cursor + p);
         cursor = abs + tok.len();
-        if is_registered(tok) && text_start.is_none() {
+        let registered = is_registered(tok);
+        let invocable = registered && is_user_invocable(tok);
+        if invocable && text_start.is_none() {
             names.push(tok.to_string());
         } else {
-            // First non-name token (or unregistered) starts user_text.
+            if registered && !invocable && names.is_empty() && first_blocked.is_none() {
+                first_blocked = Some(tok.to_string());
+            }
+            // First non-name token (or unregistered/non-invocable) starts user_text.
             text_start = Some(abs);
             break;
         }
     }
 
     if names.is_empty() {
+        if let Some(blocked) = first_blocked {
+            return Err(SlashError::NotUserInvocable(blocked));
+        }
         // The first token wasn't registered — hard error.
         let first = rest.split_whitespace().next().unwrap_or("");
         return Err(SlashError::UnknownSkill(first.to_string()));
@@ -507,11 +533,16 @@ async fn dispatch_input_line(
         renderer.prompt_user()?;
         return Ok(InputOutcome::ReDisplayPrompt);
     }
-    // Slash dispatch. The `is_registered` closure is backed by the
-    // injected `SkillProvider`; when no provider was wired
+    // Slash dispatch. The closures are backed by the injected
+    // `SkillProvider`; when no provider was wired
     // (`[skills].enabled = false`), every name is unregistered and
     // `/skill` invocations surface to the user as `UnknownSkill`.
-    let parsed = parse_slash_skill(line, &|n: &str| skills.is_some_and(|s| s.is_registered(n)));
+    // `is_user_invocable` honors `SKILL.md` `user-invocable: false`.
+    let parsed = parse_slash_skill(
+        line,
+        &|n: &str| skills.is_some_and(|s| s.is_registered(n)),
+        &|n: &str| skills.is_some_and(|s| s.get_metadata(n).is_some_and(|m| m.user_invocable)),
+    );
     match parsed {
         Ok(trigger) => {
             handle.submit(trigger).await.context("submit trigger")?;
@@ -519,6 +550,14 @@ async fn dispatch_input_line(
         }
         Err(SlashError::UnknownSkill(name)) => {
             let _ = writeln!(std::io::stderr(), "unknown skill: {name}");
+            renderer.prompt_user()?;
+            Ok(InputOutcome::ReDisplayPrompt)
+        }
+        Err(SlashError::NotUserInvocable(name)) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "skill '{name}' is not user-invocable (SKILL.md set user-invocable: false)"
+            );
             renderer.prompt_user()?;
             Ok(InputOutcome::ReDisplayPrompt)
         }

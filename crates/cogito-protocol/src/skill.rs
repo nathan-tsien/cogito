@@ -23,6 +23,15 @@ pub trait SkillProvider: Send + Sync {
     /// O(1) check used by H06 sigil filter — only registered names
     /// activate; unknown `$X` is treated as literal text.
     fn is_registered(&self, name: &str) -> bool;
+
+    /// Metadata for a single skill (used to enforce
+    /// `disable-model-invocation` / `user-invocable` at activation
+    /// channels). Default impl falls back to a linear scan of `list()`
+    /// so existing third-party impls keep working; impls with an O(1)
+    /// table (e.g. `SkillRegistry`) should override.
+    fn get_metadata(&self, name: &str) -> Option<SkillMetadata> {
+        self.list().into_iter().find(|m| m.name == name)
+    }
 }
 
 /// Lightweight skill descriptor (no body) — used for the system-prompt

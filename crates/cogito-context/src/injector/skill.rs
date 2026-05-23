@@ -140,11 +140,10 @@ fn collect_model_channel(
     current_turn: TurnId,
     provider: &dyn SkillProvider,
 ) -> Vec<String> {
-    // The sigil scanner lives in cogito-skills (Hands layer); cogito-context
-    // is also Hands so the same-layer dep is permitted per ADR-0004.
-    use cogito_skills::sigil::{FenceState, find_sigils_outside_code};
+    // Sigil scanner lives in cogito-protocol so both Brain (H06) and Hands
+    // (this injector) can share the same impl without crossing ADR-0004.
+    use cogito_protocol::sigil::{FenceState, find_sigils_outside_code};
 
-    let mut state = FenceState::default();
     let mut names: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     let mut hit_current = false;
@@ -156,8 +155,24 @@ fn collect_model_channel(
             continue;
         }
         if let EventPayload::AssistantMessageAppended { text } = &ev.payload {
+            // Each AssistantMessageAppended carries one completed text
+            // block; H06 resets fence state at TextBlockCompleted, so the
+            // projection here must reset per event to match.
+            let mut state = FenceState::default();
             for hit in find_sigils_outside_code(&mut state, text) {
-                if provider.is_registered(&hit.name) && seen.insert(hit.name.clone()) {
+                if !provider.is_registered(&hit.name) {
+                    continue;
+                }
+                // Honor SKILL.md `disable-model-invocation: true` — the
+                // skill is still listed in the registry block but the
+                // sigil channel cannot activate it.
+                if provider
+                    .get_metadata(&hit.name)
+                    .is_some_and(|m| m.disable_model_invocation)
+                {
+                    continue;
+                }
+                if seen.insert(hit.name.clone()) {
                     names.push(hit.name);
                 }
             }

@@ -271,6 +271,134 @@ async fn model_channel_activates_from_previous_text_block() {
 }
 
 #[tokio::test]
+async fn model_channel_respects_disable_model_invocation() {
+    // Build a provider whose only skill has `disable_model_invocation: true`.
+    // A $sigil in a prior turn's assistant text must NOT activate it.
+    let provider: Arc<dyn SkillProvider> = Arc::new(StaticProvider {
+        skills: vec![(
+            SkillMetadata {
+                name: "internal".into(),
+                description: "internal-only skill".into(),
+                source: SkillSource::User,
+                disable_model_invocation: true,
+                user_invocable: true,
+                version: None,
+            },
+            "body".into(),
+        )],
+    });
+
+    let mut recorder = InMemoryRecorder::default();
+    let strategy = HarnessStrategy::default_with_model("test");
+    let session_id = SessionId::new();
+    let prev_turn = TurnId::new();
+    let cur_turn = TurnId::new();
+    let exec_ctx = ExecCtx::open_ended(session_id, cur_turn);
+
+    let history = vec![
+        make_event(
+            0,
+            prev_turn,
+            EventPayload::AssistantMessageAppended {
+                text: "I'll use $internal.".into(),
+            },
+        ),
+        make_event(
+            1,
+            cur_turn,
+            EventPayload::TurnStarted {
+                user_input: vec![],
+                activate_skills: vec![],
+            },
+        ),
+    ];
+
+    let input = InjectionInput {
+        session_id,
+        turn_id: cur_turn,
+        strategy: &strategy,
+        history: &history,
+        exec_ctx: &exec_ctx,
+        recorder: &mut recorder,
+    };
+    let _ = SkillInjector::new(provider).inject(input).await.unwrap();
+
+    let activated = recorder
+        .events
+        .iter()
+        .filter(|(_, p)| matches!(p, EventPayload::SkillActivated { .. }))
+        .count();
+    assert_eq!(
+        activated, 0,
+        "sigil must not activate a skill with disable_model_invocation: true"
+    );
+}
+
+#[tokio::test]
+async fn user_channel_still_activates_when_model_invocation_disabled() {
+    // Same skill, this time via user-channel /skill — should activate.
+    let provider: Arc<dyn SkillProvider> = Arc::new(StaticProvider {
+        skills: vec![(
+            SkillMetadata {
+                name: "internal".into(),
+                description: "internal-only skill".into(),
+                source: SkillSource::User,
+                disable_model_invocation: true,
+                user_invocable: true,
+                version: None,
+            },
+            "body".into(),
+        )],
+    });
+
+    let mut recorder = InMemoryRecorder::default();
+    let strategy = HarnessStrategy::default_with_model("test");
+    let session_id = SessionId::new();
+    let cur_turn = TurnId::new();
+    let exec_ctx = ExecCtx::open_ended(session_id, cur_turn);
+
+    let history = vec![make_event(
+        0,
+        cur_turn,
+        EventPayload::TurnStarted {
+            user_input: vec![],
+            activate_skills: vec!["internal".into()],
+        },
+    )];
+
+    let input = InjectionInput {
+        session_id,
+        turn_id: cur_turn,
+        strategy: &strategy,
+        history: &history,
+        exec_ctx: &exec_ctx,
+        recorder: &mut recorder,
+    };
+    let _ = SkillInjector::new(provider).inject(input).await.unwrap();
+
+    let activated: Vec<_> = recorder
+        .events
+        .iter()
+        .filter_map(|(_, p)| {
+            if let EventPayload::SkillActivated {
+                skill_name,
+                channel,
+                ..
+            } = p
+            {
+                Some((skill_name.clone(), *channel))
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        activated,
+        vec![("internal".to_string(), SkillActivationChannel::UserSlash)]
+    );
+}
+
+#[tokio::test]
 async fn prior_activation_dedupes_repeat() {
     let mut recorder = InMemoryRecorder::default();
     let strategy = HarnessStrategy::default_with_model("test");

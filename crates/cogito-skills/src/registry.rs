@@ -198,4 +198,8 @@ impl SkillProvider for SkillRegistry {
     fn is_registered(&self, name: &str) -> bool {
         self.by_name.contains_key(name)
     }
+
+    fn get_metadata(&self, name: &str) -> Option<SkillMetadata> {
+        self.by_name.get(name).map(|r| r.metadata.clone())
+    }
 }
