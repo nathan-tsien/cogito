@@ -16,6 +16,7 @@
 //! - [`job`]: `JobManager` trait, `JobId`, `JobStatus`, `JobCompletionEvent`
 //! - [`metrics`]: `MetricsRecorder` trait + `NoOpMetricsRecorder` — pluggable metrics sink (Sprint 5)
 //! - [`session`]: `SessionMeta` — per-session pass-through metadata
+//! - [`skill`]: `SkillProvider` trait + `SkillMetadata`/`SkillContent`/`SkillSource` (ADR-0020)
 //! - [`store`]: `ConversationStore` trait + `StoreError` (persisted event log backend contract)
 //! - [`context`]: `ContextError`, `Compactor`, `HistoryProjector`, `ProjectedMessage` — Context-Management traits and types (H11)
 //! - [`strategy`]: `HarnessStrategy`, `ToolFilter`
@@ -38,6 +39,7 @@ pub mod ids;
 pub mod job;
 pub mod metrics;
 pub mod session;
+pub mod skill;
 pub mod store;
 pub mod strategy;
 pub mod stream;
