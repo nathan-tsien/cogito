@@ -50,8 +50,19 @@ Merging any two traits would violate one side's invariant; see ADR-0008 §"Alter
 |---|---|---|
 | Compactor | `NoneCompactor`, `TruncateCompactor` | `none`, `truncate` |
 | HistoryProjector | `StandardProjector` | `standard` |
-| SystemPromptInjector | `NoneInjector` | `none` |
+| SystemPromptInjector | `NoneInjector`, `SkillInjector` (Sprint 7) | `none`, `skill` |
 | ToolFilterOverrider | `NoneOverrider` | `none` |
+
+Sprint 7 added `SkillInjector` alongside `NoneInjector` under the
+`SystemPromptInjector` slot. It is the authoritative landing point for skill
+activations: it consumes pending `SkillActivationRequested` triggers (from H06
+sigil detection in the previous turn, or from a CLI `/skill <name>` command),
+loads the corresponding SKILL.md bodies via the injected `SkillProvider`, and
+emits a deduplicated `SkillActivated` event plus the appended system-prompt
+suffix. Cross-turn dedup is anchored on `(session_id, skill_name)`. See
+`docs/adr/0020-skill-loader.md` and
+`docs/superpowers/specs/2026-05-23-sprint-7-skill-loader-design.md` for the
+end-to-end design.
 
 ### Orchestration order
 
