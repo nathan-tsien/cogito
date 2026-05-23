@@ -97,6 +97,116 @@ pub enum StoreError {
         /// Human-readable detail.
         message: String,
     },
+
+    /// A write was rejected because a domain invariant would be violated.
+    ///
+    /// Used by `StepRecorder::record_context_compacted` to enforce the
+    /// §5.5 boundary invariants (seq range alignment, uniqueness per turn).
+    #[error("invariant violated: {0}")]
+    InvariantViolated(String),
+}
+
+/// Write-side abstraction used by Context-Management trait implementations
+/// (H11 Compactor, `SystemPromptInjector`, `ToolFilterOverrider`) to persist
+/// events without taking a direct reference to `cogito_core::StepRecorder`.
+///
+/// Implementations bridge this trait to `StepRecorder::append` (or an
+/// equivalent test double). The interface is intentionally minimal: callers
+/// supply a fully-constructed `EventPayload`; the recorder assigns `seq`,
+/// `ts`, `event_id`, and the session/turn envelope.
+///
+/// `EventRecorder` is dyn-safe and `Send + Sync` so it can be injected as
+/// a `&mut dyn EventRecorder` across await points.
+#[async_trait]
+pub trait EventRecorder: Send {
+    /// Persist one event payload for the given turn. Returns the `EventId`
+    /// assigned to the newly-written event and its monotonic `seq` number.
+    async fn append_payload(
+        &mut self,
+        turn_id: crate::ids::TurnId,
+        payload: crate::event::EventPayload,
+    ) -> Result<(crate::ids::EventId, u64), StoreError>;
+
+    /// Persist a `SystemPromptInjected` event for `turn_id`.
+    ///
+    /// Default implementation builds the payload and delegates to
+    /// [`EventRecorder::append_payload`]. Overriding implementations
+    /// (e.g. `StepRecorder`) may add idempotency checks.
+    async fn record_system_prompt_injected(
+        &mut self,
+        turn_id: crate::ids::TurnId,
+        suffix: String,
+        contributors: Vec<String>,
+        produced_by: &str,
+    ) -> Result<crate::ids::EventId, StoreError> {
+        let (id, _seq) = self
+            .append_payload(
+                turn_id,
+                crate::event::EventPayload::SystemPromptInjected {
+                    turn_id,
+                    suffix,
+                    contributors,
+                    produced_by: produced_by.to_owned(),
+                },
+            )
+            .await?;
+        Ok(id)
+    }
+
+    /// Persist a `ToolFilterOverridden` event for `turn_id`.
+    ///
+    /// Default implementation builds the payload and delegates to
+    /// [`EventRecorder::append_payload`]. Overriding implementations
+    /// (e.g. `StepRecorder`) may add idempotency checks.
+    async fn record_tool_filter_overridden(
+        &mut self,
+        turn_id: crate::ids::TurnId,
+        mode: crate::context::ToolFilterOverrideMode,
+        contributors: Vec<String>,
+        produced_by: &str,
+    ) -> Result<crate::ids::EventId, StoreError> {
+        let (id, _seq) = self
+            .append_payload(
+                turn_id,
+                crate::event::EventPayload::ToolFilterOverridden {
+                    turn_id,
+                    mode,
+                    contributors,
+                    produced_by: produced_by.to_owned(),
+                },
+            )
+            .await?;
+        Ok(id)
+    }
+
+    /// Persist a `ContextCompacted` event for `turn_id`.
+    ///
+    /// Default implementation builds the payload and delegates to
+    /// [`EventRecorder::append_payload`]. Overriding implementations
+    /// (e.g. `StepRecorder`) enforce §5.5 boundary invariants.
+    async fn record_context_compacted(
+        &mut self,
+        turn_id: crate::ids::TurnId,
+        replaced_seq_range: (u64, u64),
+        produced_by: &str,
+        replacement: crate::context::CompactionReplacement,
+        estimates: crate::context::TokenEstimates,
+    ) -> Result<crate::ids::EventId, StoreError> {
+        let (id, _seq) = self
+            .append_payload(
+                turn_id,
+                crate::event::EventPayload::ContextCompacted {
+                    turn_id,
+                    replaced_seq_range,
+                    produced_by: produced_by.to_owned(),
+                    replacement,
+                    token_estimate_before: estimates.before,
+                    token_estimate_after: estimates.after,
+                },
+            )
+            .await?;
+        Ok(id)
+    }
 }
 
 #[cfg(test)]

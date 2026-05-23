@@ -247,6 +247,94 @@ Added: Sprint 5 as an additive variant under ADR-0007. No
 `turn_timed_out`, `hook_rejected`. The canonical fixture uses
 `turn_timed_out`.
 
+## Context management events
+
+Added Sprint 6 (ADR-0008). Four additive `EventPayload` variants; no `SCHEMA_VERSION` bump.
+
+These variants belong to `EventCategory::ContextDecision`. External readers must tolerate unknown `type` values per ADR-0007.
+
+A worked session demonstrating one truncate compaction is at
+`crates/testing/cogito-test-fixtures/fixtures/sessions/sample-truncate-v1.jsonl`.
+
+### `context_compacted`
+
+Written by the `Compactor` when it actually compacts history. A no-op compactor (`NoneCompactor`) never writes this event. At most one per turn in v0.1.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `turn_id` | ULID string | Turn during which compaction was decided. |
+| `replaced_seq_range` | `[u64, u64]` | Inclusive `[start_seq, end_seq]` covered by this compaction. Boundaries align to turn start/end. |
+| `produced_by` | string | `Compactor::id()` — e.g. `"truncate"`. |
+| `replacement` | object | What replaces the covered range in projection. `{"kind":"drop"}` for truncation; `{"kind":"summary","text":"...","model":"..."}` for summarization. |
+| `token_estimate_before` | u64 \| null | Estimated prompt tokens before compaction (informational). |
+| `token_estimate_after` | u64 \| null | Estimated prompt tokens after compaction (informational). |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":12,"ts":"2026-05-23T10:00:02.000Z","type":"context_compacted","data":{"turn_id":"01HFZZZ","replaced_seq_range":[1,8],"produced_by":"truncate","replacement":{"kind":"drop"},"token_estimate_before":1200,"token_estimate_after":300}}
+```
+
+### `system_prompt_injected`
+
+Written by `SystemPromptInjector` every turn, even when the suffix is empty (audit invariant). The suffix is appended after `strategy.system_prompt` with a `\n\n` separator when non-empty.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `turn_id` | ULID string | Turn whose system prompt this suffix applies to. |
+| `suffix` | string | Text appended to the base system prompt. Empty string for no-op injectors. |
+| `contributors` | string[] | Tags identifying what contributed (e.g. `["date", "skill:plan-review"]`). |
+| `produced_by` | string | `Injector::id()` — e.g. `"none"`. |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":13,"ts":"2026-05-23T10:00:02.100Z","type":"system_prompt_injected","data":{"turn_id":"01HFZZZ","suffix":"","contributors":[],"produced_by":"none"}}
+```
+
+### `tool_filter_overridden`
+
+Written by `ToolFilterOverrider` every turn, even when the mode is `Inherit` (audit invariant). H05 reads this event to apply the override on top of `strategy.allowed_tools`.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `turn_id` | ULID string | Turn whose tool surface this override applies to. |
+| `mode` | object | `{"kind":"inherit"}`, `{"kind":"intersect","tools":[...]}`, or `{"kind":"replace","tools":[...]}`. |
+| `contributors` | string[] | Tags identifying what contributed. |
+| `produced_by` | string | `Overrider::id()` — e.g. `"none"`. |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":14,"ts":"2026-05-23T10:00:02.200Z","type":"tool_filter_overridden","data":{"turn_id":"01HFZZZ","mode":{"kind":"inherit"},"contributors":[],"produced_by":"none"}}
+```
+
+### `context_decision_recorded`
+
+Written by H11 itself after all three traits finish. This is the summary index for the turn: it cross-references the event ids of the three trait events, and captures any per-trait errors from the degrade path.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `turn_id` | ULID string | Turn this decision summary belongs to. |
+| `compactions` | ULID string[] | Event ids of `context_compacted` events written this turn (0 or 1 for v0.1). |
+| `system_prompt_event` | ULID string | Event id of this turn's `system_prompt_injected`. |
+| `tool_filter_event` | ULID string | Event id of this turn's `tool_filter_overridden`. |
+| `errors` | object | Per-trait error capture. Fields: `compactor`, `injector`, `overrider` — each is a string (serialized error) or `null` if the trait ran cleanly. |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":15,"ts":"2026-05-23T10:00:02.300Z","type":"context_decision_recorded","data":{"turn_id":"01HFZZZ","compactions":["01HFCCC"],"system_prompt_event":"01HFSSS","tool_filter_event":"01HFTTT","errors":{"compactor":null,"injector":null,"overrider":null}}}
+```
+
 ## Forward compatibility
 
 - **Additive changes** (new `EventPayload` variant, new optional field

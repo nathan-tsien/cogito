@@ -104,6 +104,9 @@ async fn tool_call_completes_via_second_model_call() -> Result<(), Box<dyn std::
         tools,
         hooks: Arc::new(CompositeHookPipeline::default()),
         metrics: Arc::new(NoOpMetricsRecorder),
+        context_pipeline: Arc::new(cogito_context::build_pipeline(
+            &cogito_protocol::context::ContextConfig::default(),
+        )),
     };
 
     let ctx = TurnCtx {
@@ -198,6 +201,9 @@ async fn invalid_tool_args_persist_error_result() -> Result<(), Box<dyn std::err
         tools,
         hooks: Arc::new(CompositeHookPipeline::default()),
         metrics: Arc::new(NoOpMetricsRecorder),
+        context_pipeline: Arc::new(cogito_context::build_pipeline(
+            &cogito_protocol::context::ContextConfig::default(),
+        )),
     };
 
     let ctx = TurnCtx {

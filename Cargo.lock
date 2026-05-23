@@ -407,11 +407,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "cogito-context"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "cogito-mock-model",
+ "cogito-protocol",
+ "cogito-test-fixtures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "cogito-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "cogito-context",
  "cogito-mock-model",
  "cogito-protocol",
  "cogito-store-jsonl",
@@ -530,12 +546,14 @@ dependencies = [
  "futures",
  "insta",
  "proptest",
+ "regex",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
+ "toml",
  "ulid",
  "uuid",
 ]

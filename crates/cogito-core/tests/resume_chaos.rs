@@ -387,22 +387,75 @@ async fn run_with_y_fault(scenario: &ChaosScenario, crash_after_n: u64) -> Vec<C
 /// that legitimately vary across runs:
 ///
 /// - `event_id` and `ts` are generated per-write.
-/// - `turn_id` is a fresh ULID minted by each `TurnDriver` instance; the
-///   golden run and the resumed run drive different turn instances even
-///   though they describe the same logical turn. The oracle compares
-///   `(seq, payload)` and asserts that within one log all events with the
-///   same `seq` share `turn_id` — captured by the `payload` comparison
-///   since `turn_id` is on the envelope, not the payload.
+/// - `turn_id` on the envelope is a fresh ULID minted by each `TurnDriver`
+///   instance; the golden run and the resumed run drive different instances
+///   even though they describe the same logical turn.
+/// - Sprint 6 H11 events (`SystemPromptInjected`, `ToolFilterOverridden`,
+///   `ContextDecisionRecorded`) embed `turn_id` and `EventId` values inside
+///   the payload. These are also run-specific, so they are normalized to
+///   sentinel/nil values before comparison.
 #[derive(Debug, PartialEq)]
 struct Canonical {
     seq: u64,
     payload: EventPayload,
 }
 
+/// Nil sentinel values used to normalize run-specific IDs in H11 payloads.
+fn nil_turn_id() -> cogito_protocol::ids::TurnId {
+    cogito_protocol::ids::TurnId::from(ulid::Ulid::nil())
+}
+
+fn nil_event_id() -> cogito_protocol::ids::EventId {
+    cogito_protocol::ids::EventId::recorder_failure_placeholder()
+}
+
+/// Return a canonicalized payload that replaces run-specific ID fields with
+/// stable sentinel values so golden and resumed logs compare equal.
+fn normalize_payload(payload: EventPayload) -> EventPayload {
+    match payload {
+        EventPayload::SystemPromptInjected {
+            suffix,
+            contributors,
+            produced_by,
+            ..
+        } => EventPayload::SystemPromptInjected {
+            turn_id: nil_turn_id(),
+            suffix,
+            contributors,
+            produced_by,
+        },
+        EventPayload::ToolFilterOverridden {
+            mode,
+            contributors,
+            produced_by,
+            ..
+        } => EventPayload::ToolFilterOverridden {
+            turn_id: nil_turn_id(),
+            mode,
+            contributors,
+            produced_by,
+        },
+        EventPayload::ContextDecisionRecorded {
+            compactions,
+            errors,
+            ..
+        } => EventPayload::ContextDecisionRecorded {
+            turn_id: nil_turn_id(),
+            // EventId cross-references differ between runs — normalize to nil.
+            compactions: compactions.into_iter().map(|_| nil_event_id()).collect(),
+            system_prompt_event: nil_event_id(),
+            tool_filter_event: nil_event_id(),
+            errors,
+        },
+        // All other variants carry no run-specific IDs inside the payload.
+        other => other,
+    }
+}
+
 fn canonical(e: &ConversationEvent) -> Canonical {
     Canonical {
         seq: e.seq,
-        payload: e.payload.clone(),
+        payload: normalize_payload(e.payload.clone()),
     }
 }
 
@@ -555,6 +608,42 @@ fn resumable_boundaries(events: &[ConversationEvent]) -> Vec<u64> {
         .collect()
 }
 
+// === Context-manage pairing oracle ==========================================
+
+/// Assert that every `ContextManageEntered` in the log has a matching
+/// `ContextManageCompleted` (or that the turn ended with `TurnFailed`, which
+/// resets any pending enter). Both variants are empty structs — they carry no
+/// `turn_id` — so pairing is tracked by sequential count rather than by ID.
+///
+/// A well-formed log satisfies:
+/// - `count(ContextManageCompleted) == count(ContextManageEntered)`
+/// - No `ContextManageCompleted` appears before its corresponding `Entered`
+/// - `TurnFailed` may close an open `Entered` (pessimistic reset)
+fn assert_context_managed_pairing(events: &[ConversationEvent]) {
+    let mut entered_without_completed: i64 = 0;
+    for ev in events {
+        match ev.payload {
+            EventPayload::ContextManageEntered { .. } => entered_without_completed += 1,
+            EventPayload::ContextManageCompleted { .. } => {
+                assert!(
+                    entered_without_completed > 0,
+                    "ContextManageCompleted with no preceding Entered"
+                );
+                entered_without_completed -= 1;
+            }
+            EventPayload::TurnFailed { .. } => {
+                // Turn failure closes any pending entered — pessimistic reset.
+                entered_without_completed = 0;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        entered_without_completed, 0,
+        "unclosed ContextManageEntered count: {entered_without_completed}"
+    );
+}
+
 // === Tests ===================================================================
 
 #[tokio::test]
@@ -595,6 +684,9 @@ async fn chaos_y_path_every_event_boundary() {
                 resumed.len()
             );
 
+            // Pairing check runs first so a missing Completed surfaces before
+            // the prefix-immutability diff (which would be harder to diagnose).
+            assert_context_managed_pairing(&resumed);
             assert_prefix_immutable(&golden.events, &resumed, crash_after_n);
             assert_terminal_equivalent(&golden.terminal, terminal_payload(&resumed));
             assert_tool_mapping_equivalent(&golden.events, &resumed);

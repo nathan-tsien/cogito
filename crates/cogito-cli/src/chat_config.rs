@@ -111,6 +111,7 @@ pub fn synthesize_legacy_provider(
             auth_scheme: "Bearer".into(),
             timeout_secs: None,
             include_prior_thinking: false,
+            context_window_tokens: None,
         })
     }
 }
@@ -178,6 +179,7 @@ pub fn patch_base_url(cfg: ProviderConfig, new_base_url: String) -> ProviderConf
             auth_scheme,
             timeout_secs,
             include_prior_thinking,
+            context_window_tokens,
             ..
         } => ProviderConfig::OpenAiCompat {
             name,
@@ -187,6 +189,7 @@ pub fn patch_base_url(cfg: ProviderConfig, new_base_url: String) -> ProviderConf
             auth_scheme,
             timeout_secs,
             include_prior_thinking,
+            context_window_tokens,
         },
     }
 }

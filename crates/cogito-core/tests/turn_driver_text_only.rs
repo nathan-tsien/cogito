@@ -73,6 +73,9 @@ async fn text_only_turn_reaches_completed() -> Result<(), Box<dyn std::error::Er
         tools,
         hooks: Arc::new(CompositeHookPipeline::default()),
         metrics: Arc::new(NoOpMetricsRecorder),
+        context_pipeline: Arc::new(cogito_context::build_pipeline(
+            &cogito_protocol::context::ContextConfig::default(),
+        )),
     };
 
     let ctx = TurnCtx {

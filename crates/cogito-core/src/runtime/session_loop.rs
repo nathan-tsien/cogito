@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 use cogito_protocol::ExecCtx;
 use cogito_protocol::MetricsRecorder;
 use cogito_protocol::content::ContentBlock;
+use cogito_protocol::context::ContextPipeline;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::job::{JobCompletionEvent, JobId};
@@ -41,6 +42,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::types::{SessionCommand, ShutdownOutcome, TurnTrigger};
 use crate::harness::hooks::CompositeHookPipeline;
+// cogito-context is wired by the Runtime layer (not the Brain/harness layer),
+// consistent with ADR-0004: the runtime composes the pipeline from config and
+// injects it as a protocol trait object into TurnDeps.
 use crate::harness::resume::{ResumePoint, replay};
 use crate::harness::step_recorder::StepRecorder;
 use crate::harness::turn_driver::{TurnCtx, TurnDeps, TurnEntry, enter_turn};
@@ -97,6 +101,9 @@ pub(super) struct SessionState {
     pub(super) hooks: Arc<CompositeHookPipeline>,
     /// Metrics sink for this session (defaults to `NoOpMetricsRecorder` until v0.4 wires a real adapter).
     pub(super) metrics: Arc<dyn MetricsRecorder>,
+    /// Context pipeline built once at session open from `strategy.context`.
+    /// All turns in this session share the same pipeline via `Arc::clone`.
+    pub(super) context_pipeline: Arc<ContextPipeline>,
 }
 
 /// External dependencies injected at spawn time.
@@ -327,6 +334,10 @@ fn spawn_turn_driver(
         strategy: state.strategy.clone(),
         consecutive_tool_errors: 0,
     };
+    // Pipeline was built once at session open in `Runtime::open_session` and
+    // stored in `SessionState`. Clone the Arc here so each turn shares the
+    // same pipeline without rebuilding it.
+    let context_pipeline = Arc::clone(&state.context_pipeline);
     let turn_deps = TurnDeps {
         step: Arc::clone(&state.recorder),
         store: Arc::clone(&state.store),
@@ -334,6 +345,7 @@ fn spawn_turn_driver(
         tools: Arc::clone(&deps.tools),
         hooks: Arc::clone(&state.hooks),
         metrics: Arc::clone(&state.metrics),
+        context_pipeline,
     };
     let result_tx = state.turn_result_tx.clone();
     tokio::spawn(async move {

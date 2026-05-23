@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Sprint 6 (Context Management)
+
+- `cogito-protocol::context` — 4 traits (`Compactor`, `HistoryProjector`, `SystemPromptInjector`, `ToolFilterOverrider`) + `ContextConfig` + `ContextPipeline` + supporting types
+- `EventPayload` variants: `ContextCompacted`, `SystemPromptInjected`, `ToolFilterOverridden`, `ContextDecisionRecorded` (additive, no `SCHEMA_VERSION` bump per ADR-0007)
+- `EventPayload::category()` classifier (Conversation / HarnessMeta / ContextDecision)
+- `ModelGateway::model_limits()` additive method + `ModelLimits` type
+- `parse_context_window_suffix()` helper (`[1m]`/`[32k]`-style model id suffix parsing)
+- `cogito-context` crate: `NoneCompactor`, `TruncateCompactor`, `StandardProjector`, `NoneInjector`, `NoneOverrider`, `build_pipeline` factory
+- `OpenAiCompatProviderConfig.context_window_tokens: Option<u64>` fallback field
+- `StepRecorder::record_context_compacted` / `record_system_prompt_injected` / `record_tool_filter_overridden` / `record_context_decision` methods (StoreError invariant checking + per-turn idempotency)
+- `EventRecorder` trait in `cogito-protocol::store` (write-side abstraction so trait impls can persist events without depending on cogito-core)
+- `StoreError::InvariantViolated` variant
+
+### Changed — Sprint 6 (Context Management)
+
+- H01 Turn Driver `ContextManaged` state from pass-through to real orchestration (4-trait pipeline + degrade-on-failure)
+- H04 Prompt Composer delegates history projection to `dyn HistoryProjector`
+- H05 Tool Surface honors per-turn `ToolFilterOverridden` event
+- `AnthropicGateway` / `OpenAiCompatGateway` override `model_limits()`; OpenAI-compat strips `[<size>]` suffix from `params.model` before sending wire request to vLLM/SGLang
+- `HarnessStrategy` gains `context: ContextConfig` field (default = all no-op)
+
+### Decisions (ADR) — Sprint 6
+
+- **ADR-0008** Context Management — Accepted 2026-05-23
+
 ### Added — Sprint 5 (Hook Pipeline 实化)
 
 - `cogito-protocol::hook` — `HookHandler` + `HookProvider` + `HookDecision` + `HookLifecyclePoint` traits/types

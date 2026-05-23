@@ -17,6 +17,7 @@
 //! - [`metrics`]: `MetricsRecorder` trait + `NoOpMetricsRecorder` — pluggable metrics sink (Sprint 5)
 //! - [`session`]: `SessionMeta` — per-session pass-through metadata
 //! - [`store`]: `ConversationStore` trait + `StoreError` (persisted event log backend contract)
+//! - [`context`]: `ContextError`, `Compactor`, `HistoryProjector`, `ProjectedMessage` — Context-Management traits and types (H11)
 //! - [`strategy`]: `HarnessStrategy`, `ToolFilter`
 //! - [`stream`]: `StreamEvent` enum (real-time fanout to subscribers)
 //! - [`tool`]: `ToolProvider` trait, `ToolDescriptor`, `InvokeOutcome`, `ExecutionClass`
@@ -27,6 +28,7 @@
 //! the Sprint 0 closure plan) and Sprint 1 (`event`, `store`).
 
 pub mod content;
+pub mod context;
 pub mod error;
 pub mod event;
 pub mod exec_ctx;
@@ -44,17 +46,25 @@ pub mod turn;
 pub mod turn_trigger;
 
 pub use content::ContentBlock;
-pub use event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
+pub use context::{
+    CompactionApplied, CompactionInput, CompactionKind, CompactionReplacement, Compactor,
+    CompactorConfig, ContextConfig, ContextDecisionErrors, ContextError, ContextPipeline,
+    HistoryProjector, HistoryProjectorConfig, InjectionInput, ProjectedMessage,
+    SystemPromptInjector, SystemPromptInjectorConfig, TokenEstimates, TokenThreshold,
+    ToolFilterInput, ToolFilterOverrideMode, ToolFilterOverrider, ToolFilterOverriderConfig,
+    TruncateConfig,
+};
+pub use event::{ConversationEvent, EventCategory, EventPayload, SCHEMA_VERSION};
 pub use exec_ctx::ExecCtx;
 pub use gateway::{
-    Message, ModelError, ModelEvent, ModelGateway, ModelInput, ModelOutput, ModelParams,
-    StopReason, Usage,
+    Message, ModelError, ModelEvent, ModelGateway, ModelInput, ModelLimits, ModelOutput,
+    ModelParams, StopReason, Usage,
 };
 pub use hook::{HookDecision, HookHandler, HookLifecyclePoint, HookProvider};
 pub use ids::{EventId, SessionId, TurnId};
 pub use metrics::{MetricsRecorder, NoOpMetricsRecorder};
 pub use session::SessionMeta;
-pub use store::{ConversationStore, StoreError};
+pub use store::{ConversationStore, EventRecorder, StoreError};
 pub use strategy::{HarnessStrategy, ToolFilter};
 pub use tool::{
     ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,

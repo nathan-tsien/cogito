@@ -1,6 +1,7 @@
 //! cogito-test-fixtures — shared test fixtures. Not published.
 
 pub mod chaos_scenarios;
+pub mod context;
 pub mod fault_store;
 pub mod fixtures;
 pub mod mock_job_manager;
