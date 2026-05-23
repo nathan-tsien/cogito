@@ -86,6 +86,7 @@ async fn resume_from_model_completed_fast_paths_to_turn_completed()
             Some(turn_id),
             EventPayload::TurnStarted {
                 user_input: vec![cogito_protocol::ContentBlock::Text { text: "hi".into() }],
+                activate_skills: vec![],
             },
         ),
         evt(

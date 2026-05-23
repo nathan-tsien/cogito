@@ -188,7 +188,7 @@ mod tests {
 
             for ev in events {
                 match &ev.payload {
-                    EventPayload::TurnStarted { user_input } => {
+                    EventPayload::TurnStarted { user_input, .. } => {
                         let text = user_input
                             .iter()
                             .filter_map(|b| {
@@ -257,6 +257,7 @@ mod tests {
                 user_input: vec![ContentBlock::Text {
                     text: "ignored".into(),
                 }],
+                activate_skills: vec![],
             },
             Some(turn_id),
         )];
@@ -306,6 +307,7 @@ mod tests {
                 0,
                 EventPayload::TurnStarted {
                     user_input: vec![ContentBlock::Text { text: "go".into() }],
+                    activate_skills: vec![],
                 },
                 Some(turn_id),
             ),

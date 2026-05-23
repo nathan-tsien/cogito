@@ -66,6 +66,7 @@ fn push_completed_turn(
         Some(tid),
         EventPayload::TurnStarted {
             user_input: vec![user_block(user_text)],
+            activate_skills: vec![],
         },
     ));
     *seq += 1;

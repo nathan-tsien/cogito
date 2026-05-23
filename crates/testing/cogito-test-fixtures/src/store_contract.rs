@@ -76,6 +76,7 @@ pub fn turn_started_event(
         ts: Utc::now(),
         payload: EventPayload::TurnStarted {
             user_input: vec![ContentBlock::Text { text: text.into() }],
+            activate_skills: vec![],
         },
     }
 }

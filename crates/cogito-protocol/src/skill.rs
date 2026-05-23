@@ -78,3 +78,14 @@ pub enum SkillSource {
     /// cogito-bundled skill (feature-gated; off by default in v0.1).
     System,
 }
+
+/// Channel that triggered a `SkillActivated` event.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SkillActivationChannel {
+    /// Model emitted `$Name` in stream text.
+    ModelSigil,
+    /// User typed `/skill <name>`.
+    UserSlash,
+}

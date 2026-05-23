@@ -570,7 +570,14 @@ mod tests {
                 },
                 None,
             ),
-            evt(1, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                1,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(
                 2,
                 EventPayload::TurnCompleted {
@@ -588,7 +595,14 @@ mod tests {
     fn turn_failed_returns_fresh_turn() {
         let t = TurnId::new();
         let events = vec![
-            evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(
                 1,
                 EventPayload::TurnFailed {
@@ -605,7 +619,14 @@ mod tests {
     fn turn_started_no_model_call_returns_restart() {
         let t = TurnId::new();
         let events = vec![
-            evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(
                 1,
                 EventPayload::PromptComposed {
@@ -626,7 +647,14 @@ mod tests {
     fn model_call_started_no_completed_returns_restart() {
         let t = TurnId::new();
         let events = vec![
-            evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(
                 1,
                 EventPayload::ModelCallStarted { model: "m".into() },
@@ -641,7 +669,14 @@ mod tests {
     fn model_call_completed_no_tool_use_returns_resume_from_model_completed() {
         let t = TurnId::new();
         let events = vec![
-            evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(
                 1,
                 EventPayload::ModelCallStarted { model: "m".into() },
@@ -691,7 +726,14 @@ mod tests {
         // for tool uses and `[completed+1..]` for tool results.
         let t = TurnId::new();
         let events = vec![
-            evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(
                 1,
                 EventPayload::ModelCallStarted { model: "m".into() },
@@ -737,7 +779,14 @@ mod tests {
         // (matching H06 ordering); ToolResultRecorded goes after.
         let t = TurnId::new();
         let events = vec![
-            evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(
                 1,
                 EventPayload::ModelCallStarted { model: "m".into() },
@@ -797,7 +846,14 @@ mod tests {
         let t = TurnId::new();
         let j = JobId::default();
         let events = vec![
-            evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(1, EventPayload::TurnPaused { job_id: j }, Some(t)),
         ];
         let d = replay(&events).unwrap();
@@ -815,7 +871,14 @@ mod tests {
         let t = TurnId::new();
         let j = JobId::default();
         let events = vec![
-            evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(
                 1,
                 EventPayload::ModelCallStarted { model: "m".into() },
@@ -882,7 +945,14 @@ mod tests {
     fn job_completed_without_matching_paused_is_malformed() {
         let t = TurnId::new();
         let events = vec![
-            evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(
                 1,
                 EventPayload::JobCompletedRecorded {
@@ -904,12 +974,18 @@ mod tests {
         let events = vec![
             evt(
                 0,
-                EventPayload::TurnStarted { user_input: vec![] },
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
                 Some(t1),
             ),
             evt(
                 1,
-                EventPayload::TurnStarted { user_input: vec![] },
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
                 Some(t2),
             ),
         ];
@@ -922,7 +998,14 @@ mod tests {
     fn model_completed_tool_use_stop_reason_without_tools_is_malformed() {
         let t = TurnId::new();
         let events = vec![
-            evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(
                 1,
                 EventPayload::ModelCallStarted { model: "m".into() },
@@ -947,7 +1030,14 @@ mod tests {
     fn tool_split_matches_by_call_id_not_position() {
         let t = TurnId::new();
         let events = vec![
-            evt(0, EventPayload::TurnStarted { user_input: vec![] }, Some(t)),
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
             evt(
                 1,
                 EventPayload::ModelCallStarted { model: "m".into() },

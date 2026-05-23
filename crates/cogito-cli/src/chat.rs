@@ -411,7 +411,7 @@ async fn replay_history(
         let event = ev.context("replay event")?;
         event_count += 1;
         match event.payload {
-            EventPayload::TurnStarted { user_input } => {
+            EventPayload::TurnStarted { user_input, .. } => {
                 if let Some(text) = first_user_text(&user_input) {
                     renderer.replay_user_input(text)?;
                 }

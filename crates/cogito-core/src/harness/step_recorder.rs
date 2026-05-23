@@ -119,8 +119,18 @@ impl StepRecorder {
         user_input: Vec<ContentBlock>,
     ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnStarted);
-        self.append(Some(turn_id), EventPayload::TurnStarted { user_input })
-            .await
+        // Task 03 (Sprint 7): `activate_skills` is additive; the signature
+        // here stays single-arg for now and emits an empty list. Task 04
+        // extends `TurnTrigger` with the slash-command channel and the
+        // recorder API will be widened then.
+        self.append(
+            Some(turn_id),
+            EventPayload::TurnStarted {
+                user_input,
+                activate_skills: vec![],
+            },
+        )
+        .await
     }
 
     /// Buffer a streaming text chunk and broadcast it live as

@@ -119,6 +119,7 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
                 user_input: vec![ContentBlock::Text {
                     text: "read /tmp/x".into(),
                 }],
+                activate_skills: vec![],
             },
         ),
         envelope(
