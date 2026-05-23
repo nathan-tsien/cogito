@@ -2,13 +2,15 @@
 //!
 //! Spec: `docs/superpowers/specs/2026-05-23-sprint-7-skill-loader-design.md` §7.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use cogito_protocol::context::{ContextError, InjectionInput, SystemPromptInjector};
-use cogito_protocol::ids::EventId;
-use cogito_protocol::skill::SkillProvider;
+use cogito_protocol::event::{ConversationEvent, EventPayload};
+use cogito_protocol::ids::{EventId, TurnId};
+use cogito_protocol::skill::{SkillActivationChannel, SkillProvider, SkillSource};
 use cogito_protocol::store::EventRecorder;
 
 /// Per-skill description character cap for the registry block.
@@ -35,14 +37,69 @@ impl SkillInjector {
 #[async_trait]
 impl SystemPromptInjector for SkillInjector {
     async fn inject(&self, input: InjectionInput<'_>) -> Result<EventId, ContextError> {
-        // Task 12 will fill in candidate collection + dedupe.
-        // For Task 11 we emit only the registry block — no activations.
-        let suffix = build_registry_block(&*self.provider, self.description_cap_chars);
+        // Idempotency: if a SystemPromptInjected for this turn already exists,
+        // return the existing event_id and emit nothing new (resume hit).
+        if let Some(eid) = find_existing_injection(input.history, input.turn_id) {
+            return Ok(eid);
+        }
+
+        // Step 1: collect user-channel names from current turn's TurnStarted.
+        let user_names = collect_user_channel(input.history, input.turn_id);
+
+        // Step 2: collect model-channel names from previous turn(s) text.
+        let model_names = collect_model_channel(input.history, input.turn_id, &*self.provider);
+
+        // Step 3: dedupe against prior SkillActivated events.
+        let prior = collect_prior_activations(input.history);
+
+        let mut seen_this_turn: HashSet<String> = HashSet::new();
+        let mut contributors: Vec<String> = Vec::new();
+        let mut to_inject: Vec<String> = Vec::new();
+
+        let candidates = user_names
+            .into_iter()
+            .map(|n| (n, SkillActivationChannel::UserSlash))
+            .chain(
+                model_names
+                    .into_iter()
+                    .map(|n| (n, SkillActivationChannel::ModelSigil)),
+            );
+        for (name, channel) in candidates {
+            if prior.contains(&name) {
+                continue;
+            }
+            if !seen_this_turn.insert(name.clone()) {
+                continue;
+            }
+            let Some(content) = self.provider.get(&name) else {
+                continue;
+            };
+            EventRecorder::record_skill_activated(
+                input.recorder,
+                input.turn_id,
+                name.clone(),
+                content.source.clone(),
+                channel,
+            )
+            .await?;
+            contributors.push(name.clone());
+            to_inject.push(name);
+        }
+
+        // Step 4: build suffix.
+        let registry = build_registry_block(&*self.provider, self.description_cap_chars);
+        let bodies = build_body_blocks(&*self.provider, &to_inject);
+        let suffix = if registry.is_empty() && bodies.is_empty() {
+            String::new()
+        } else {
+            format!("{registry}{bodies}")
+        };
+
         let event_id = EventRecorder::record_system_prompt_injected(
             input.recorder,
             input.turn_id,
             suffix,
-            Vec::new(),
+            contributors,
             "skill",
         )
         .await?;
@@ -52,6 +109,71 @@ impl SystemPromptInjector for SkillInjector {
     fn id(&self) -> &'static str {
         "skill"
     }
+}
+
+fn find_existing_injection(history: &[ConversationEvent], turn_id: TurnId) -> Option<EventId> {
+    for ev in history {
+        if ev.turn_id == Some(turn_id)
+            && let EventPayload::SystemPromptInjected { .. } = &ev.payload
+        {
+            return Some(ev.event_id);
+        }
+    }
+    None
+}
+
+fn collect_user_channel(history: &[ConversationEvent], turn_id: TurnId) -> Vec<String> {
+    for ev in history {
+        if ev.turn_id == Some(turn_id)
+            && let EventPayload::TurnStarted {
+                activate_skills, ..
+            } = &ev.payload
+        {
+            return activate_skills.clone();
+        }
+    }
+    Vec::new()
+}
+
+fn collect_model_channel(
+    history: &[ConversationEvent],
+    current_turn: TurnId,
+    provider: &dyn SkillProvider,
+) -> Vec<String> {
+    // The sigil scanner lives in cogito-skills (Hands layer); cogito-context
+    // is also Hands so the same-layer dep is permitted per ADR-0004.
+    use cogito_skills::sigil::{FenceState, find_sigils_outside_code};
+
+    let mut state = FenceState::default();
+    let mut names: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut hit_current = false;
+    for ev in history {
+        if ev.turn_id == Some(current_turn) {
+            hit_current = true;
+        }
+        if hit_current {
+            continue;
+        }
+        if let EventPayload::AssistantMessageAppended { text } = &ev.payload {
+            for hit in find_sigils_outside_code(&mut state, text) {
+                if provider.is_registered(&hit.name) && seen.insert(hit.name.clone()) {
+                    names.push(hit.name);
+                }
+            }
+        }
+    }
+    names
+}
+
+fn collect_prior_activations(history: &[ConversationEvent]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for ev in history {
+        if let EventPayload::SkillActivated { skill_name, .. } = &ev.payload {
+            out.insert(skill_name.clone());
+        }
+    }
+    out
 }
 
 fn build_registry_block(provider: &dyn SkillProvider, cap_chars: usize) -> String {
@@ -77,6 +199,35 @@ fn build_registry_block(provider: &dyn SkillProvider, cap_chars: usize) -> Strin
         out.push_str(": ");
         out.push_str(&desc);
         out.push('\n');
+    }
+    out
+}
+
+fn build_body_blocks(provider: &dyn SkillProvider, names: &[String]) -> String {
+    use std::fmt::Write as _;
+
+    if names.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n");
+    for name in names {
+        let Some(content) = provider.get(name) else {
+            continue;
+        };
+        let source_kind = match content.source {
+            SkillSource::Repo { .. } => "repo",
+            SkillSource::User => "user",
+            SkillSource::Plugin { .. } => "plugin",
+            SkillSource::System => "system",
+            // `SkillSource` is `#[non_exhaustive]`; future variants render as
+            // "unknown" until explicit support lands.
+            _ => "unknown",
+        };
+        // Writing into a `String` via `fmt::Write` is infallible; the
+        // `Result` can be safely discarded.
+        let _ = write!(out, "\n<skill name=\"{name}\" source=\"{source_kind}\">\n");
+        out.push_str(&content.body);
+        out.push_str("\n</skill>\n");
     }
     out
 }

@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 cogito-protocol = { workspace = true }
+cogito-skills = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -18,7 +19,6 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 cogito-mock-model = { workspace = true }
-cogito-skills = { workspace = true }
 cogito-test-fixtures = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 serde_json = { workspace = true }
