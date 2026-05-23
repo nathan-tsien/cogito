@@ -17,6 +17,7 @@
 
 use chrono::{TimeZone, Utc};
 use cogito_protocol::job::{JobId, JobOutcome};
+use cogito_protocol::skill::{SkillActivationChannel, SkillSource};
 use cogito_protocol::tool::ToolResult;
 use cogito_protocol::turn::{TurnFailureReason, TurnOutcome};
 use cogito_protocol::{
@@ -202,6 +203,130 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
             },
         ),
     ]
+}
+
+/// Build the canonical Sprint 7 skill fixture: one turn that activates a
+/// single user-channel skill (`invoice-parser`) and shows the
+/// `SkillInjector` system prompt suffix it produces.
+///
+/// Exercises three Sprint 7 additive shapes in their natural order:
+/// 1. `TurnStarted.activate_skills` carrying user-channel activations.
+/// 2. `SkillActivated` payload (one per newly activated skill).
+/// 3. `SystemPromptInjected` written by `SkillInjector` (id `"skill"`).
+///
+/// The IDs and timestamp are deterministic so the JSONL file is
+/// byte-reproducible across runs. See the module-level comment for the
+/// rationale on `expect`/`unwrap` here.
+///
+/// # Panics
+///
+/// Panics if the hard-coded ULID literals or the fixed UTC timestamp
+/// stop being valid — same rationale as [`canonical_sample_session`].
+#[must_use]
+pub fn canonical_skill_session() -> Vec<ConversationEvent> {
+    // ULIDs use Crockford base32 — letters I, L, O, U are excluded.
+    // The literals below spell "SK1LL" without an L (S-K-1-double-1).
+    let sid = SessionId::from(
+        Ulid::from_string("01SK11SESS10NSESS10NSESS10").expect("fixed skill session ulid"),
+    );
+    let turn = TurnId::from(
+        Ulid::from_string("01SK11TRN10TRN10TRN10TRN10").expect("fixed skill turn ulid"),
+    );
+
+    let mut counter: u64 = 0;
+    let mut next_event_id = || {
+        counter += 1;
+        EventId::from(Ulid::from_parts(counter, 0))
+    };
+
+    // Fixed base timestamp: 2026-05-23T00:00:00Z = 1_779_494_400.
+    let ts0 = Utc
+        .timestamp_opt(1_779_494_400, 0)
+        .single()
+        .expect("fixed UTC timestamp is unambiguous");
+
+    let mut envelope =
+        |seq: u64, turn_id: Option<TurnId>, payload: EventPayload| ConversationEvent {
+            schema_version: SCHEMA_VERSION,
+            event_id: next_event_id(),
+            session_id: sid,
+            turn_id,
+            seq,
+            ts: ts0 + chrono::Duration::milliseconds(i64::try_from(seq * 100).unwrap_or(0)),
+            payload,
+        };
+
+    // System prompt suffix as `SkillInjector` would render it for a
+    // single-skill registry: `## Available Skills` block + one `<skill>`
+    // body block. The literal mirrors the shape spec'd in
+    // `docs/superpowers/plans/2026-05-23-sprint-7-skill-loader.md` Task 23
+    // Step 3.
+    let suffix = "## Available Skills\n- invoice-parser: \
+                  Parse invoice PDFs into structured rows.\n\n\
+                  <skill name=\"invoice-parser\" source=\"user\">\n\
+                  # body\n\
+                  </skill>\n"
+        .to_string();
+
+    vec![
+        envelope(
+            0,
+            None,
+            EventPayload::SessionStarted {
+                meta: SessionMeta {
+                    cogito_version: "0.1.0".into(),
+                    strategy: Some("default".into()),
+                    model: Some("claude-sonnet-4-6".into()),
+                    user_id: Some("u_skill".into()),
+                    ..Default::default()
+                },
+            },
+        ),
+        envelope(
+            1,
+            Some(turn),
+            EventPayload::TurnStarted {
+                user_input: vec![ContentBlock::Text { text: "hi".into() }],
+                activate_skills: vec!["invoice-parser".into()],
+            },
+        ),
+        envelope(
+            2,
+            Some(turn),
+            EventPayload::SkillActivated {
+                skill_name: "invoice-parser".into(),
+                source: SkillSource::User,
+                channel: SkillActivationChannel::UserSlash,
+            },
+        ),
+        envelope(
+            3,
+            Some(turn),
+            EventPayload::SystemPromptInjected {
+                turn_id: turn,
+                suffix,
+                contributors: vec!["invoice-parser".into()],
+                produced_by: "skill".into(),
+            },
+        ),
+    ]
+}
+
+/// Serialize the canonical Sprint 7 skill fixture to JSONL bytes.
+///
+/// # Panics
+///
+/// Panics if `serde_json::to_vec` fails on any event — same rationale as
+/// [`canonical_sample_jsonl`].
+#[must_use]
+pub fn canonical_skill_jsonl() -> Vec<u8> {
+    let mut buf = Vec::new();
+    for event in canonical_skill_session() {
+        let mut line = serde_json::to_vec(&event).expect("event serializes");
+        line.push(b'\n');
+        buf.extend_from_slice(&line);
+    }
+    buf
 }
 
 /// Absolute path to a recorded SSE fixture under `fixtures/sse/`.
