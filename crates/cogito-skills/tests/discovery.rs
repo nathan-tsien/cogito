@@ -51,7 +51,7 @@ fn repo_scope_carries_source_repo() {
     };
     let found = discover_skills(&cfg).unwrap();
     let foo = found.iter().find(|s| s.parsed.name == "repo-foo").unwrap();
-    matches!(foo.source, SkillSource::Repo { .. });
+    assert!(matches!(foo.source, SkillSource::Repo { .. }));
 }
 
 #[test]
