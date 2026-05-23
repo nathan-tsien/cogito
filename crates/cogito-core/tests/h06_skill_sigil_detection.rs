@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use cogito_protocol::skill::{SkillContent, SkillMetadata, SkillProvider, SkillSource};
+use cogito_protocol::skill::{SkillContent, SkillMetadata, SkillProvider};
 use cogito_protocol::stream::StreamEvent;
 use tokio::sync::broadcast;
 
@@ -70,10 +70,4 @@ async fn deduplicates_same_name_in_one_chunk() {
         rx.try_recv().is_err(),
         "second occurrence in same chunk must not re-emit"
     );
-}
-
-// Silence unused import warning for SkillSource (mirrors the plan's import set).
-#[allow(dead_code)]
-fn _unused_imports_marker() -> Option<SkillSource> {
-    None
 }
