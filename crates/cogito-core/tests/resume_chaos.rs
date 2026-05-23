@@ -695,6 +695,553 @@ async fn chaos_y_path_every_event_boundary() {
     }
 }
 
+// === Sprint 7: text_then_skill_then_tool chaos scenario =====================
+//
+// Spec: docs/superpowers/specs/2026-05-23-sprint-7-skill-loader-design.md §11.
+//
+// Goal: verify that the H11 SkillInjector's idempotency and the H06 sigil
+// recording survive a mid-flight crash. Spec §11 names two crash boundaries:
+//   (a) after the turn-1 `AssistantMessageAppended` carrying `$foo`
+//       (sigil text persisted, no SkillActivated written yet)
+//   (b) after `SkillActivated` of turn 2, before its `SystemPromptInjected`
+//       (partial-write; SkillInjector must skip re-emitting on resume)
+//
+// v0.1 narrowing (matching the rest of this test file): both spec boundaries
+// land inside an in-flight turn where the harness has written `TurnStarted`
+// but no `ModelCallCompleted` yet. H03 `replay()` classifies that into
+// `RestartCurrentTurn`, which `apply_resume_point` downgrades to `FreshTurn`
+// (the user_input recovery path is a documented TODO). So resuming from
+// either spec boundary today would silently drop the in-flight turn and
+// destroy the prefix-immutability oracle. Both boundaries are therefore
+// shifted forward to the nearest `ResumeFromModelCompleted`-compatible
+// boundary on the same conceptual "side" of the partial write:
+//
+//   - Spec (a) "after sigil text + before SkillActivated" → moved to
+//     "after turn-1 final `ModelCallCompleted`" (one event before
+//     `TurnCompleted`). At this point the sigil text is durably on disk;
+//     resume fast-paths turn 1 to `TurnCompleted`. Turn 2's SkillInjector
+//     still gets to scan the recovered sigil text.
+//   - Spec (b) "after SkillActivated + before SystemPromptInjected" →
+//     moved to "after turn-2's `ModelCallCompleted`" (one event before
+//     turn 2's `TurnCompleted`). At this point BOTH SkillActivated and
+//     SystemPromptInjected are durably on disk. Resume fast-paths turn 2
+//     and verifies the SkillInjector idempotency check (`find_existing_
+//     injection`) does not re-emit `SystemPromptInjected`. This is a
+//     strictly weaker test than the spec's idealized boundary, but it's
+//     the strongest one this v0.1 chaos infra can mechanically exercise.
+//
+// When `RestartCurrentTurn` is wired (post-Sprint-3 TODO in `session_loop.
+// rs::apply_resume_point`), the boundaries should be tightened back to
+// match the spec exactly.
+
+/// Single-skill `SkillProvider`: registers "foo" with a recognizable body
+/// so we can assert against the `<skill name="foo"` envelope in the
+/// injected system-prompt suffix.
+struct StaticFooSkillProvider;
+
+const FOO_BODY: &str = "## foo\n\nA test skill body used by the chaos scenario.";
+const FOO_DESCRIPTION: &str = "Test skill 'foo' for chaos coverage.";
+
+impl cogito_protocol::skill::SkillProvider for StaticFooSkillProvider {
+    fn list(&self) -> Vec<cogito_protocol::skill::SkillMetadata> {
+        vec![cogito_protocol::skill::SkillMetadata {
+            name: "foo".into(),
+            description: FOO_DESCRIPTION.into(),
+            source: cogito_protocol::skill::SkillSource::User,
+            disable_model_invocation: false,
+            user_invocable: true,
+            version: None,
+        }]
+    }
+
+    fn get(&self, name: &str) -> Option<cogito_protocol::skill::SkillContent> {
+        if name == "foo" {
+            Some(cogito_protocol::skill::SkillContent {
+                name: "foo".into(),
+                source: cogito_protocol::skill::SkillSource::User,
+                body: FOO_BODY.into(),
+            })
+        } else {
+            None
+        }
+    }
+
+    fn is_registered(&self, name: &str) -> bool {
+        name == "foo"
+    }
+}
+
+/// Strategy with H11 `SystemPromptInjectorConfig::Skill`. Other slots are the
+/// defaults from `default_with_model("mock")`.
+fn skill_strategy() -> HarnessStrategy {
+    let mut strategy = HarnessStrategy::default_with_model("mock");
+    strategy.context.system_prompt_injector =
+        cogito_protocol::context::SystemPromptInjectorConfig::Skill;
+    strategy
+}
+
+/// Build a `ScriptedMockModel` for the two-turn `text_then_skill_then_tool`
+/// flow. Three model calls total. Matchers are checked in declaration
+/// order, first-match-wins:
+///
+/// 1. `LastUserTextContains("follow up")` → turn 2 call 1 (ack). Placed
+///    first so turn 2's User message wins over the still-present turn-1
+///    tool result.
+/// 2. `LastToolResultContains("MOCK_TOOL_RESULT")` → turn 1 call 2 (after
+///    `read_file` returns).
+/// 3. `LastUserTextContains("please use $foo")` → turn 1 call 1 (sigil text
+///    + tool use).
+fn build_skill_chaos_model(scenario: &ChaosScenario) -> ScriptedMockModel {
+    let matchers = vec![
+        (
+            InputMatcher::LastUserTextContains("follow up".into()),
+            OutputScript {
+                events: turn2_reply_script(),
+            },
+        ),
+        (
+            InputMatcher::LastToolResultContains("MOCK_TOOL_RESULT".into()),
+            OutputScript {
+                events: scenario.model_scripts[1].clone(),
+            },
+        ),
+        (
+            InputMatcher::LastUserTextContains("please use $foo".into()),
+            OutputScript {
+                events: scenario.model_scripts[0].clone(),
+            },
+        ),
+    ];
+    ScriptedMockModel::new(matchers)
+}
+
+/// Turn 2 model script: a short ack with no tool use. Pure data lives here
+/// (not in `chaos_scenarios.rs`) because turn 2 is conceptually a separate
+/// model call wired by the runner, not part of the scenario's
+/// `model_scripts` (which represents turn 1).
+fn turn2_reply_script() -> Vec<cogito_protocol::gateway::ModelEvent> {
+    use cogito_protocol::gateway::{ModelEvent, StopReason, Usage};
+    vec![
+        ModelEvent::TextDelta {
+            block_index: 0,
+            chunk: "ack".into(),
+        },
+        ModelEvent::TextBlockCompleted {
+            block_index: 0,
+            text: "ack".into(),
+        },
+        ModelEvent::MessageCompleted {
+            stop_reason: StopReason::EndTurn,
+            usage: Usage {
+                input_tokens: 5,
+                output_tokens: 1,
+            },
+        },
+    ]
+}
+
+/// Wire a `Runtime` for the skill chaos scenario. Same shape as the generic
+/// `build_runtime`, but overrides the model, attaches a `SkillProvider`, and
+/// uses the `SystemPromptInjectorConfig::Skill` strategy.
+fn build_skill_runtime(
+    store: Arc<dyn ConversationStore>,
+    scenario: &ChaosScenario,
+) -> Arc<Runtime> {
+    let mock = Arc::new(build_skill_chaos_model(scenario));
+    let tools = Arc::new(MockToolProvider);
+    let skills: Arc<dyn cogito_protocol::skill::SkillProvider> = Arc::new(StaticFooSkillProvider);
+    Runtime::builder()
+        .store(store)
+        .model(mock as Arc<dyn ModelGateway>)
+        .tools(tools as Arc<dyn ToolProvider>)
+        .skills(skills)
+        .strategy(skill_strategy())
+        .build()
+        .expect("runtime builds")
+}
+
+/// Drive both turns of the skill scenario to completion (no faults) and
+/// return the full event log.
+async fn skill_run_to_completion(scenario: &ChaosScenario) -> GoldenRun {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let runtime = build_skill_runtime(Arc::clone(&store), scenario);
+
+    let session_id = SessionId::new();
+    let handle = runtime
+        .open_session(session_id, OpenMode::New)
+        .await
+        .expect("open New");
+    let _events_rx = handle.subscribe();
+
+    // Turn 1: sigil text + tool.
+    handle
+        .submit_user_text("please use $foo")
+        .await
+        .expect("submit_user_text turn 1");
+    wait_for_turn_completed_twice(&handle).await;
+
+    // Turn 2: follow-up. The SkillInjector re-derives "foo" from turn 1's
+    // recorded assistant text and writes SkillActivated + SystemPromptInjected
+    // with the body.
+    handle
+        .submit_user_text("follow up")
+        .await
+        .expect("submit_user_text turn 2");
+    wait_for_turn_completed_twice(&handle).await;
+
+    let events = read_log(store.as_ref(), session_id).await;
+    let terminal = terminal_payload(&events).clone();
+
+    let out = handle
+        .shutdown(Duration::from_secs(5))
+        .await
+        .expect("shutdown");
+    assert!(
+        matches!(out, ShutdownOutcome::Clean { .. }),
+        "expected Clean shutdown, got {out:?}"
+    );
+    drop(tmp);
+    GoldenRun { events, terminal }
+}
+
+/// Wait for the session actor to fully process two `TurnCompleted` events
+/// (the FSM emission + the actor's terminal hook), so the next
+/// `submit_user_text` is not silently dropped by `try_start_turn`'s guard.
+/// Mirrors `h11_skill_injection::wait_for_turn_completed`.
+async fn wait_for_turn_completed_twice(handle: &SessionHandle) {
+    let mut events_rx = handle.subscribe();
+    let _ = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut seen = 0u8;
+        loop {
+            match events_rx.recv().await {
+                Ok(StreamEvent::TurnCompleted) => {
+                    seen += 1;
+                    if seen == 2 {
+                        return;
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => return,
+            }
+        }
+    })
+    .await;
+}
+
+/// Run the skill scenario with a `PanicAt(crash_after_n)` Y-path crash
+/// somewhere across the two-turn flow, then resume in a fresh `Runtime`
+/// sharing the same JSONL store. Returns the resumed log.
+///
+/// `turn1_total` counts how many appends to expect for turn 1 (everything
+/// up through the second `TurnCompleted` event). Crash boundaries with
+/// `crash_after_n <= turn1_total` panic mid-turn-1; boundaries past that
+/// crash mid-turn-2.
+/// The phase-1 actor is replayed forward (turn 1 submitted, then turn 2
+/// submitted as soon as the on-disk log shows turn 1 has terminated) so
+/// post-turn-1 boundaries are reachable.
+async fn skill_run_with_y_fault(
+    scenario: &ChaosScenario,
+    crash_after_n: u64,
+    turn1_total: u64,
+) -> Vec<ConversationEvent> {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let session_id = SessionId::new();
+
+    // ----- Phase 1: drive both turns; fault may fire in either. -----
+    let inner1: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let wrapper1: Arc<FaultInjectingStore<JsonlStore>> =
+        Arc::new(FaultInjectingStore::new(Arc::clone(&inner1)));
+    let store1: Arc<dyn ConversationStore> = Arc::clone(&wrapper1) as Arc<dyn ConversationStore>;
+    let runtime1 = build_skill_runtime(store1, scenario);
+    let handle1 = runtime1
+        .open_session(session_id, OpenMode::New)
+        .await
+        .expect("open New");
+
+    // Arm the trigger AFTER open_session so seq=0 SessionStarted is not the
+    // panic target. `crash_after_n` is 1-indexed against turn-event seq, so
+    // the trigger fires after `crash_after_n + 1` total appends (the +1
+    // accounts for SessionStarted).
+    wrapper1
+        .set_trigger(FaultTrigger::PanicAt {
+            event_no: crash_after_n + 1,
+            message: "skill chaos fault",
+        })
+        .await;
+
+    handle1
+        .submit_user_text("please use $foo")
+        .await
+        .expect("submit_user_text turn 1");
+
+    // Wait until either the panic fires or turn 1 reaches a terminal. We
+    // do not subscribe to TurnCompleted because the actor may already be
+    // dead by the time we'd start listening; polling the on-disk log is
+    // panic-tolerant.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut turn1_seen_terminal = false;
+    loop {
+        if log_has_terminal(inner1.as_ref(), session_id).await {
+            turn1_seen_terminal = true;
+            break;
+        }
+        if wrapper1.written_count() > crash_after_n {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    // If turn 1 terminated cleanly and the crash boundary is past turn 1,
+    // submit turn 2 from the SAME handle so the second-turn appends land in
+    // the still-live actor; this is the only way to reach turn-2 boundaries.
+    if turn1_seen_terminal && crash_after_n > turn1_total {
+        // Allow the actor's on_turn_complete hook to run so the
+        // `in_flight = None` guard releases.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let _ = handle1.submit_user_text("follow up").await;
+        let deadline2 = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let events = read_log(inner1.as_ref(), session_id).await;
+            // Count distinct turns by TurnStarted events; require >= 2 to
+            // confirm turn 2 has at least begun (the dual-TurnCompleted
+            // dance means raw terminal counts don't reflect turn count).
+            let turns_started = events
+                .iter()
+                .filter(|e| matches!(e.payload, EventPayload::TurnStarted { .. }))
+                .count();
+            // Done condition: turn 2 also terminated (i.e. >= 2 TurnStarted
+            // AND >= 4 TurnCompleted/Failed total, since each turn writes
+            // two of them).
+            let terminal_count = events
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e.payload,
+                        EventPayload::TurnCompleted { .. }
+                            | EventPayload::TurnFailed { .. }
+                            | EventPayload::TurnPaused { .. }
+                    )
+                })
+                .count();
+            let both_turns_done = turns_started >= 2 && terminal_count >= 4;
+            if both_turns_done || wrapper1.written_count() > crash_after_n {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    drop(handle1);
+    drop(runtime1);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // ----- Phase 2: fresh Runtime, same on-disk JSONL, Resume mode. -----
+    let inner2: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let store2: Arc<dyn ConversationStore> = inner2.clone();
+    let runtime2 = build_skill_runtime(Arc::clone(&store2), scenario);
+
+    let handle2 = runtime2
+        .open_session(session_id, OpenMode::Resume)
+        .await
+        .expect("open Resume");
+
+    // Drive turn 1 to terminal (resume-from-crashed-turn-1) OR turn 2 to
+    // terminal (turn 1 already done, turn 2 crashed). The phase-2 handle
+    // only knows what's on disk; if turn 2 was never submitted (i.e. phase 1
+    // crashed mid-turn-1), we need to submit "follow up" again so turn 2 runs.
+    wait_for_terminal_with_store(&handle2, store2.as_ref(), session_id).await;
+
+    let mid_events = read_log(store2.as_ref(), session_id).await;
+    let turns_started = mid_events
+        .iter()
+        .filter(|e| matches!(e.payload, EventPayload::TurnStarted { .. }))
+        .count();
+
+    // If the resumed log only has turn 1 begun (no turn 2 TurnStarted),
+    // submit turn 2 ourselves so the chaos scenario observes the same
+    // two-turn flow as the golden.
+    if turns_started < 2 {
+        // Brief settling pause so the resume-induced TurnCompleted for
+        // turn 1 has flushed before we kick off turn 2.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let _ = handle2.submit_user_text("follow up").await;
+        // Wait for the SECOND TurnCompleted broadcast (turn 2). Since
+        // wait_for_terminal_with_store short-circuits on any prior terminal,
+        // we poll the log instead.
+        let deadline3 = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let events = read_log(store2.as_ref(), session_id).await;
+            let ts = events
+                .iter()
+                .filter(|e| matches!(e.payload, EventPayload::TurnStarted { .. }))
+                .count();
+            let tc = events
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e.payload,
+                        EventPayload::TurnCompleted { .. }
+                            | EventPayload::TurnFailed { .. }
+                            | EventPayload::TurnPaused { .. }
+                    )
+                })
+                .count();
+            if ts >= 2 && tc >= 4 {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline3 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    let events = read_log(store2.as_ref(), session_id).await;
+    let _ = handle2.shutdown(Duration::from_secs(5)).await;
+    drop(tmp);
+    events
+}
+
+/// Locate the two `ResumeFromModelCompleted`-compatible crash boundaries
+/// chosen for `text_then_skill_then_tool`. Returns 1-indexed turn-event-
+/// indices into the golden log. See the file-level comment for why these
+/// differ from the spec's idealized boundaries.
+///
+/// - `boundary_1`: the first `ModelCallCompleted` in the log with
+///   `stop_reason` `EndTurn` (i.e., turn 1's final model call, which closes
+///   the sigil-bearing turn). Crash here = "sigil text persisted, turn 1
+///   resumes cleanly".
+/// - `boundary_2`: the LAST `ModelCallCompleted` in the log with
+///   `stop_reason` `EndTurn` (i.e., turn 2's only model call, which closes
+///   the `SkillActivated`-bearing turn). Crash here = "`SkillActivated` +
+///   `SystemPromptInjected` persisted, turn 2 resumes cleanly".
+fn skill_crash_boundaries(events: &[ConversationEvent]) -> (Option<u64>, Option<u64>) {
+    use cogito_protocol::gateway::StopReason;
+    let mut endturns: Vec<u64> = Vec::new();
+    for (i, e) in events.iter().enumerate() {
+        if let EventPayload::ModelCallCompleted { stop_reason, .. } = &e.payload {
+            if matches!(stop_reason, StopReason::EndTurn) {
+                endturns.push((i + 1) as u64);
+            }
+        }
+    }
+    let b1 = endturns.first().copied();
+    let b2 = endturns.last().copied();
+    // If b1 == b2 (e.g. golden produced only one EndTurn), the test
+    // becomes a single-boundary check, but the spec demands two distinct
+    // events; surface that as the caller's responsibility.
+    (b1, b2)
+}
+
+/// Count how many events make up the turn 1 prefix in the golden log
+/// (everything through the FIRST `TurnCompleted`, inclusive). Used by the
+/// fault runner to decide whether to submit turn 2 on the live handle.
+fn turn1_event_count(events: &[ConversationEvent]) -> u64 {
+    for (i, e) in events.iter().enumerate() {
+        if matches!(e.payload, EventPayload::TurnCompleted { .. }) {
+            return (i + 1) as u64;
+        }
+    }
+    events.len() as u64
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn text_then_skill_then_tool() {
+    let scenario = chaos_scenarios::text_then_skill_then_tool();
+
+    let golden = skill_run_to_completion(&scenario).await;
+    let turn1_total = turn1_event_count(&golden.events);
+
+    eprintln!(
+        "scenario=text_then_skill_then_tool golden_events={} turn1_total={turn1_total}",
+        golden.events.len()
+    );
+
+    // Skill-specific golden assertions: the resumed and golden logs must each
+    // contain exactly one SkillActivated{name=foo} and turn 2's
+    // SystemPromptInjected must carry the <skill name="foo"> body.
+    assert_skill_activated_once(&golden.events, "foo");
+    assert_turn2_suffix_has_skill_body(&golden.events);
+
+    let (b1, b2) = skill_crash_boundaries(&golden.events);
+    let b1 = b1.expect("golden must contain at least one EndTurn ModelCallCompleted (turn 1)");
+    let b2 = b2.expect("golden must contain at least one EndTurn ModelCallCompleted (turn 2)");
+    assert_ne!(
+        b1, b2,
+        "scenario must produce two distinct EndTurn ModelCallCompleted events; got both at {b1}"
+    );
+
+    eprintln!(
+        "  skill chaos boundaries: b1={b1} (post turn-1 final MCC), \
+         b2={b2} (post turn-2 final MCC)"
+    );
+
+    for &crash_after_n in &[b1, b2] {
+        let resumed = skill_run_with_y_fault(&scenario, crash_after_n, turn1_total).await;
+        eprintln!(
+            "  skill chaos: crash_after_n={crash_after_n} resumed_len={}",
+            resumed.len()
+        );
+
+        assert_context_managed_pairing(&resumed);
+        assert_prefix_immutable(&golden.events, &resumed, crash_after_n);
+        assert_terminal_equivalent(&golden.terminal, terminal_payload(&resumed));
+        assert_tool_mapping_equivalent(&golden.events, &resumed);
+        assert_final_text_equivalent(&golden.events, &resumed);
+
+        // Skill-specific oracle: post-resume the log still records exactly
+        // one SkillActivated{name=foo} (no double-injection on resume).
+        assert_skill_activated_once(&resumed, "foo");
+        // Skill-specific oracle: the final suffix in the resumed log still
+        // carries the skill body (proves SystemPromptInjected was written
+        // exactly once after resume).
+        assert_turn2_suffix_has_skill_body(&resumed);
+    }
+}
+
+/// Assert that the log contains exactly one `SkillActivated` event whose
+/// `skill_name` equals `name`.
+fn assert_skill_activated_once(events: &[ConversationEvent], name: &str) {
+    let count = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.payload,
+                EventPayload::SkillActivated { skill_name, .. } if skill_name == name
+            )
+        })
+        .count();
+    assert_eq!(
+        count, 1,
+        "expected exactly one SkillActivated{{name={name}}}, got {count}"
+    );
+}
+
+/// Assert that the last `SystemPromptInjected.suffix` in the log contains
+/// the XML-wrapped skill body (i.e. turn 2 successfully injected the
+/// activated skill).
+fn assert_turn2_suffix_has_skill_body(events: &[ConversationEvent]) {
+    let last_suffix = events
+        .iter()
+        .rev()
+        .find_map(|e| match &e.payload {
+            EventPayload::SystemPromptInjected { suffix, .. } => Some(suffix.clone()),
+            _ => None,
+        })
+        .expect("at least one SystemPromptInjected in log");
+    assert!(
+        last_suffix.contains("<skill name=\"foo\""),
+        "expected final suffix to contain skill body, got: {last_suffix}"
+    );
+}
+
 // TODO(post-Sprint-3): X path with poisoned-actor detection from outside.
 // Today the actor task panic just gets caught by tokio; the test side
 // detects "phase 1 is done" by polling the on-disk log + the wrapper's
