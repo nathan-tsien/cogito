@@ -572,6 +572,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cogito-skills"
+version = "0.1.0"
+dependencies = [
+ "cogito-protocol",
+ "regex",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "cogito-store-jsonl"
 version = "0.1.0"
 dependencies = [
