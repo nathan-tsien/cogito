@@ -7,36 +7,30 @@
 use serde::{Deserialize, Serialize};
 
 /// What caused a new turn to start. Open-by-extension via
-/// `#[non_exhaustive]` per ADR-0007 track B: future variants are additive
-/// and do NOT bump `schema_version`.
-///
-/// v0.1 ships exactly one variant. A single-variant `#[non_exhaustive]`
-/// enum is intentional: it locks the *shape* of the abstraction so that
-/// future variants are additive (Skill, Hook, multimodal user content),
-/// even though the enum looks like overkill today.
+/// `#[non_exhaustive]` per ADR-0007 track B.
 ///
 /// Reserved variants (DO NOT add to the enum until the matching
-/// consumer lands — adding a variant before its handler exists creates
-/// a dead-code path that drifts unverified):
+/// consumer lands):
 ///
-/// - `UserContent(Vec<ContentBlock>)` — lands with the v0.2 multimedia
-///   ADR + `ContentBlock::{Image, Audio}`. Projection: the per-session
-///   loop writes `TurnStarted.user_input = blocks` verbatim.
-/// - `SkillInvocation { skill_id: String, args: serde_json::Value }` —
-///   lands with the post-v0.3 Skills initiative. Projection: the loop
-///   writes `TurnStarted.origin = Skill { skill_id }` and derives
-///   `user_input` from `args`.
-/// - `HookFired { hook_id: String, payload: serde_json::Value }` —
-///   lands with the post-v0.6 Hooks initiative beyond H09's policy
-///   gate. Projection: the loop writes
-///   `TurnStarted.origin = Hook { hook_id }` and derives `user_input`
-///   from `payload`.
+/// - `UserContent(Vec<ContentBlock>)` — lands with v0.2 multimedia ADR.
+/// - `HookFired { hook_id, payload }` — lands with post-v0.6 Hook trigger work.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TurnTrigger {
     /// User-typed plain text. The overwhelmingly common case for v0.1.
     UserText(String),
+
+    /// User invoked one or more skills via `/skill <name>` (optionally with
+    /// trailing text). `user_text` is the leftover after slash parsing
+    /// (`None` when the user typed only `/skill foo`). Both fields can be
+    /// non-empty simultaneously (`/skill foo do X`).
+    SkillActivation {
+        /// Skill names to activate (Repo/User bare names or `<plugin_id>:<name>`).
+        names: Vec<String>,
+        /// Optional trailing user text that becomes `TurnStarted.user_input`.
+        user_text: Option<String>,
+    },
 }
 
 #[cfg(test)]
@@ -55,15 +49,36 @@ mod tests {
 
     #[test]
     fn unknown_kind_fails_to_deserialize() {
-        // Until v0.2 lands `UserContent` (or v0.3 lands `SkillInvocation`),
-        // unknown `kind` values must fail loudly: TurnTrigger is wire-internal
-        // between SessionHandle and the per-session loop, NOT a persisted
-        // event-log payload that needs forward-tolerance per ADR-0007.
-        let unknown = r#"{"kind":"skill_invocation","data":{"skill_id":"foo"}}"#;
+        let unknown = r#"{"kind":"hook_fired","data":{"hook_id":"x"}}"#;
         let result: Result<TurnTrigger, _> = serde_json::from_str(unknown);
         assert!(
             result.is_err(),
             "expected unknown variant to error; got {result:?}"
         );
+    }
+
+    #[test]
+    fn skill_activation_serde_roundtrip_no_text() -> serde_json::Result<()> {
+        let trigger = TurnTrigger::SkillActivation {
+            names: vec!["foo".into(), "bar".into()],
+            user_text: None,
+        };
+        let json = serde_json::to_string(&trigger)?;
+        let parsed: TurnTrigger = serde_json::from_str(&json)?;
+        assert_eq!(parsed, trigger);
+        assert!(json.contains("\"kind\":\"skill_activation\""));
+        Ok(())
+    }
+
+    #[test]
+    fn skill_activation_serde_roundtrip_with_text() -> serde_json::Result<()> {
+        let trigger = TurnTrigger::SkillActivation {
+            names: vec!["foo".into()],
+            user_text: Some("do X".into()),
+        };
+        let json = serde_json::to_string(&trigger)?;
+        let parsed: TurnTrigger = serde_json::from_str(&json)?;
+        assert_eq!(parsed, trigger);
+        Ok(())
     }
 }
