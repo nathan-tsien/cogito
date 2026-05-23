@@ -176,3 +176,18 @@ fn cross_scope_repo_wins_over_user() {
     let dual = reg.get("dual").unwrap();
     assert!(dual.body.starts_with("repo body"));
 }
+
+#[test]
+fn registry_list_is_sorted_by_name() {
+    let cfg = ScanConfig {
+        workspace_root: Some(fixtures()),
+        user_dir: Some(fixtures().join("user-home").join(".cogito").join("skills")),
+        include_system: false,
+    };
+    let reg = SkillRegistry::scan(cfg).unwrap();
+    let names: Vec<String> = reg.list().into_iter().map(|m| m.name).collect();
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(names, sorted, "list() must be sorted alphabetically");
+    assert!(names.len() >= 2, "test depends on at least 2 fixtures");
+}

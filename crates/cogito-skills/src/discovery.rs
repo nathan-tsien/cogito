@@ -105,7 +105,15 @@ fn scan_skills_dir(
         path: skills_dir.to_path_buf(),
         source: e,
     })?;
-    for entry in entries.flatten() {
+    // Sort by file name so discovery output (and same-dir duplicate
+    // detection) is filesystem-independent. `read_dir` on Linux returns
+    // inode-allocation order, which varies across runs and machines and
+    // would let prompt caching churn on the downstream `SkillInjector`.
+    // Per-entry I/O errors are still silently skipped via `.flatten()`,
+    // matching the previous behavior.
+    let mut entries: Vec<fs::DirEntry> = entries.flatten().collect();
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for entry in entries {
         let dir = entry.path();
         if !dir.is_dir() {
             continue;

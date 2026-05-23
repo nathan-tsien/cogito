@@ -177,7 +177,14 @@ fn check_same_dir_duplicates(config: &ScanConfig) -> Result<(), SkillRegistryErr
 
 impl SkillProvider for SkillRegistry {
     fn list(&self) -> Vec<SkillMetadata> {
-        self.by_name.values().map(|r| r.metadata.clone()).collect()
+        // Sort alphabetically by name so downstream consumers (notably
+        // `SkillInjector`, which serializes this list into the system
+        // prompt) see a stable order — `HashMap` iteration is otherwise
+        // arbitrary and would defeat prompt caching.
+        let mut out: Vec<SkillMetadata> =
+            self.by_name.values().map(|r| r.metadata.clone()).collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
     }
 
     fn get(&self, name: &str) -> Option<SkillContent> {
