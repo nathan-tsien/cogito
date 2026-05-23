@@ -105,8 +105,8 @@ Turn N — model emits "$invoice-parser please run":
        a. accumulate text deltas; maintain code-fence state (``` toggles;
           inline backticks tracked per-line)
        b. on `$<ident>` match outside code: emit
-          ModelEvent::SkillActivationRequested { name } — informational,
-          surfaces via StreamEvent for telemetry but NOT persisted
+          StreamEvent::SkillActivationRequested { skill_name } — broadcast,
+          NOT persisted (next turn's SkillInjector is authoritative)
        c. text itself is recorded normally as TextBlockRecorded
   → Turn N completes; activation is processed on Turn N+1 (step 2 above).
 ```
@@ -247,17 +247,24 @@ no top-level user message is appended to `messages`. The model sees the activate
 content and produces a turn (likely echoing acknowledgement + waiting for next
 user input). This matches Claude Code's `/skill` UX.
 
-### 5.5 New `ModelEvent` variant — `SkillActivationRequested`
+### 5.5 New `StreamEvent` variant — `SkillActivationRequested`
 
 ```rust
+// cogito-protocol/src/stream.rs
 #[non_exhaustive]
-pub enum ModelEvent {
+pub enum StreamEvent {
     // ... existing variants
-    /// H06 detected `$<registered>` outside code blocks. In-memory only;
-    /// surfaces via StreamEvent for telemetry. NOT persisted.
-    SkillActivationRequested { name: String },
+    /// H06 detected `$<registered>` outside code blocks. Broadcast-only;
+    /// NOT persisted. Subscribers (REPL, TUI, telemetry) surface live UI;
+    /// authoritative activation lands as `EventPayload::SkillActivated` in
+    /// the next turn's H11 pass.
+    SkillActivationRequested { skill_name: String },
 }
 ```
+
+(Earlier draft used `ModelEvent` — incorrect. `ModelEvent` belongs to
+`ModelGateway` streaming; sigil detection happens in H06 after ModelEvent has
+already been consumed, so the right broadcast surface is `StreamEvent`.)
 
 Per Q1 (re-derive), this event is never written to the conversation store.
 H11's SkillInjector reconstructs the same set by scanning text blocks.
@@ -488,7 +495,7 @@ Today's H06 only handles text + thinking + tool-use streaming. Sprint 7 adds:
 - A `FenceState` carried per `text_block` (reset on `text_block_start`).
 - On each `text_delta`: feed delta to `find_sigils_outside_code`; for each hit,
   call `provider.is_registered(name)`; if true, emit
-  `ModelEvent::SkillActivationRequested { name }` once per (name, block).
+  `StreamEvent::SkillActivationRequested { skill_name }` once per (name, block).
 - The `text_delta` is still passed through unchanged; sigil detection is
   side-effect-only.
 
@@ -610,7 +617,7 @@ final-text) MUST pass for each boundary.
 
 - `tests/h06_skill_sigil_detection.rs`: mock model emits text streams with
   sigils inside / outside code fences; assert exactly the expected set of
-  `ModelEvent::SkillActivationRequested` surfaces.
+  `StreamEvent::SkillActivationRequested` surfaces.
 - `tests/h11_skill_injection.rs`: end-to-end H11 pass with SkillInjector
   configured — covers all three activation paths.
 - `tests/turn_driver_skill_activation_user.rs`: TurnTrigger::SkillActivation
