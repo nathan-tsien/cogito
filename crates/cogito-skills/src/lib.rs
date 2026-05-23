@@ -3,7 +3,10 @@
 
 pub mod discovery;
 pub mod metadata;
+pub mod registry;
 pub mod sigil;
+
+pub use registry::{SkillRegistry, SkillRegistryError};
 
 #[cfg(test)]
 mod smoke_tests {

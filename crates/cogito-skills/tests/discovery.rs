@@ -75,3 +75,104 @@ fn missing_user_dir_is_not_an_error() {
     };
     let _ = discover_skills(&cfg).expect("missing user dir is OK");
 }
+
+use cogito_protocol::skill::SkillProvider;
+use cogito_skills::{SkillRegistry, SkillRegistryError};
+
+#[test]
+fn registry_build_succeeds() {
+    let reg = SkillRegistry::scan(ScanConfig {
+        workspace_root: Some(fixtures()),
+        user_dir: Some(fixtures().join("user-home").join(".cogito").join("skills")),
+        include_system: false,
+    })
+    .unwrap();
+    assert!(reg.is_registered("repo-foo"));
+    assert!(reg.is_registered("user-baz"));
+    assert!(!reg.is_registered("nonexistent"));
+}
+
+#[test]
+fn registry_get_returns_body() {
+    let reg = SkillRegistry::scan(ScanConfig {
+        workspace_root: Some(fixtures()),
+        user_dir: None,
+        include_system: false,
+    })
+    .unwrap();
+    let content = reg.get("repo-foo").unwrap();
+    assert!(content.body.starts_with("foo body"));
+}
+
+#[test]
+fn duplicate_name_in_same_dir_is_fatal() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let tmp = tempdir().unwrap();
+    let skills = tmp.path().join(".cogito").join("skills");
+    fs::create_dir_all(skills.join("dup-a")).unwrap();
+    fs::create_dir_all(skills.join("dup-b")).unwrap();
+    fs::write(
+        skills.join("dup-a").join("SKILL.md"),
+        "---\nname: dup\ndescription: a\n---\nbody-a",
+    )
+    .unwrap();
+    fs::write(
+        skills.join("dup-b").join("SKILL.md"),
+        "---\nname: dup\ndescription: b\n---\nbody-b",
+    )
+    .unwrap();
+    // Plant a .git/ so the walk-up stops here:
+    fs::create_dir_all(tmp.path().join(".git")).unwrap();
+
+    let err = SkillRegistry::scan(ScanConfig {
+        workspace_root: Some(tmp.path().to_path_buf()),
+        user_dir: None,
+        include_system: false,
+    })
+    .unwrap_err();
+    assert!(matches!(err, SkillRegistryError::DuplicateName { .. }));
+}
+
+#[test]
+fn cross_scope_repo_wins_over_user() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let tmp = tempdir().unwrap();
+    let repo_skills = tmp
+        .path()
+        .join("repo")
+        .join(".cogito")
+        .join("skills")
+        .join("dual");
+    let user_skills = tmp
+        .path()
+        .join("user")
+        .join(".cogito")
+        .join("skills")
+        .join("dual");
+    fs::create_dir_all(&repo_skills).unwrap();
+    fs::create_dir_all(&user_skills).unwrap();
+    fs::write(
+        repo_skills.join("SKILL.md"),
+        "---\nname: dual\ndescription: from-repo\n---\nrepo body",
+    )
+    .unwrap();
+    fs::write(
+        user_skills.join("SKILL.md"),
+        "---\nname: dual\ndescription: from-user\n---\nuser body",
+    )
+    .unwrap();
+    fs::create_dir_all(tmp.path().join("repo").join(".git")).unwrap();
+
+    let reg = SkillRegistry::scan(ScanConfig {
+        workspace_root: Some(tmp.path().join("repo")),
+        user_dir: Some(tmp.path().join("user").join(".cogito").join("skills")),
+        include_system: false,
+    })
+    .unwrap();
+    let dual = reg.get("dual").unwrap();
+    assert!(dual.body.starts_with("repo body"));
+}
