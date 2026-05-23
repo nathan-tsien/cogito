@@ -2,6 +2,7 @@
 //! `docs/superpowers/specs/2026-05-23-sprint-7-skill-loader-design.md`.
 
 pub mod metadata;
+pub mod sigil;
 
 #[cfg(test)]
 mod smoke_tests {
