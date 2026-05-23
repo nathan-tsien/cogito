@@ -414,6 +414,7 @@ dependencies = [
  "chrono",
  "cogito-mock-model",
  "cogito-protocol",
+ "cogito-skills",
  "cogito-test-fixtures",
  "serde",
  "serde_json",
