@@ -64,6 +64,37 @@ pub struct RuntimeConfigPartial {
     /// finalize, where a bad entry becomes a `McpStartupFailure`
     /// instead of poisoning the whole parse. See ADR-0018 §3.
     pub mcp_servers: Option<Vec<toml::Value>>,
+    /// Optional `[skills]` section (Sprint 7). Plumbed into
+    /// `RuntimeBuilder` by `cogito-cli` to build a `SkillRegistry`.
+    pub skills: Option<SkillsConfig>,
+}
+
+/// `[skills]` cogito.toml section.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct SkillsConfig {
+    /// Master switch. When `false`, `RuntimeBuilder` receives no `SkillProvider`
+    /// and selecting `SystemPromptInjectorConfig::Skill` fails at build time.
+    #[serde(default = "default_skills_enabled")]
+    pub enabled: bool,
+    /// User scope dir. None / empty disables user scope.
+    pub user_dir: Option<String>,
+    /// Opt-in to bundled (System) skills.
+    #[serde(default)]
+    pub include_system: bool,
+}
+
+fn default_skills_enabled() -> bool {
+    true
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            user_dir: None,
+            include_system: false,
+        }
+    }
 }
 
 /// Partial `[runtime]` section. Every field is `Option<T>` so the
@@ -120,6 +151,7 @@ mod tests {
             }),
             providers: Some(vec![]),
             mcp_servers: None,
+            skills: None,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: RuntimeConfigPartial = serde_json::from_str(&s).unwrap();
@@ -135,6 +167,7 @@ mod tests {
         assert!(p.runtime.is_none());
         assert!(p.providers.is_none());
         assert!(p.mcp_servers.is_none());
+        assert!(p.skills.is_none());
     }
 
     #[test]

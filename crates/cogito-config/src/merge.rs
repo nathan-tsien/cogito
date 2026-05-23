@@ -28,6 +28,9 @@ fn merge_into(mut acc: RuntimeConfigPartial, next: RuntimeConfigPartial) -> Runt
     if let Some(mcp_next) = next.mcp_servers {
         acc.mcp_servers = Some(mcp_next);
     }
+    if let Some(skills_next) = next.skills {
+        acc.skills = Some(skills_next);
+    }
     acc
 }
 
