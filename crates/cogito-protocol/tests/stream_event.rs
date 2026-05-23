@@ -47,3 +47,16 @@ fn lifecycle_events_round_trip() -> serde_json::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn skill_activation_requested_serde_roundtrip() {
+    use cogito_protocol::stream::StreamEvent;
+    let ev = StreamEvent::SkillActivationRequested {
+        skill_name: "invoice-parser".into(),
+    };
+    let json = serde_json::to_string(&ev).unwrap();
+    assert!(json.contains("\"kind\":\"skill_activation_requested\""));
+    let parsed: StreamEvent = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed, ev);
+}

@@ -21,8 +21,10 @@ futures.workspace = true
 regex.workspace = true
 
 [dev-dependencies]
+cogito-test-fixtures = { workspace = true }
 insta.workspace = true
 proptest.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
 toml = { workspace = true }
 
 [lints]

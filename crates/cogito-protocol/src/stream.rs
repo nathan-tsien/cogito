@@ -58,6 +58,15 @@ pub enum StreamEvent {
         chunk: String,
     },
 
+    /// H06 detected a `$<registered>` sigil outside code blocks. Broadcast
+    /// only — NOT persisted. Subscribers (REPL, TUI) surface this for live
+    /// feedback; the authoritative activation lands as
+    /// `EventPayload::SkillActivated` in the next turn's H11 pass.
+    SkillActivationRequested {
+        /// The bare skill name (or `<plugin_id>:<name>`) detected.
+        skill_name: String,
+    },
+
     /// H08 began dispatching a tool call.
     ToolDispatchStarted {
         /// Opaque identifier for the tool call.
