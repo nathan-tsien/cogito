@@ -7,6 +7,7 @@ use std::sync::Arc;
 use cogito_protocol::ContextPipeline;
 use cogito_protocol::MetricsRecorder;
 use cogito_protocol::gateway::ModelGateway;
+use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::tool::ToolProvider;
 use tokio::sync::Mutex;
@@ -44,4 +45,9 @@ pub struct TurnDeps {
     /// session open. Task 31 will move construction to `SessionShared`; for
     /// Sprint 6 it is built in `spawn_turn_driver` from the per-turn strategy.
     pub context_pipeline: Arc<ContextPipeline>,
+    /// Optional Skill loader provider. `None` for sessions whose strategy
+    /// does NOT select `SystemPromptInjectorConfig::Skill`. H06 uses it to
+    /// gate sigil detection; H11's `SkillInjector` holds its own `Arc`
+    /// internally.
+    pub skills: Option<Arc<dyn SkillProvider>>,
 }

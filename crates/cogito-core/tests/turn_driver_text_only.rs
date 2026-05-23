@@ -76,6 +76,7 @@ async fn text_only_turn_reaches_completed() -> Result<(), Box<dyn std::error::Er
         context_pipeline: Arc::new(cogito_context::build_pipeline(
             &cogito_protocol::context::ContextConfig::default(),
         )),
+        skills: None,
     };
 
     let ctx = TurnCtx {

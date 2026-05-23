@@ -32,6 +32,7 @@ use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::job::{JobCompletionEvent, JobId};
 use cogito_protocol::session::SessionMeta;
+use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
@@ -104,6 +105,10 @@ pub(super) struct SessionState {
     /// Context pipeline built once at session open from `strategy.context`.
     /// All turns in this session share the same pipeline via `Arc::clone`.
     pub(super) context_pipeline: Arc<ContextPipeline>,
+    /// Optional Skill loader provider — injected at Runtime build time and
+    /// cloned into every turn's `TurnDeps`. `None` for sessions that do not
+    /// use the Skill injector.
+    pub(super) skills: Option<Arc<dyn SkillProvider>>,
 }
 
 /// External dependencies injected at spawn time.
@@ -346,6 +351,7 @@ fn spawn_turn_driver(
         hooks: Arc::clone(&state.hooks),
         metrics: Arc::clone(&state.metrics),
         context_pipeline,
+        skills: state.skills.clone(),
     };
     let result_tx = state.turn_result_tx.clone();
     tokio::spawn(async move {
