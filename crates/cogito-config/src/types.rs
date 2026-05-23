@@ -27,6 +27,12 @@ pub struct RuntimeConfig {
     /// Surface code joins these with handshake-time failures from
     /// `build_mcp_provider` and surfaces them in the startup banner.
     pub mcp_parse_failures: Vec<McpStartupFailure>,
+    /// Sprint 7: optional `[skills]` section. Surfaces (CLI / TUI) use
+    /// this to construct a `SkillRegistry` and inject it into
+    /// `RuntimeBuilder::skills`. `None` is equivalent to "section
+    /// omitted"; finalize does not synthesize a default so absence
+    /// stays distinguishable from `enabled = true`.
+    pub skills: Option<SkillsConfig>,
 }
 
 /// Finalized `[runtime]` section. All fields are resolved (no `Option`

@@ -101,6 +101,7 @@ impl RuntimeConfigPartial {
             strategies: std::collections::HashMap::new(),
             mcp_servers,
             mcp_parse_failures,
+            skills: self.skills,
         })
     }
 }

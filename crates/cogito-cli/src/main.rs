@@ -3,11 +3,8 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)]
 
-mod banner;
-mod chat;
-mod render;
-
 use clap::{Parser, Subcommand};
+use cogito_cli::chat;
 
 #[derive(Parser)]
 #[command(name = "cogito", version, about = "cogito Agent Runtime CLI")]

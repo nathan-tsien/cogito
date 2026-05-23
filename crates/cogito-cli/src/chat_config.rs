@@ -3,6 +3,7 @@
 //! the boundary without going through the full Runtime.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use cogito_config::{
@@ -10,6 +11,7 @@ use cogito_config::{
     RuntimeSectionPartial, merge_layers,
 };
 use cogito_model::ProviderConfig;
+use cogito_protocol::skill::SkillProvider;
 
 /// Subset of `ChatArgs` needed by the config helpers. The CLI build
 /// passes a real `ChatArgs`; tests pass a `ChatConfigInputs` directly.
@@ -153,6 +155,48 @@ pub fn select_provider(cfg: &RuntimeConfig, inputs: &ChatConfigInputs) -> Result
         chosen = patch_base_url(chosen, b.clone());
     }
     Ok(chosen)
+}
+
+/// Build the `Arc<dyn SkillProvider>` for this CLI run from the
+/// finalized `[skills]` section. Returns `Ok(None)` when the section
+/// exists but is `enabled = false`, or when scanning succeeded but no
+/// skills were discovered would still produce an empty registry — we
+/// inject that as well so model-sigil activation still flows through
+/// H06 (an empty registry simply matches nothing).
+///
+/// The default when the section is absent is "enabled": Sprint 7's
+/// philosophy is that skills are a passive, opt-out feature.
+///
+/// # Errors
+///
+/// Returns the `SkillRegistryError` surfaced by the registry scan,
+/// wrapped in `anyhow` for the CLI's error chain.
+pub fn build_skill_provider(cfg: &RuntimeConfig) -> Result<Option<Arc<dyn SkillProvider>>> {
+    let enabled = cfg.skills.as_ref().is_none_or(|s| s.enabled);
+    if !enabled {
+        return Ok(None);
+    }
+    let section = cfg.skills.clone().unwrap_or_default();
+    let scan = cogito_skills::discovery::ScanConfig {
+        workspace_root: Some(
+            std::env::current_dir().context("reading current dir for skill scan")?,
+        ),
+        user_dir: section
+            .user_dir
+            .map(PathBuf::from)
+            .or_else(default_user_skills_dir),
+        include_system: section.include_system,
+    };
+    let registry =
+        cogito_skills::SkillRegistry::scan(scan).map_err(|e| anyhow!("scanning skills: {e}"))?;
+    Ok(Some(Arc::new(registry) as Arc<dyn SkillProvider>))
+}
+
+/// Resolve the conventional user-scope skills directory
+/// (`~/.cogito/skills`). Returns `None` when `$HOME` is unset — that
+/// disables user-scope scanning without failing the run.
+fn default_user_skills_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cogito").join("skills"))
 }
 
 /// Replace the `base_url` field on the chosen provider, preserving
