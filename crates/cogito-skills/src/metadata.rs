@@ -42,6 +42,9 @@ pub enum ParseError {
     /// YAML deserialization failed.
     #[error("yaml parse error: {0}")]
     Yaml(#[from] serde_yaml::Error),
+    /// I/O error reading SKILL.md.
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 #[derive(Debug, Deserialize)]

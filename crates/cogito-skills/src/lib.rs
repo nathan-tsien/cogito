@@ -1,6 +1,7 @@
 //! Hands-layer Skill loader. See `docs/skills/overview.md` and
 //! `docs/superpowers/specs/2026-05-23-sprint-7-skill-loader-design.md`.
 
+pub mod discovery;
 pub mod metadata;
 pub mod sigil;
 
