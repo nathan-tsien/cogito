@@ -57,7 +57,7 @@ impl HistoryProjector for StandardProjector {
                     }
                 }
 
-                EventPayload::TurnStarted { user_input } => {
+                EventPayload::TurnStarted { user_input, .. } => {
                     flush_assistant(&mut assistant_buf, &mut messages);
                     // Extract text from user input blocks. Non-text blocks (images, etc.)
                     // are skipped in v0.1: `ProjectedMessage::User` carries a plain String,
@@ -298,6 +298,7 @@ mod tests {
                 Some(turn1),
                 EventPayload::TurnStarted {
                     user_input: vec![text_block("Hello")],
+                    activate_skills: vec![],
                 },
             ),
             make_event(
@@ -312,6 +313,7 @@ mod tests {
                 Some(turn2),
                 EventPayload::TurnStarted {
                     user_input: vec![text_block("How are you?")],
+                    activate_skills: vec![],
                 },
             ),
             make_event(
@@ -360,6 +362,7 @@ mod tests {
                 Some(turn1),
                 EventPayload::TurnStarted {
                     user_input: vec![text_block("Old message")],
+                    activate_skills: vec![],
                 },
             ),
             make_event(
@@ -388,6 +391,7 @@ mod tests {
                 Some(turn3),
                 EventPayload::TurnStarted {
                     user_input: vec![text_block("New message")],
+                    activate_skills: vec![],
                 },
             ),
             make_event(
@@ -430,6 +434,7 @@ mod tests {
                 Some(turn1),
                 EventPayload::TurnStarted {
                     user_input: vec![text_block("Early message")],
+                    activate_skills: vec![],
                 },
             ),
             make_event(
@@ -461,6 +466,7 @@ mod tests {
                 Some(turn3),
                 EventPayload::TurnStarted {
                     user_input: vec![text_block("Latest message")],
+                    activate_skills: vec![],
                 },
             ),
             make_event(
@@ -514,6 +520,7 @@ mod tests {
                 Some(turn1),
                 EventPayload::TurnStarted {
                     user_input: vec![text_block("What day is it?")],
+                    activate_skills: vec![],
                 },
             ),
         ];
@@ -549,6 +556,7 @@ mod tests {
                 Some(turn1),
                 EventPayload::TurnStarted {
                     user_input: vec![text_block("Think first")],
+                    activate_skills: vec![],
                 },
             ),
             make_event(
@@ -602,6 +610,7 @@ mod tests {
                 Some(turn1),
                 EventPayload::TurnStarted {
                     user_input: vec![text_block("List files")],
+                    activate_skills: vec![],
                 },
             ),
             make_event(

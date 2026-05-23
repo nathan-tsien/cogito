@@ -107,6 +107,7 @@ async fn tool_call_completes_via_second_model_call() -> Result<(), Box<dyn std::
         context_pipeline: Arc::new(cogito_context::build_pipeline(
             &cogito_protocol::context::ContextConfig::default(),
         )),
+        skills: None,
     };
 
     let ctx = TurnCtx {
@@ -204,6 +205,7 @@ async fn invalid_tool_args_persist_error_result() -> Result<(), Box<dyn std::err
         context_pipeline: Arc::new(cogito_context::build_pipeline(
             &cogito_protocol::context::ContextConfig::default(),
         )),
+        skills: None,
     };
 
     let ctx = TurnCtx {

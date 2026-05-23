@@ -27,6 +27,12 @@ pub struct RuntimeConfig {
     /// Surface code joins these with handshake-time failures from
     /// `build_mcp_provider` and surfaces them in the startup banner.
     pub mcp_parse_failures: Vec<McpStartupFailure>,
+    /// Sprint 7: optional `[skills]` section. Surfaces (CLI / TUI) use
+    /// this to construct a `SkillRegistry` and inject it into
+    /// `RuntimeBuilder::skills`. `None` is equivalent to "section
+    /// omitted"; finalize does not synthesize a default so absence
+    /// stays distinguishable from `enabled = true`.
+    pub skills: Option<SkillsConfig>,
 }
 
 /// Finalized `[runtime]` section. All fields are resolved (no `Option`
@@ -64,6 +70,38 @@ pub struct RuntimeConfigPartial {
     /// finalize, where a bad entry becomes a `McpStartupFailure`
     /// instead of poisoning the whole parse. See ADR-0018 §3.
     pub mcp_servers: Option<Vec<toml::Value>>,
+    /// Optional `[skills]` section (Sprint 7). Plumbed into
+    /// `RuntimeBuilder` by `cogito-cli` to build a `SkillRegistry`.
+    pub skills: Option<SkillsConfig>,
+}
+
+/// `[skills]` cogito.toml section.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkillsConfig {
+    /// Master switch. When `false`, `RuntimeBuilder` receives no `SkillProvider`
+    /// and selecting `SystemPromptInjectorConfig::Skill` fails at build time.
+    #[serde(default = "default_skills_enabled")]
+    pub enabled: bool,
+    /// User scope dir. None / empty disables user scope.
+    pub user_dir: Option<String>,
+    /// Opt-in to bundled (System) skills.
+    #[serde(default)]
+    pub include_system: bool,
+}
+
+fn default_skills_enabled() -> bool {
+    true
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            user_dir: None,
+            include_system: false,
+        }
+    }
 }
 
 /// Partial `[runtime]` section. Every field is `Option<T>` so the
@@ -120,6 +158,7 @@ mod tests {
             }),
             providers: Some(vec![]),
             mcp_servers: None,
+            skills: None,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: RuntimeConfigPartial = serde_json::from_str(&s).unwrap();
@@ -135,6 +174,7 @@ mod tests {
         assert!(p.runtime.is_none());
         assert!(p.providers.is_none());
         assert!(p.mcp_servers.is_none());
+        assert!(p.skills.is_none());
     }
 
     #[test]
@@ -201,6 +241,24 @@ mod tests {
             panic!("expected ConfigParse");
         };
         assert_eq!(*index, 1);
+    }
+
+    #[test]
+    fn skills_config_rejects_unknown_field() {
+        // A typo like `userdir` (missing underscore) must surface rather
+        // than silently degrade to the default.
+        let toml_str = r#"
+            [skills]
+            enabled = true
+            userdir = "/tmp/skills"
+        "#;
+        let err = toml::from_str::<RuntimeConfigPartial>(toml_str)
+            .expect_err("unknown [skills] field must error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("userdir") || msg.contains("unknown"),
+            "error should mention the offending field, got: {msg}"
+        );
     }
 
     #[test]

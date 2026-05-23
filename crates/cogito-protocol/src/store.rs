@@ -179,6 +179,28 @@ pub trait EventRecorder: Send {
         Ok(id)
     }
 
+    /// Persist a `SkillActivated` event. Default impl routes through
+    /// `append_payload`; backends needing tighter integration may override.
+    async fn record_skill_activated(
+        &mut self,
+        turn_id: crate::ids::TurnId,
+        skill_name: String,
+        source: crate::skill::SkillSource,
+        channel: crate::skill::SkillActivationChannel,
+    ) -> Result<crate::ids::EventId, StoreError> {
+        let (id, _seq) = self
+            .append_payload(
+                turn_id,
+                crate::event::EventPayload::SkillActivated {
+                    skill_name,
+                    source,
+                    channel,
+                },
+            )
+            .await?;
+        Ok(id)
+    }
+
     /// Persist a `ContextCompacted` event for `turn_id`.
     ///
     /// Default implementation builds the payload and delegates to

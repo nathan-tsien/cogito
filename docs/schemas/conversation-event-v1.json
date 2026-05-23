@@ -50,6 +50,14 @@
             "user_input"
           ],
           "properties": {
+            "activate_skills": {
+              "description": "User-requested skill activations carried via `TurnTrigger::SkillActivation` (slash-command channel). Empty for plain `UserText` triggers. Independent from sigil-based activations, which are re-derived from previous-turn text.\n\nAdditive per ADR-0007: defaults to empty on read for older fixtures.",
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "user_input": {
               "description": "User input that triggered this turn.",
               "type": "array",
@@ -742,6 +750,52 @@
           ]
         }
       }
+    },
+    {
+      "description": "A skill (Skill loader, ADR-0020) was activated for the upcoming turn. Written by `SkillInjector` in H11; one event per newly activated skill (dedupe rules in spec §11).",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "channel",
+            "skill_name",
+            "source"
+          ],
+          "properties": {
+            "channel": {
+              "description": "Channel that triggered this activation.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/SkillActivationChannel"
+                }
+              ]
+            },
+            "skill_name": {
+              "description": "Bare name (`foo`) or `<plugin_id>:<name>` for Plugin scope.",
+              "type": "string"
+            },
+            "source": {
+              "description": "Where the skill was discovered.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/SkillSource"
+                }
+              ]
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "skill_activated"
+          ]
+        }
+      }
     }
   ],
   "required": [
@@ -1145,6 +1199,116 @@
           ]
         }
       }
+    },
+    "SkillActivationChannel": {
+      "description": "Channel that triggered a `SkillActivated` event.",
+      "oneOf": [
+        {
+          "description": "Model emitted `$Name` in stream text.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "model_sigil"
+              ]
+            }
+          }
+        },
+        {
+          "description": "User typed `/skill <name>`.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "user_slash"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "SkillSource": {
+      "description": "Where a skill was discovered. Forward-compatible with v0.2 plugins.",
+      "oneOf": [
+        {
+          "description": "`<workspace>/.cogito/skills/<name>/`. `dir` is the workspace root at which the `.cogito/skills/` directory was found (NOT the skill's own directory).",
+          "type": "object",
+          "required": [
+            "dir",
+            "kind"
+          ],
+          "properties": {
+            "dir": {
+              "description": "Workspace root directory.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "repo"
+              ]
+            }
+          }
+        },
+        {
+          "description": "`~/.cogito/skills/<name>/`.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "user"
+              ]
+            }
+          }
+        },
+        {
+          "description": "`<plugin>/skills/<name>/` — never produced in v0.1 (Plugin loader is Sprint 12 / ADR-0021).",
+          "type": "object",
+          "required": [
+            "kind",
+            "plugin_id"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "plugin"
+              ]
+            },
+            "plugin_id": {
+              "description": "Plugin id; namespacing is `<plugin_id>:<skill_name>`.",
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "cogito-bundled skill (feature-gated; off by default in v0.1).",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "system"
+              ]
+            }
+          }
+        }
+      ]
     },
     "StopReason": {
       "description": "Why the model stopped emitting. Set as the last field on `ModelOutput`.\n\nMarked `#[non_exhaustive]` because v0.x adapters may introduce new reasons (e.g. `Refusal` from policy-aware providers); reserving the variant set lets future additions stay additive.",

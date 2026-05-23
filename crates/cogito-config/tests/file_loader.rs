@@ -180,3 +180,26 @@ async fn unknown_inner_field_errors() {
     })
     .await;
 }
+
+#[test]
+fn parses_skills_section() {
+    use cogito_config::types::SkillsConfig;
+    let toml_text = r#"
+[skills]
+enabled = true
+user_dir = "/tmp/.cogito/skills"
+include_system = false
+"#;
+    let parsed: cogito_config::types::RuntimeConfigPartial = toml::from_str(toml_text).unwrap();
+    let skills: SkillsConfig = parsed.skills.unwrap();
+    assert!(skills.enabled);
+    assert_eq!(skills.user_dir.as_deref(), Some("/tmp/.cogito/skills"));
+    assert!(!skills.include_system);
+}
+
+#[test]
+fn skills_section_optional() {
+    let parsed: cogito_config::types::RuntimeConfigPartial =
+        toml::from_str("[provider.default]\nkind = \"anthropic\"").unwrap();
+    assert!(parsed.skills.is_none());
+}

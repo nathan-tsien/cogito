@@ -1,0 +1,21 @@
+[package]
+name = "cogito-skills"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cogito-protocol = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+regex = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

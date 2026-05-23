@@ -68,6 +68,7 @@ fn push_completed_turn(
         Some(tid),
         EventPayload::TurnStarted {
             user_input: vec![text_block(user_text)],
+            activate_skills: vec![],
         },
     ));
     *seq += 1;
@@ -271,6 +272,7 @@ fn build_two_compaction_session() -> (Vec<ConversationEvent>, TurnId) {
         Some(t61_id),
         EventPayload::TurnStarted {
             user_input: vec![text_block("What are the latest climate projections?")],
+            activate_skills: vec![],
         },
     ));
 
@@ -394,6 +396,7 @@ fn covered_compaction_event_is_suppressed() {
             Some(turn_a),
             EventPayload::TurnStarted {
                 user_input: vec![text_block("early user")],
+                activate_skills: vec![],
             },
         ),
         mk(
@@ -424,6 +427,7 @@ fn covered_compaction_event_is_suppressed() {
             Some(turn_b),
             EventPayload::TurnStarted {
                 user_input: vec![text_block("middle user")],
+                activate_skills: vec![],
             },
         ),
         mk(
@@ -454,6 +458,7 @@ fn covered_compaction_event_is_suppressed() {
             Some(current),
             EventPayload::TurnStarted {
                 user_input: vec![text_block("current user")],
+                activate_skills: vec![],
             },
         ),
     ];
@@ -516,6 +521,7 @@ fn current_turn_events_post_compaction_are_emitted_in_order() {
             Some(early_turn),
             EventPayload::TurnStarted {
                 user_input: vec![text_block("early question")],
+                activate_skills: vec![],
             },
         ),
         mk(
@@ -555,6 +561,7 @@ fn current_turn_events_post_compaction_are_emitted_in_order() {
             Some(current),
             EventPayload::TurnStarted {
                 user_input: vec![text_block("current question")],
+                activate_skills: vec![],
             },
         ),
         mk(

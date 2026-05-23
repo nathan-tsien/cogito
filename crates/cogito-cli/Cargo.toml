@@ -19,12 +19,14 @@ cogito-config = { workspace = true, features = ["file"] }
 cogito-core = { workspace = true }
 cogito-mcp = { workspace = true }
 cogito-model = { workspace = true }
+cogito-skills = { workspace = true }
 cogito-tools = { workspace = true }
 cogito-store-jsonl = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

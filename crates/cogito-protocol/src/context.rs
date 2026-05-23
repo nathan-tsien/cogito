@@ -421,6 +421,16 @@ pub enum HistoryProjectorConfig {
 pub enum SystemPromptInjectorConfig {
     /// No-op injector; `strategy.system_prompt` is used unchanged.
     None,
+    /// Skill loader injector (Sprint 7): re-derives model-channel
+    /// activations from history, reads user-channel names from
+    /// `TurnStarted.activate_skills`, emits one `SkillActivated` event
+    /// per new activation, and writes a `SystemPromptInjected` event
+    /// whose suffix contains the "Available Skills" registry block plus
+    /// XML-wrapped activated SKILL.md bodies.
+    ///
+    /// Requires a `SkillProvider` injected at Runtime build time;
+    /// `cogito_context::build_pipeline` fails fast if missing.
+    Skill,
 }
 
 /// Selects which `ToolFilterOverrider` implementation H11 instantiates.
@@ -497,5 +507,36 @@ kind = "none"
         };
         assert!((of_context_window - 0.75).abs() < 1e-6);
         assert_eq!(safety_headroom, 8192);
+    }
+
+    #[test]
+    fn system_prompt_injector_config_skill_serde() {
+        let cfg = SystemPromptInjectorConfig::Skill;
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert_eq!(json, r#"{"kind":"skill"}"#);
+        let parsed: SystemPromptInjectorConfig = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed, SystemPromptInjectorConfig::Skill));
+    }
+
+    #[test]
+    fn context_config_with_skill_injector_toml_parses() {
+        let toml_input = r#"
+[compactor]
+kind = "none"
+
+[history_projector]
+kind = "standard"
+
+[system_prompt_injector]
+kind = "skill"
+
+[tool_filter_overrider]
+kind = "none"
+"#;
+        let parsed: ContextConfig = toml::from_str(toml_input).expect("parses");
+        assert!(matches!(
+            parsed.system_prompt_injector,
+            SystemPromptInjectorConfig::Skill
+        ));
     }
 }

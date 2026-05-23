@@ -27,7 +27,7 @@ pub async fn transit(
 ) -> TurnState {
     let output = {
         let mut recorder = deps.step.lock().await;
-        demux(stream, &mut recorder, ctx.turn_id).await
+        demux(stream, &mut recorder, ctx.turn_id, deps.skills.as_ref()).await
     };
 
     match output {

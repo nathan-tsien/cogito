@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use cogito_protocol::gateway::ModelGateway;
+use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::tool::ToolProvider;
@@ -37,6 +38,9 @@ pub struct Runtime {
     tools: Arc<dyn ToolProvider>,
     /// Default strategy applied to every new session.
     strategy: HarnessStrategy,
+    /// Optional Skill loader provider. Required only when the strategy
+    /// selects `SystemPromptInjectorConfig::Skill`; otherwise `None`.
+    skills: Option<Arc<dyn SkillProvider>>,
 }
 
 impl Runtime {
@@ -160,7 +164,15 @@ impl Runtime {
 
         // Build the context pipeline once per session from `strategy.context`.
         // All turns share this same Arc; no per-turn rebuild is needed.
-        let context_pipeline = Arc::new(cogito_context::build_pipeline(&self.strategy.context));
+        // `build_pipeline_v2` threads the optional `SkillProvider` into the
+        // pipeline so the `SkillInjector` (when selected) gets its handle.
+        let context_pipeline = Arc::new(
+            cogito_context::build_pipeline_v2(&self.strategy.context, self.skills.clone())
+                .map_err(|e| RuntimeError::ResumeFailed {
+                    id,
+                    reason: e.to_string(),
+                })?,
+        );
 
         let state = SessionState {
             session_id: id,
@@ -176,6 +188,7 @@ impl Runtime {
             hooks,
             metrics,
             context_pipeline,
+            skills: self.skills.clone(),
         };
 
         let deps = SessionDeps {
@@ -236,6 +249,7 @@ pub struct RuntimeBuilder {
     model: Option<Arc<dyn ModelGateway>>,
     tools: Option<Arc<dyn ToolProvider>>,
     strategy: Option<HarnessStrategy>,
+    skills: Option<Arc<dyn SkillProvider>>,
 }
 
 impl RuntimeBuilder {
@@ -281,6 +295,14 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Inject a `SkillProvider`. Optional — required only when the strategy
+    /// selects `SystemPromptInjectorConfig::Skill`.
+    #[must_use]
+    pub fn skills(mut self, skills: Arc<dyn SkillProvider>) -> Self {
+        self.skills = Some(skills);
+        self
+    }
+
     /// Finalize.
     ///
     /// # Errors
@@ -309,6 +331,7 @@ impl RuntimeBuilder {
             model,
             tools,
             strategy,
+            skills: self.skills,
         }))
     }
 }

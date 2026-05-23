@@ -42,6 +42,7 @@ fn single_user_turn_projects_to_user_message() {
     let events = vec![evt(
         EventPayload::TurnStarted {
             user_input: vec![ContentBlock::Text { text: "hi".into() }],
+            activate_skills: vec![],
         },
         1,
         turn_id,
@@ -63,6 +64,7 @@ fn assistant_with_tool_use_and_result_round_trip() {
                 user_input: vec![ContentBlock::Text {
                     text: "read it".into(),
                 }],
+                activate_skills: vec![],
             },
             1,
             turn_id,

@@ -77,6 +77,15 @@ pub enum EventPayload {
     TurnStarted {
         /// User input that triggered this turn.
         user_input: Vec<ContentBlock>,
+        /// User-requested skill activations carried via
+        /// `TurnTrigger::SkillActivation` (slash-command channel). Empty
+        /// for plain `UserText` triggers. Independent from sigil-based
+        /// activations, which are re-derived from previous-turn text.
+        ///
+        /// Additive per ADR-0007: defaults to empty on read for older
+        /// fixtures.
+        #[serde(default)]
+        activate_skills: Vec<String>,
     },
 
     /// One content block of assistant text has been fully emitted.
@@ -267,6 +276,18 @@ pub enum EventPayload {
         /// Per-trait error capture for degrade paths.
         errors: crate::context::ContextDecisionErrors,
     },
+
+    /// A skill (Skill loader, ADR-0020) was activated for the upcoming
+    /// turn. Written by `SkillInjector` in H11; one event per newly
+    /// activated skill (dedupe rules in spec §11).
+    SkillActivated {
+        /// Bare name (`foo`) or `<plugin_id>:<name>` for Plugin scope.
+        skill_name: String,
+        /// Where the skill was discovered.
+        source: crate::skill::SkillSource,
+        /// Channel that triggered this activation.
+        channel: crate::skill::SkillActivationChannel,
+    },
 }
 
 /// Coarse classification of `EventPayload` variants. Used by Postgres backends
@@ -309,7 +330,8 @@ impl EventPayload {
             Self::ContextCompacted { .. }
             | Self::SystemPromptInjected { .. }
             | Self::ToolFilterOverridden { .. }
-            | Self::ContextDecisionRecorded { .. } => EventCategory::ContextDecision,
+            | Self::ContextDecisionRecorded { .. }
+            | Self::SkillActivated { .. } => EventCategory::ContextDecision,
         }
     }
 }
@@ -358,7 +380,7 @@ mod tests {
 
     #[test]
     #[allow(clippy::too_many_lines)]
-    fn all_twenty_one_variants_roundtrip() -> serde_json::Result<()> {
+    fn all_twenty_two_variants_roundtrip() -> serde_json::Result<()> {
         // Covers every EventPayload variant. When a new variant is added,
         // add it here too and rename the test to match the new count.
         //
@@ -375,6 +397,7 @@ mod tests {
             },
             EventPayload::TurnStarted {
                 user_input: vec![ContentBlock::Text { text: "go".into() }],
+                activate_skills: vec![],
             },
             EventPayload::AssistantMessageAppended { text: "ok".into() },
             EventPayload::ToolUseRecorded {
@@ -463,6 +486,12 @@ mod tests {
                 tool_filter_event: EventId::new(),
                 errors: crate::context::ContextDecisionErrors::default(),
             },
+            // Sprint 7 skill-loader variant (ADR-0020).
+            EventPayload::SkillActivated {
+                skill_name: "invoice-parser".into(),
+                source: crate::skill::SkillSource::User,
+                channel: crate::skill::SkillActivationChannel::ModelSigil,
+            },
         ];
         for v in variants {
             let event = sample_envelope(v.clone());
@@ -523,6 +552,7 @@ mod tests {
     fn category_classifies_all_variants() {
         let conv = EventPayload::TurnStarted {
             user_input: vec![ContentBlock::Text { text: "hi".into() }],
+            activate_skills: vec![],
         };
         assert_eq!(conv.category(), EventCategory::Conversation);
 

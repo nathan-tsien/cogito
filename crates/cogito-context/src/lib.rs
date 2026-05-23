@@ -21,4 +21,4 @@ pub mod pipeline;
 pub mod projector;
 
 pub use cogito_protocol::ContextPipeline;
-pub use pipeline::build_pipeline;
+pub use pipeline::{PipelineBuildError, build_pipeline, build_pipeline_v2};

@@ -300,7 +300,7 @@ fn event_char_count(event: &ConversationEvent) -> usize {
     use cogito_protocol::tool::ToolResult;
 
     match &event.payload {
-        EventPayload::TurnStarted { user_input } => user_input
+        EventPayload::TurnStarted { user_input, .. } => user_input
             .iter()
             .map(|b| match b {
                 ContentBlock::Text { text } => text.len(),

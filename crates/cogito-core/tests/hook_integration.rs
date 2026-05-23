@@ -91,6 +91,7 @@ async fn sensitive_content_hook_rejects_tool_with_aws_key() -> Result<(), Box<dy
         context_pipeline: Arc::new(cogito_context::build_pipeline(
             &cogito_protocol::context::ContextConfig::default(),
         )),
+        skills: None,
     };
 
     let ctx = TurnCtx {

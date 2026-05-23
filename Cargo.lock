@@ -375,12 +375,14 @@ dependencies = [
  "cogito-mcp",
  "cogito-model",
  "cogito-protocol",
+ "cogito-skills",
  "cogito-store-jsonl",
  "cogito-tools",
  "futures",
  "serde_json",
  "temp-env",
  "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -417,6 +419,7 @@ dependencies = [
  "cogito-test-fixtures",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -430,6 +433,7 @@ dependencies = [
  "cogito-context",
  "cogito-mock-model",
  "cogito-protocol",
+ "cogito-skills",
  "cogito-store-jsonl",
  "cogito-test-fixtures",
  "cogito-tools",
@@ -543,6 +547,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "cogito-test-fixtures",
  "futures",
  "insta",
  "proptest",
@@ -568,6 +573,19 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-test",
+ "tracing",
+]
+
+[[package]]
+name = "cogito-skills"
+version = "0.1.0"
+dependencies = [
+ "cogito-protocol",
+ "regex",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 1.0.69",
  "tracing",
 ]
 

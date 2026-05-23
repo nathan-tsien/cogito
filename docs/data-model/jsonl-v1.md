@@ -335,6 +335,50 @@ Written by H11 itself after all three traits finish. This is the summary index f
 {"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":15,"ts":"2026-05-23T10:00:02.300Z","type":"context_decision_recorded","data":{"turn_id":"01HFZZZ","compactions":["01HFCCC"],"system_prompt_event":"01HFSSS","tool_filter_event":"01HFTTT","errors":{"compactor":null,"injector":null,"overrider":null}}}
 ```
 
+## Sprint 7 additive entries (no schema bump)
+
+Added Sprint 7 (ADR-0020). One additive `EventPayload` variant
+(`SkillActivated`) plus one additive optional field on the existing
+`TurnStarted` payload. No `SCHEMA_VERSION` bump per ADR-0007.
+
+### `turn_started.activate_skills`
+
+New optional field on the existing `TurnStarted` payload.
+
+- Type: `string[]`
+- Default on read: `[]` (older fixtures and turns triggered via
+  `TurnTrigger::UserText` continue to parse cleanly).
+- Source: user-channel skill activations carried with this turn — see
+  `TurnTrigger::SkillActivation` and the `/skill <name>` slash command
+  wired in by Surface. Sigil-based (model-channel) activations are NOT
+  recorded here; H11's `SkillInjector` re-derives them from previous-turn
+  assistant text.
+
+### `skill_activated`
+
+Written by `SkillInjector` (H11) — one event per newly activated skill
+within a turn. Dedupe rules and channel precedence live in the Sprint 7
+spec §11. Cross-references `system_prompt_injected.contributors` (which
+holds the same skill names) and the per-turn `system_prompt_event` in
+`context_decision_recorded`.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `skill_name` | string | Bare name (`foo`) or `<plugin_id>:<name>` for Plugin scope. |
+| `source` | object | Where the skill was discovered. `{"kind":"repo","dir":"<workspace>"}` / `{"kind":"user"}` / `{"kind":"plugin","plugin_id":"<id>"}` / `{"kind":"system"}`. |
+| `channel` | object | What triggered the activation. `{"kind":"model_sigil"}` (assistant emitted `$Name` in prior-turn text) or `{"kind":"user_slash"}` (user typed `/skill <name>`). |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":2,"ts":"2026-05-23T00:00:00.200Z","type":"skill_activated","data":{"skill_name":"invoice-parser","source":{"kind":"user"},"channel":{"kind":"user_slash"}}}
+```
+
+A worked session demonstrating one user-channel skill activation is at
+`crates/testing/cogito-test-fixtures/fixtures/sessions/sample-skill-v1.jsonl`.
+
 ## Forward compatibility
 
 - **Additive changes** (new `EventPayload` variant, new optional field

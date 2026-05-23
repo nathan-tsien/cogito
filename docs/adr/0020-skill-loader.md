@@ -2,13 +2,14 @@
 
 ## Status
 
-Proposed — placeholder (finalized in v0.1 Sprint 7).
+Accepted (Sprint 7, 2026-05-23).
 
 This ADR captures decisions ratified in the
 [2026-05-22 roadmap rebalance spec](../superpowers/specs/2026-05-22-roadmap-rebalance-design.md)
-(§2.5 + §2.6 + §4.1). The full ADR — including the precise sigil regex,
-error UX, and SKILL.md frontmatter schema — is finalized during Sprint 7
-when the loader is actually implemented.
+(§2.5 + §2.6 + §4.1) and finalized during Sprint 7 when the loader was
+implemented. See the "Sprint 7 closure notes" section at the bottom for
+the locked-in values (sigil regex, description cap, repo-root stop set,
+code-fence handling).
 
 ## Context
 
@@ -168,4 +169,28 @@ Additive under ADR-0007 (no `SCHEMA_VERSION` bump).
 - Rebalance spec: [`docs/superpowers/specs/2026-05-22-roadmap-rebalance-design.md`](../superpowers/specs/2026-05-22-roadmap-rebalance-design.md) §2.5–§2.6 + §4.1
 - agentskills.io specification: https://agentskills.io/specification
 - Codex skill loader source: `codex-rs/core-skills/` (Apache-2.0)
+
+## Sprint 7 closure notes
+
+Final values locked in during Sprint 7 implementation:
+
+- **Sigil regex**: `\$([A-Za-z][A-Za-z0-9_:-]{0,63})` — first character must
+  be an ASCII letter; subsequent characters allow letters, digits, `_`,
+  `:`, `-`; total identifier length bounded at 64 characters. Rejects
+  `$1` (SQL placeholder), `$_foo` (shell convention), `${name}` (template
+  substitution).
+- **Description cap**: 1024 characters per skill in the "Available Skills"
+  system-prompt block. Skills with longer `description` fields are
+  truncated at load time with a warning event.
+- **Repo-root stop**: discovery walks upward from CWD and stops at the
+  first directory containing `.git/` OR `cogito.toml`, or when reaching
+  the filesystem root. `.skills/` directories found along the way are
+  merged (closer-to-CWD wins on name collision).
+- **Code-fence skip**: sigils inside fenced code blocks (` ``` ` /  `~~~`)
+  and inline code spans (`` ` ``) are NOT expanded — answer to spec Q3 = A.
+  Rationale: users routinely paste shell snippets with `$VAR` into chat
+  and would not expect expansion inside a code fence.
+- **ADR-0023 (bundled scripts) remains a placeholder.** Sprint 7 ships
+  the markdown-only loader; auto-execution of `scripts/` in a skill is
+  deferred until a concrete consumer use case demands it.
 - Claude Code skills documentation: https://code.claude.com/docs/en/skills

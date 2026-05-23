@@ -6,13 +6,13 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 + 6 complete; Sprint 4
-> (MCP sync tools) in flight; Sprints 7–10 reshaped per
+> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 + 6 + 7 complete; Sprint 4
+> (MCP sync tools) in flight; Sprints 8–10 reshaped per
 > [2026-05-22 roadmap rebalance](docs/superpowers/specs/2026-05-22-roadmap-rebalance-design.md)
 > (Hook impl + Context C2 trait freeze + Skill loader promoted into
 > v0.1; Async Jobs / Multi-model / TUI / hardening renumbered;
 > Storage+Multimodal deferred from v0.2 to v0.5).
-> **Current sprint: Sprint 7 (Skill loader).**
+> **Current sprint: Sprint 8 (Async Jobs).**
 
 ## Version plan
 
@@ -164,16 +164,16 @@ contributions and unblocks Sprint 7 Skill injection into H11.
 members ship knowledge packs as markdown + frontmatter, no Rust
 required.
 
-- [ ] **ADR-0020**: Skill loader — locks K5 sigil activation (`$SkillName` + `/skill X` dual channel; no `load_skill` tool), scope precedence (Repo > User > Plugin > System), `SKILL.md` frontmatter schema (`name` / `description` / `disable-model-invocation` / `user-invocable`), bundled-scripts deferral (see ADR-0023)
-- [ ] **New crate `cogito-skills`** (Hands): SkillRegistry + scope-based filesystem discovery + frontmatter parser + sigil regex + `SkillProvider` trait impl
-- [ ] `cogito-protocol`: add `SkillProvider` trait + `EventPayload::SkillActivated { skill_name, source, recorded_event_id }` (additive, no schema_version bump)
-- [ ] H04 Prompt Composer: inject "Available Skills" block (name + description with character cap per skill)
-- [ ] H06 Stream Demultiplexer: detect sigil in `text_delta`; emit `ModelEvent::SkillActivationRequested`
-- [ ] H11 Context Manage: on `SkillActivationRequested`, inject full `SKILL.md` as user-role message before next turn (via `SystemPromptInjector` trait from Sprint 6)
-- [ ] CLI: `/skill <name>` slash command in `cogito chat` REPL
-- [ ] Sigil edge-case guardrails (see rebalance spec §7.1): match only registered skill names + system-prompt escape instruction
-- [ ] Smoke test: skill defined under `.cogito/skills/` activates via sigil + via slash; SKILL.md content reaches model
-- [ ] Resume-chaos: new scenario `text_then_skill_then_tool` — crash injection at boundaries with skill-activated context
+- [x] **ADR-0020**: Skill loader — locks K5 sigil activation (`$SkillName` + `/skill X` dual channel; no `load_skill` tool), scope precedence (Repo > User > Plugin > System), `SKILL.md` frontmatter schema (`name` / `description` / `disable-model-invocation` / `user-invocable`), bundled-scripts deferral (see ADR-0023)
+- [x] **New crate `cogito-skills`** (Hands): SkillRegistry + scope-based filesystem discovery + frontmatter parser + sigil regex + `SkillProvider` trait impl
+- [x] `cogito-protocol`: add `SkillProvider` trait + `EventPayload::SkillActivated { skill_name, source, recorded_event_id }` (additive, no schema_version bump)
+- [x] H04 Prompt Composer: inject "Available Skills" block (name + description with character cap per skill)
+- [x] H06 Stream Demultiplexer: detect sigil in `text_delta`; emit `ModelEvent::SkillActivationRequested`
+- [x] H11 Context Manage: on `SkillActivationRequested`, inject full `SKILL.md` as user-role message before next turn (via `SystemPromptInjector` trait from Sprint 6)
+- [x] CLI: `/skill <name>` slash command in `cogito chat` REPL
+- [x] Sigil edge-case guardrails (see rebalance spec §7.1): match only registered skill names + system-prompt escape instruction
+- [x] Smoke test: skill defined under `.cogito/skills/` activates via sigil + via slash; SKILL.md content reaches model
+- [x] Resume-chaos: new scenario `text_then_skill_then_tool` — crash injection at boundaries with skill-activated context
 
 #### Sprint 8 · Async Jobs (2 days)
 

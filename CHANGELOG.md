@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint 7 — Skill loader (ADR-0020)
+
+- `cogito-skills` crate (Hands): SkillRegistry impl of SkillProvider; frontmatter parser; sigil regex + code-fence-aware scanner; Repo + User scope discovery.
+- `cogito-protocol`: SkillProvider trait + SkillMetadata/Content/Source; SkillActivated event variant; TurnStarted.activate_skills field; TurnTrigger::SkillActivation variant; StreamEvent::SkillActivationRequested broadcast; SystemPromptInjectorConfig::Skill; EventRecorder.record_skill_activated default impl; cogito_protocol::sigil module promoted from cogito-skills for ADR-0004 layer compliance.
+- `cogito-context`: SkillInjector impl of SystemPromptInjector; build_pipeline_v2 takes Option<Arc<dyn SkillProvider>>.
+- `cogito-core`: H06 sigil side-channel; TurnDeps.skills field; RuntimeBuilder.skills(...); session_loop projects SkillActivation to TurnStarted.activate_skills.
+- `cogito-cli`: `/skill <name> [text]` slash parser; `[skills]` cogito.toml section; SkillRegistry built at chat startup.
+- Resume chaos: `text_then_skill_then_tool` scenario with crash injection at sigil/activation boundaries.
+- Docs: `docs/skills/overview.md`; H06/H11 closure notes; ADR-0020 promoted to Accepted.
+- Additive event-log changes (no SCHEMA_VERSION bump).
+
 ### Added — Sprint 6 (Context Management)
 
 - `cogito-protocol::context` — 4 traits (`Compactor`, `HistoryProjector`, `SystemPromptInjector`, `ToolFilterOverrider`) + `ContextConfig` + `ContextPipeline` + supporting types

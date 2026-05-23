@@ -23,8 +23,128 @@ use cogito_tools::{BuiltinToolProvider, ReadFile};
 use futures::StreamExt;
 use std::io::Write as _;
 
+use thiserror::Error;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
+
+/// Errors from [`parse_slash_skill`]. These are user-facing — printed
+/// to stderr by the REPL and surfaced as a usage hint rather than
+/// being submitted as a turn.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum SlashError {
+    /// First token after `/skill ` was not a registered name; the user
+    /// either typo'd a name or referred to a skill that was never
+    /// discovered. Treated as a hard rejection — we do not silently
+    /// fall back to `UserText` to avoid surprising the user.
+    #[error("unknown skill: {0}")]
+    UnknownSkill(String),
+    /// Skill is registered but its SKILL.md set `user-invocable: false`,
+    /// so the slash channel must not activate it. Surface as a
+    /// distinct error so the REPL can tell the user *why* the slash
+    /// invocation was rejected.
+    #[error("skill not user-invocable: {0}")]
+    NotUserInvocable(String),
+    /// User typed bare `/skill` with no arguments.
+    #[error("missing skill name after /skill")]
+    Empty,
+}
+
+/// Parse a REPL input line. Returns either a plain
+/// [`TurnTrigger::UserText`] trigger or a
+/// [`TurnTrigger::SkillActivation`] trigger.
+///
+/// Grammar:
+/// ```text
+/// "/skill <name>[ <name>...] [ <user_text>]"
+/// ```
+///
+/// Scanning rule: after `/skill `, read tokens left-to-right; each
+/// registered name is added to `names`. The first unknown token (or
+/// end of input) switches to user-text accumulation. The first token
+/// MUST be registered; otherwise we return
+/// [`SlashError::UnknownSkill`].
+///
+/// `is_registered` and `is_user_invocable` are closures over the
+/// corresponding [`cogito_protocol::skill::SkillProvider`] checks so
+/// the parser stays decoupled from the registry's concrete type and
+/// can be exercised with stub registries in tests.
+///
+/// # Errors
+///
+/// Returns [`SlashError::Empty`] when the line is exactly `/skill`,
+/// [`SlashError::UnknownSkill`] when the first token after `/skill `
+/// is not registered, and [`SlashError::NotUserInvocable`] when the
+/// first token is registered but its `SKILL.md` set
+/// `user-invocable: false`.
+pub fn parse_slash_skill<F, G>(
+    line: &str,
+    is_registered: &F,
+    is_user_invocable: &G,
+) -> Result<cogito_protocol::turn_trigger::TurnTrigger, SlashError>
+where
+    F: Fn(&str) -> bool,
+    G: Fn(&str) -> bool,
+{
+    use cogito_protocol::turn_trigger::TurnTrigger;
+    let trimmed = line.trim_start();
+    let Some(rest) = trimmed
+        .strip_prefix("/skill ")
+        .or_else(|| trimmed.strip_prefix("/skill\t"))
+    else {
+        if trimmed == "/skill" {
+            return Err(SlashError::Empty);
+        }
+        return Ok(TurnTrigger::UserText(line.to_string()));
+    };
+
+    let mut names: Vec<String> = Vec::new();
+    let mut text_start: Option<usize> = None;
+    let mut cursor = 0usize;
+    // Track the first registered-but-blocked token so we can return a
+    // precise `NotUserInvocable` error after the scan. The blocked
+    // token is treated as a hard reject only when it is the first
+    // token; a blocked token *after* an already-accepted name is
+    // treated as the start of user_text (consistent with how an
+    // unregistered token is handled), since the user's preceding
+    // accepted names are valid activations on their own.
+    let mut first_blocked: Option<String> = None;
+    for tok in rest.split_whitespace() {
+        // Locate `tok` inside `rest` starting at `cursor` so we can
+        // preserve the original spacing of the trailing user text.
+        // `split_whitespace` collapses runs of whitespace, which would
+        // otherwise lose the user's "do  this" double-spacing.
+        let abs = rest[cursor..].find(tok).map_or(cursor, |p| cursor + p);
+        cursor = abs + tok.len();
+        let registered = is_registered(tok);
+        let invocable = registered && is_user_invocable(tok);
+        if invocable && text_start.is_none() {
+            names.push(tok.to_string());
+        } else {
+            if registered && !invocable && names.is_empty() && first_blocked.is_none() {
+                first_blocked = Some(tok.to_string());
+            }
+            // First non-name token (or unregistered/non-invocable) starts user_text.
+            text_start = Some(abs);
+            break;
+        }
+    }
+
+    if names.is_empty() {
+        if let Some(blocked) = first_blocked {
+            return Err(SlashError::NotUserInvocable(blocked));
+        }
+        // The first token wasn't registered — hard error.
+        let first = rest.split_whitespace().next().unwrap_or("");
+        return Err(SlashError::UnknownSkill(first.to_string()));
+    }
+
+    let user_text = text_start
+        .map(|pos| rest[pos..].trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    Ok(TurnTrigger::SkillActivation { names, user_text })
+}
 
 /// CLI value for `--mode`. Mirrors `OpenMode` but lives in the Surface
 /// crate so clap can derive `ValueEnum` without touching the Brain
@@ -199,15 +319,15 @@ async fn build_tool_provider(
 
 /// Entry point for the `chat` subcommand.
 pub async fn run(args: ChatArgs) -> Result<()> {
-    let inputs = cogito_cli::chat_config::ChatConfigInputs {
+    let inputs = crate::chat_config::ChatConfigInputs {
         config_path: args.config.clone(),
         model: args.model.clone(),
         provider: args.provider.clone(),
         base_url: args.base_url.clone(),
         session_root: args.session_root.clone(),
     };
-    let cfg = cogito_cli::chat_config::load_layered_config(&inputs).await?;
-    let provider_cfg = cogito_cli::chat_config::select_provider(&cfg, &inputs)?;
+    let cfg = crate::chat_config::load_layered_config(&inputs).await?;
+    let provider_cfg = crate::chat_config::select_provider(&cfg, &inputs)?;
     let gateway: Arc<dyn ModelGateway> =
         build_gateway(provider_cfg).map_err(|e| anyhow!("building gateway: {e}"))?;
 
@@ -222,19 +342,22 @@ pub async fn run(args: ChatArgs) -> Result<()> {
     // Runtime builder takes its own `Arc<dyn ConversationStore>` clone.
     let store_for_replay: Arc<dyn ConversationStore> = store.clone();
     let tools = build_tool_provider(&cfg).await?;
+    let skills = crate::chat_config::build_skill_provider(&cfg)?;
 
     let mut strategy = HarnessStrategy::default_with_model(&model_id);
     if let Some(sys) = args.system.clone() {
         strategy.system_prompt = sys;
     }
 
-    let runtime = Runtime::builder()
+    let mut builder = Runtime::builder()
         .store(store)
         .model(gateway)
         .tools(tools)
-        .strategy(strategy)
-        .build()
-        .context("building runtime")?;
+        .strategy(strategy);
+    if let Some(provider) = skills.clone() {
+        builder = builder.skills(provider);
+    }
+    let runtime = builder.build().context("building runtime")?;
 
     // Parse or generate the session ID.
     let session_id = match &args.session_id {
@@ -256,7 +379,7 @@ pub async fn run(args: ChatArgs) -> Result<()> {
         "cogito chat started (type /quit to exit, Ctrl-C to cancel turn / exit when idle)"
     );
 
-    run_repl(handle.clone(), store_for_replay, session_id, mode).await?;
+    run_repl(handle.clone(), store_for_replay, session_id, mode, skills).await?;
     let _ = handle.shutdown(Duration::from_secs(30)).await;
     Ok(())
 }
@@ -274,6 +397,7 @@ async fn run_repl(
     store: Arc<dyn ConversationStore>,
     session_id: SessionId,
     mode: ChatMode,
+    skills: Option<Arc<dyn cogito_protocol::skill::SkillProvider>>,
 ) -> Result<()> {
     // Ctrl-C handler — forwards each press as a message; the main loop
     // interprets it relative to current state (in-flight turn vs idle).
@@ -344,15 +468,11 @@ async fn run_repl(
                     let l = String::from_utf8_lossy(&line_buf).into_owned();
                     line_buf.clear();
 
-                    if l.trim() == "/quit" {
-                        break;
+                    match dispatch_input_line(&l, &handle, skills.as_ref(), &mut renderer).await? {
+                        InputOutcome::Quit => break,
+                        InputOutcome::Submitted => turn_in_flight = true,
+                        InputOutcome::ReDisplayPrompt => {}
                     }
-                    if l.trim().is_empty() {
-                        renderer.prompt_user()?;
-                        continue;
-                    }
-                    handle.submit_user_text(l).await.context("submit_user_text")?;
-                    turn_in_flight = true;
                 }
                 Err(e) => return Err(e).context("stdin read"),
             },
@@ -379,6 +499,77 @@ async fn run_repl(
         }
     }
     Ok(())
+}
+
+/// Decision returned by [`dispatch_input_line`]: tells the REPL loop
+/// whether to exit, mark a turn as in-flight, or simply redraw the
+/// prompt and keep going.
+enum InputOutcome {
+    /// `/quit` was typed — break out of the REPL.
+    Quit,
+    /// A turn was submitted via `submit(...)`.
+    Submitted,
+    /// Either the line was blank, the slash form was malformed, or the
+    /// skill name was unknown. The caller should redraw the prompt and
+    /// wait for the next line; no turn was started.
+    ReDisplayPrompt,
+}
+
+/// Handle one already-trimmed-of-trailing-newline input line from the
+/// REPL: dispatch `/quit`, blank lines, `/skill ...` slash commands,
+/// and plain user text. Factored out of `run_repl` so the loop stays
+/// under `clippy::too_many_lines` and so the slash-vs-text branch can
+/// evolve without growing the main `tokio::select!`.
+async fn dispatch_input_line(
+    line: &str,
+    handle: &cogito_core::runtime::SessionHandle,
+    skills: Option<&Arc<dyn cogito_protocol::skill::SkillProvider>>,
+    renderer: &mut Renderer<std::io::Stdout>,
+) -> Result<InputOutcome> {
+    if line.trim() == "/quit" {
+        return Ok(InputOutcome::Quit);
+    }
+    if line.trim().is_empty() {
+        renderer.prompt_user()?;
+        return Ok(InputOutcome::ReDisplayPrompt);
+    }
+    // Slash dispatch. The closures are backed by the injected
+    // `SkillProvider`; when no provider was wired
+    // (`[skills].enabled = false`), every name is unregistered and
+    // `/skill` invocations surface to the user as `UnknownSkill`.
+    // `is_user_invocable` honors `SKILL.md` `user-invocable: false`.
+    let parsed = parse_slash_skill(
+        line,
+        &|n: &str| skills.is_some_and(|s| s.is_registered(n)),
+        &|n: &str| skills.is_some_and(|s| s.get_metadata(n).is_some_and(|m| m.user_invocable)),
+    );
+    match parsed {
+        Ok(trigger) => {
+            handle.submit(trigger).await.context("submit trigger")?;
+            Ok(InputOutcome::Submitted)
+        }
+        Err(SlashError::UnknownSkill(name)) => {
+            let _ = writeln!(std::io::stderr(), "unknown skill: {name}");
+            renderer.prompt_user()?;
+            Ok(InputOutcome::ReDisplayPrompt)
+        }
+        Err(SlashError::NotUserInvocable(name)) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "skill '{name}' is not user-invocable (SKILL.md set user-invocable: false)"
+            );
+            renderer.prompt_user()?;
+            Ok(InputOutcome::ReDisplayPrompt)
+        }
+        Err(SlashError::Empty) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "usage: /skill <name> [<name>...] [ <user-text>]"
+            );
+            renderer.prompt_user()?;
+            Ok(InputOutcome::ReDisplayPrompt)
+        }
+    }
 }
 
 /// Read every persisted `ConversationEvent` for `session_id` and feed
@@ -411,7 +602,7 @@ async fn replay_history(
         let event = ev.context("replay event")?;
         event_count += 1;
         match event.payload {
-            EventPayload::TurnStarted { user_input } => {
+            EventPayload::TurnStarted { user_input, .. } => {
                 if let Some(text) = first_user_text(&user_input) {
                     renderer.replay_user_input(text)?;
                 }
