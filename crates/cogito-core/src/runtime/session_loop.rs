@@ -416,27 +416,38 @@ async fn handle_command(
 /// `TurnEntry::FreshLikeInit` — resume dispatch happens once at actor
 /// startup via `apply_resume_point`, not here.
 ///
-/// `TurnTrigger` projection (v0.1 single-variant; ADR-0016):
-/// - `UserText(text)` -> `user_input = vec![ContentBlock::Text { text }]`
+/// `TurnTrigger` projection (ADR-0016):
+/// - `UserText(text)` -> `user_input = vec![ContentBlock::Text { text }]`,
+///   `activate_skills = []`.
+/// - `SkillActivation { names, user_text }` -> `user_input` is the
+///   single-Text-block wrapping of `user_text` (empty when `user_text` is
+///   `None` or empty), `activate_skills = names`.
 ///
-/// Future variants (`UserContent` / `SkillInvocation` / `HookFired`) extend
-/// this match. `#[non_exhaustive]` forces the `_ =>` arm; we log loudly
-/// and drop the trigger rather than panic — a missed variant is a
-/// runtime bug, not a turn failure.
+/// Future variants (`UserContent` / `HookFired`) extend this match.
+/// `#[non_exhaustive]` forces the `_ =>` arm; we log loudly and drop the
+/// trigger rather than panic — a missed variant is a runtime bug, not a
+/// turn failure.
 async fn try_start_turn(state: &mut SessionState, trigger: TurnTrigger, deps: &SessionDeps) {
     if state.has_active_turn() {
         return;
     }
 
-    // match_wildcard_for_single_variants: required — TurnTrigger is
-    //   #[non_exhaustive], so omitting `_` would be a compile error.
-    // single_match_else: optional — let-else would silence the lint, but
-    //   `match` is preferred because future ADR-0016 §6 variants extend
-    //   this arm list and the match-shape signals "list will grow".
+    // match_wildcard_for_single_variants: required while `TurnTrigger`
+    //   is `#[non_exhaustive]` — omitting `_` would be a compile error
+    //   even after future variants are added.
     #[allow(clippy::match_wildcard_for_single_variants)]
-    #[allow(clippy::single_match_else)]
-    let user_input: Vec<ContentBlock> = match trigger {
-        TurnTrigger::UserText(text) => vec![ContentBlock::Text { text }],
+    let (user_input, activate_skills): (Vec<ContentBlock>, Vec<String>) = match trigger {
+        TurnTrigger::UserText(text) => (vec![ContentBlock::Text { text }], Vec::new()),
+        TurnTrigger::SkillActivation { names, user_text } => {
+            // Empty / missing user_text yields empty user_input; the
+            // SkillInjector's suffix is the only user-visible content
+            // for the turn in that case.
+            let user_input = match user_text {
+                Some(t) if !t.is_empty() => vec![ContentBlock::Text { text: t }],
+                _ => Vec::new(),
+            };
+            (user_input, names)
+        }
         // `#[non_exhaustive]` guard: when a future TurnTrigger variant
         // lands (ADR-0016 §6 migration table) the consumer crate that
         // adds the variant must also extend this match. Until then,
@@ -455,7 +466,10 @@ async fn try_start_turn(state: &mut SessionState, trigger: TurnTrigger, deps: &S
     // Write-before-transition: record TurnStarted before spawning the task.
     {
         let mut rec = state.recorder.lock().await;
-        if let Err(e) = rec.record_turn_started(turn_id, user_input).await {
+        if let Err(e) = rec
+            .record_turn_started(turn_id, user_input, activate_skills)
+            .await
+        {
             tracing::error!(
                 session_id = %state.session_id,
                 turn_id = %turn_id,

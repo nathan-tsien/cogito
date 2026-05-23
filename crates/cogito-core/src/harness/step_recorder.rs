@@ -120,21 +120,24 @@ impl StepRecorder {
 
     /// Record the start of a new turn and broadcast a live
     /// [`StreamEvent::TurnStarted`].
+    ///
+    /// `activate_skills` carries the user-requested skill names (from a
+    /// `TurnTrigger::SkillActivation`); pass an empty vec for plain
+    /// `UserText`-triggered turns. The list is independent from
+    /// sigil-based activations, which are re-derived from previous-turn
+    /// text by H06.
     pub async fn record_turn_started(
         &mut self,
         turn_id: TurnId,
         user_input: Vec<ContentBlock>,
+        activate_skills: Vec<String>,
     ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnStarted);
-        // Task 03 (Sprint 7): `activate_skills` is additive; the signature
-        // here stays single-arg for now and emits an empty list. Task 04
-        // extends `TurnTrigger` with the slash-command channel and the
-        // recorder API will be widened then.
         self.append(
             Some(turn_id),
             EventPayload::TurnStarted {
                 user_input,
-                activate_skills: vec![],
+                activate_skills,
             },
         )
         .await
@@ -855,7 +858,11 @@ mod tests {
             .await?;
         let turn_id = TurnId::new();
         let event_id_2 = rec
-            .record_turn_started(turn_id, vec![ContentBlock::Text { text: "go".into() }])
+            .record_turn_started(
+                turn_id,
+                vec![ContentBlock::Text { text: "go".into() }],
+                vec![],
+            )
             .await?;
 
         assert_ne!(event_id_1, event_id_2, "EventIds must be unique");
@@ -942,7 +949,7 @@ mod tests {
         })
         .await?;
         let turn = TurnId::new();
-        rec.record_turn_started(turn, vec![ContentBlock::Text { text: "hi".into() }])
+        rec.record_turn_started(turn, vec![ContentBlock::Text { text: "hi".into() }], vec![])
             .await?;
         rec.record_turn_completed(turn, TurnOutcome::Completed)
             .await?;
@@ -979,16 +986,24 @@ mod tests {
         .await?;
 
         let turn_a = TurnId::new();
-        rec.record_turn_started(turn_a, vec![ContentBlock::Text { text: "q1".into() }])
-            .await?;
+        rec.record_turn_started(
+            turn_a,
+            vec![ContentBlock::Text { text: "q1".into() }],
+            vec![],
+        )
+        .await?;
         rec.on_text_delta(turn_a, "answer one".into());
         rec.on_text_block_complete().await?;
         rec.record_turn_completed(turn_a, TurnOutcome::Completed)
             .await?;
 
         let turn_b = TurnId::new();
-        rec.record_turn_started(turn_b, vec![ContentBlock::Text { text: "q2".into() }])
-            .await?;
+        rec.record_turn_started(
+            turn_b,
+            vec![ContentBlock::Text { text: "q2".into() }],
+            vec![],
+        )
+        .await?;
         rec.on_text_delta(turn_b, "answer two".into());
         rec.on_text_block_complete().await?;
         rec.record_turn_completed(turn_b, TurnOutcome::Completed)
