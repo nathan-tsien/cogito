@@ -100,6 +100,13 @@ impl StepRecorder {
         }
     }
 
+    /// Crate-internal access to the live `StreamEvent` broadcast sender so
+    /// the H06 demuxer can emit side-channel events (e.g.
+    /// `SkillActivationRequested`) without going through `record_*`.
+    pub(crate) fn events_tx(&self) -> &broadcast::Sender<StreamEvent> {
+        &self.events_tx
+    }
+
     /// Record the session-open event. Called once per session, before any
     /// turn starts. Does not emit a [`StreamEvent`] — session-level state
     /// is observable via the persisted log only.

@@ -4,27 +4,71 @@
 //!
 //! See `docs/components/H06-stream-demux.md`.
 
+use std::sync::Arc;
+
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::gateway::{ModelError, ModelEvent, ModelOutput, StopReason, Usage};
 use cogito_protocol::ids::TurnId;
+use cogito_protocol::sigil::{FenceState, find_sigils_outside_code};
+use cogito_protocol::skill::SkillProvider;
+use cogito_protocol::stream::StreamEvent;
 use futures::stream::{Stream, StreamExt};
+use tokio::sync::broadcast;
 
 use crate::harness::step_recorder::StepRecorder;
+
+/// H06 helper: detect sigils in a text-delta chunk and broadcast
+/// `StreamEvent::SkillActivationRequested` for each registered hit.
+/// Dedupes within the chunk.
+///
+/// Pure outside the broadcast `send`; broadcast lag errors are intentionally
+/// ignored (lagged subscribers drop messages by design).
+///
+/// Named `sigil_emit_for_test` because the H06 demuxer's text-delta arm
+/// calls the same logic internally — keeping it as a free function gives
+/// the unit-test surface a stable entry point.
+pub fn sigil_emit_for_test(
+    provider: &Arc<dyn SkillProvider>,
+    state: &mut FenceState,
+    chunk: &str,
+    broadcast_tx: &broadcast::Sender<StreamEvent>,
+) -> Result<(), broadcast::error::SendError<StreamEvent>> {
+    let mut seen_this_chunk = std::collections::HashSet::new();
+    for hit in find_sigils_outside_code(state, chunk) {
+        if !provider.is_registered(&hit.name) {
+            continue;
+        }
+        if !seen_this_chunk.insert(hit.name.clone()) {
+            continue;
+        }
+        // Broadcast errors only occur when the channel has no live
+        // receivers; subscribers are best-effort by design.
+        let _ = broadcast_tx.send(StreamEvent::SkillActivationRequested {
+            skill_name: hit.name,
+        });
+    }
+    Ok(())
+}
 
 /// Consume the gateway stream to completion.
 ///
 /// Side effects (via `recorder`):
 /// - `TextDelta`: buffer chunk and broadcast as `StreamEvent::TextDelta`.
+///   When `skills` is `Some`, also scan the chunk for `$<registered>` sigils
+///   (outside code fences) and broadcast `StreamEvent::SkillActivationRequested`.
 /// - `TextBlockCompleted`: flush buffer → one `AssistantMessageAppended` event.
+///   Resets the streaming `FenceState` at the block boundary.
 /// - `ToolUseCompleted`: persist `ToolUseRecorded` + broadcast `ToolDispatchStarted`.
 /// - `ToolUseStarted`: no action (H08 emits `ToolDispatchStarted/Ended`).
 ///
 /// Returns the sealed `ModelOutput` with blocks in `block_index` order, or
 /// the first `ModelError` encountered (caller transitions to `Failed`).
+#[allow(clippy::too_many_lines)] // dispatch on the ModelEvent variants; splitting hurts readability
 pub async fn demux<S>(
     mut stream: S,
     recorder: &mut StepRecorder,
     turn_id: TurnId,
+    skills: Option<&Arc<dyn SkillProvider>>,
 ) -> Result<ModelOutput, ModelError>
 where
     S: Stream<Item = Result<ModelEvent, ModelError>> + Unpin,
@@ -32,6 +76,8 @@ where
     let mut content: Vec<(u32, ContentBlock)> = Vec::new();
     let mut stop_reason = StopReason::EndTurn;
     let mut usage = Usage::default();
+    // Per-text-block streaming code-fence state. Reset on `TextBlockCompleted`.
+    let mut fence_state = FenceState::default();
 
     while let Some(evt) = stream.next().await {
         match evt? {
@@ -39,6 +85,17 @@ where
                 block_index: _,
                 chunk,
             } => {
+                // Sigil detection runs BEFORE the recorder buffers/broadcasts
+                // the delta, so subscribers see SkillActivationRequested
+                // ordered consistently with the surrounding TextDelta.
+                if let Some(provider) = skills {
+                    let _ = sigil_emit_for_test(
+                        provider,
+                        &mut fence_state,
+                        &chunk,
+                        recorder.events_tx(),
+                    );
+                }
                 // StepRecorder buffers + broadcasts TextDelta internally.
                 recorder.on_text_delta(turn_id, chunk);
             }
@@ -50,6 +107,8 @@ where
                         status: 0,
                         message: format!("recorder flush: {e}"),
                     })?;
+                // Each assistant text block is an independent fence-state scope.
+                fence_state = FenceState::default();
                 content.push((block_index, ContentBlock::Text { text }));
             }
             ModelEvent::ThinkingDelta {
@@ -164,7 +223,7 @@ mod tests {
             },
         })]);
 
-        let output = demux(events, &mut recorder, turn_id).await?;
+        let output = demux(events, &mut recorder, turn_id, None).await?;
         assert_eq!(output.stop_reason, StopReason::EndTurn);
 
         // Verify ModelCallCompleted was persisted as the single event (seq 0).
@@ -237,7 +296,7 @@ mod tests {
             }),
         ]);
 
-        let output = demux(events, &mut recorder, turn_id).await?;
+        let output = demux(events, &mut recorder, turn_id, None).await?;
 
         // ModelOutput.content carries the Thinking block at index 0, Text at 1.
         assert_eq!(output.content.len(), 2);

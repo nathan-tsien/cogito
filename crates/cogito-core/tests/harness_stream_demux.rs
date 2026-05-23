@@ -77,7 +77,7 @@ async fn demux_text_only_yields_text_content() -> Result<(), Box<dyn std::error:
     let ctx = ExecCtx::open_ended(SessionId::new(), TurnId::new());
     let turn_id = TurnId::new();
     let stream = mock.stream(empty_input(), ctx).await?;
-    let output = demux(stream, &mut recorder, turn_id).await?;
+    let output = demux(stream, &mut recorder, turn_id, None).await?;
 
     assert_eq!(output.content.len(), 1);
     assert!(
@@ -116,7 +116,7 @@ async fn demux_tool_use_captures_call_in_content() -> Result<(), Box<dyn std::er
     let ctx = ExecCtx::open_ended(SessionId::new(), TurnId::new());
     let turn_id = TurnId::new();
     let stream = mock.stream(empty_input(), ctx).await?;
-    let output = demux(stream, &mut recorder, turn_id).await?;
+    let output = demux(stream, &mut recorder, turn_id, None).await?;
 
     assert_eq!(output.content.len(), 1);
     assert!(
