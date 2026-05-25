@@ -29,7 +29,7 @@ regex.workspace = true
 #
 # Production builds leave the feature off, so the test scaffolding is
 # never compiled into shipped binaries.
-test-support = []
+test-support = ["tokio/time", "tokio/macros"]
 
 [dev-dependencies]
 cogito-test-fixtures = { workspace = true }
