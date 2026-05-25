@@ -1,0 +1,177 @@
+//! In-memory `JobManager` implementation. Jobs run as `tokio::task`s; their
+//! lifecycle is tracked in a `HashMap<JobId, JobLifecycle>` behind a
+//! `parking_lot::Mutex`. See
+//! `docs/superpowers/specs/2026-05-24-sprint-8-async-jobs-design.md` §6
+//! for the design rationale.
+
+use std::collections::HashMap;
+use std::future::Future;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use cogito_protocol::job::{
+    JobCompletionEvent, JobError, JobId, JobManager, JobOutcome, JobStatus,
+};
+use parking_lot::Mutex;
+use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
+
+/// Local job manager. One instance per `Runtime`; cloned via `Arc`.
+///
+/// Jobs run as `tokio::task`s on the ambient runtime. Lifecycle state
+/// (status, terminal outcome, registered completion sink, abort handle)
+/// lives in an in-memory map; nothing is persisted, so a process
+/// restart loses every running job.
+pub struct LocalJobManager {
+    jobs: Mutex<HashMap<JobId, JobLifecycle>>,
+}
+
+/// Per-job lifecycle record kept in the in-memory map.
+struct JobLifecycle {
+    status: JobStatus,
+    outcome: Option<JobOutcome>,
+    on_complete_sink: Option<mpsc::Sender<JobCompletionEvent>>,
+    abort_handle: Option<AbortHandle>,
+}
+
+impl LocalJobManager {
+    /// Construct an empty manager wrapped in an `Arc`.
+    ///
+    /// `submit` requires `self: &Arc<Self>` so the spawned task can hold
+    /// a strong reference back to the manager for completion bookkeeping;
+    /// returning an `Arc` here saves every caller from an explicit wrap.
+    #[must_use]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            jobs: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// Submit a future as an async job. Returns immediately with the new
+    /// `JobId`; the future runs on the current Tokio runtime. When the
+    /// future resolves, the outcome is stored and any registered
+    /// `on_complete` sink fires.
+    ///
+    /// Not part of the `JobManager` trait: only async tool implementations
+    /// submit jobs, and they hold an `Arc<LocalJobManager>` directly.
+    pub fn submit<F>(self: &Arc<Self>, fut: F) -> JobId
+    where
+        F: Future<Output = JobOutcome> + Send + 'static,
+    {
+        let job_id = JobId::default();
+        let this = Arc::clone(self);
+        // Insert the lifecycle entry before spawning so that any caller
+        // observing `status` immediately after `submit` sees `Running`
+        // even if the spawned task has not been polled yet. The abort
+        // handle is patched in once we have it.
+        self.jobs.lock().insert(
+            job_id,
+            JobLifecycle {
+                status: JobStatus::Running,
+                outcome: None,
+                on_complete_sink: None,
+                abort_handle: None,
+            },
+        );
+        let handle = tokio::spawn(async move {
+            let outcome = fut.await;
+            this.complete_internal(job_id, outcome).await;
+        });
+        if let Some(entry) = self.jobs.lock().get_mut(&job_id) {
+            entry.abort_handle = Some(handle.abort_handle());
+        }
+        job_id
+    }
+
+    /// Internal: called from the spawned task when the job future resolves.
+    /// Transitions to terminal status and fires the registered sink.
+    async fn complete_internal(&self, job_id: JobId, outcome: JobOutcome) {
+        let sink = {
+            let mut jobs = self.jobs.lock();
+            let Some(job) = jobs.get_mut(&job_id) else {
+                tracing::warn!(%job_id, "complete_internal for unknown job; dropping");
+                return;
+            };
+            // `JobOutcome` is `#[non_exhaustive]`. The explicit `Failed`
+            // arm and the wildcard fallback coincide today, but the
+            // wildcard exists purely as a forward-compat catch-all
+            // (e.g. future `TimedOut` / `Preempted` variants land on
+            // `Failed` here); `match_same_arms` would have us collapse
+            // the meaningful `Failed` arm into it.
+            #[allow(clippy::match_same_arms)]
+            let new_status = match &outcome {
+                JobOutcome::Success { .. } => JobStatus::Completed,
+                JobOutcome::Failed { .. } => JobStatus::Failed,
+                JobOutcome::Cancelled => JobStatus::Cancelled,
+                _ => JobStatus::Failed,
+            };
+            job.status = new_status;
+            job.outcome = Some(outcome.clone());
+            job.abort_handle = None;
+            job.on_complete_sink.take()
+        };
+        if let Some(sink) = sink {
+            // Best-effort delivery: per the contract, a dropped receiver
+            // is not a failure, so the send result is discarded.
+            let _ = sink.send(JobCompletionEvent { job_id, outcome }).await;
+        }
+    }
+}
+
+#[async_trait]
+impl JobManager for LocalJobManager {
+    async fn status(&self, job_id: JobId) -> Result<JobStatus, JobError> {
+        self.jobs
+            .lock()
+            .get(&job_id)
+            .map(|j| j.status)
+            .ok_or(JobError::UnknownJob(job_id))
+    }
+
+    async fn result(&self, job_id: JobId) -> Result<JobOutcome, JobError> {
+        let jobs = self.jobs.lock();
+        let Some(job) = jobs.get(&job_id) else {
+            return Err(JobError::UnknownJob(job_id));
+        };
+        job.outcome.clone().ok_or_else(|| {
+            // `JobError` currently has no dedicated "still running"
+            // variant; `BackendUnavailable` is the closest match and the
+            // contract suite (Task 2) only asserts `is_err()` here.
+            JobError::BackendUnavailable(format!("job {job_id} has not yet completed"))
+        })
+    }
+
+    async fn cancel(&self, _job_id: JobId) -> Result<(), JobError> {
+        // Cancel is implemented in Task 4 of the Sprint 8 plan.
+        Err(JobError::BackendUnavailable(
+            "cancel not yet implemented".into(),
+        ))
+    }
+
+    async fn on_complete(
+        &self,
+        job_id: JobId,
+        sink: mpsc::Sender<JobCompletionEvent>,
+    ) -> Result<(), JobError> {
+        let already_terminal = {
+            let mut jobs = self.jobs.lock();
+            let Some(job) = jobs.get_mut(&job_id) else {
+                return Err(JobError::UnknownJob(job_id));
+            };
+            let is_terminal = matches!(
+                job.status,
+                JobStatus::Completed | JobStatus::Failed | JobStatus::Cancelled
+            );
+            if is_terminal {
+                job.outcome.clone()
+            } else {
+                job.on_complete_sink = Some(sink.clone());
+                None
+            }
+        };
+        if let Some(outcome) = already_terminal {
+            let _ = sink.send(JobCompletionEvent { job_id, outcome }).await;
+        }
+        Ok(())
+    }
+}

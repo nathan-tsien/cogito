@@ -9,17 +9,19 @@ publish.workspace = true
 [dependencies]
 cogito-protocol.workspace = true
 
-tokio.workspace = true
 async-trait.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "rt", "time", "process"] }
 tracing.workspace = true
-sqlx.workspace = true
-uuid.workspace = true
 
 [dev-dependencies]
-tokio-test.workspace = true
+cogito-protocol = { workspace = true, features = ["test-support"] }
+cogito-test-fixtures.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util", "process"] }
 
 [lints]
 workspace = true
