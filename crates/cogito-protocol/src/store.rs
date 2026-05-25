@@ -179,6 +179,32 @@ pub trait EventRecorder: Send {
         Ok(id)
     }
 
+    /// Persist a `JobSubmitted` event for the given turn.
+    ///
+    /// Default implementation builds the payload and delegates to
+    /// [`EventRecorder::append_payload`]. Overriding implementations
+    /// (e.g. `StepRecorder`) may add side effects such as broadcasting
+    /// a live [`crate::stream::StreamEvent`].
+    async fn record_job_submitted(
+        &mut self,
+        turn_id: crate::ids::TurnId,
+        call_id: String,
+        job_id: crate::job::JobId,
+        tool_name: String,
+    ) -> Result<crate::ids::EventId, StoreError> {
+        let (id, _seq) = self
+            .append_payload(
+                turn_id,
+                crate::event::EventPayload::JobSubmitted {
+                    call_id,
+                    job_id,
+                    tool_name,
+                },
+            )
+            .await?;
+        Ok(id)
+    }
+
     /// Persist a `SkillActivated` event. Default impl routes through
     /// `append_payload`; backends needing tighter integration may override.
     async fn record_skill_activated(

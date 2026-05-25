@@ -178,6 +178,44 @@
       }
     },
     {
+      "description": "H08 submitted an async job for a tool call. Recorded immediately after the tool's `invoke()` returns `InvokeOutcome::Async(job_id)` and BEFORE the `on_complete` sink is registered.\n\nAdded Sprint 8 as an additive variant under ADR-0007. No `SCHEMA_VERSION` bump.",
+      "type": "object",
+      "required": [
+        "data",
+        "type"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": [
+            "call_id",
+            "job_id",
+            "tool_name"
+          ],
+          "properties": {
+            "call_id": {
+              "description": "Identifier matching the originating `ToolUseRecorded.call_id`.",
+              "type": "string"
+            },
+            "job_id": {
+              "description": "Opaque job identifier produced by `JobManager`.",
+              "type": "string"
+            },
+            "tool_name": {
+              "description": "Tool name (redundant with the `call_id` lookup but kept for log readability and debugging).",
+              "type": "string"
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "job_submitted"
+          ]
+        }
+      }
+    },
+    {
       "description": "The turn paused on an async tool call.",
       "type": "object",
       "required": [

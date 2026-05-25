@@ -283,6 +283,30 @@ impl StepRecorder {
             .await
     }
 
+    /// Record that H08 submitted an async job for a tool call.
+    ///
+    /// Persists a [`EventPayload::JobSubmitted`] event but does NOT
+    /// broadcast a [`StreamEvent`] — the broadcast happens later, at
+    /// the subsequent [`StepRecorder::record_turn_paused`] call, so
+    /// that subscribers observe the canonical pause boundary.
+    pub async fn record_job_submitted(
+        &mut self,
+        turn_id: TurnId,
+        call_id: String,
+        job_id: JobId,
+        tool_name: String,
+    ) -> Result<EventId, StoreError> {
+        self.append(
+            Some(turn_id),
+            EventPayload::JobSubmitted {
+                call_id,
+                job_id,
+                tool_name,
+            },
+        )
+        .await
+    }
+
     /// Record that a previously-awaited job completed and broadcast
     /// [`StreamEvent::TurnResumed`].
     ///
