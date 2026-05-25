@@ -167,83 +167,55 @@ impl JobManager for MockJobManager {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use cogito_protocol::tool::ToolResult;
-    use std::time::Duration;
+    use async_trait::async_trait;
+    use cogito_protocol::test_support::contract_job_manager::{
+        JobManagerHarness, run_contract_suite,
+    };
 
-    #[tokio::test]
-    async fn fires_sink_immediately_if_job_already_completed()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let mgr = MockJobManager::new();
-        let job = JobId::default();
-        mgr.register(job).await;
-        mgr.complete(
-            job,
-            JobOutcome::Success {
-                result: ToolResult::text("ok"),
-            },
-        )
-        .await;
+    /// Harness that drives [`MockJobManager`] through the shared
+    /// `JobManager` contract suite. `arm` registers a fresh job and
+    /// stashes the outcome that `fire` will later hand to
+    /// [`MockJobManager::complete`].
+    struct MockHarness {
+        manager: Arc<MockJobManager>,
+        pending: Mutex<HashMap<JobId, JobOutcome>>,
+    }
 
-        let (tx, mut rx) = mpsc::channel(1);
-        mgr.on_complete(job, tx).await?;
+    #[async_trait]
+    impl JobManagerHarness for MockHarness {
+        type Manager = MockJobManager;
 
-        let evt = tokio::time::timeout(Duration::from_millis(100), rx.recv())
-            .await?
-            .ok_or("sender dropped")?;
-        assert_eq!(evt.job_id, job);
-        assert!(matches!(evt.outcome, JobOutcome::Success { .. }));
-        Ok(())
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                manager: Arc::new(MockJobManager::new()),
+                pending: Mutex::new(HashMap::new()),
+            })
+        }
+
+        fn manager(&self) -> Arc<Self::Manager> {
+            Arc::clone(&self.manager)
+        }
+
+        async fn arm(&self, outcome: JobOutcome) -> JobId {
+            let job_id = JobId::default();
+            self.manager.register(job_id).await;
+            self.pending.lock().await.insert(job_id, outcome);
+            job_id
+        }
+
+        async fn fire(&self, job_id: JobId) {
+            let outcome = self
+                .pending
+                .lock()
+                .await
+                .remove(&job_id)
+                .expect("fire called on an un-armed job");
+            self.manager.complete(job_id, outcome).await;
+        }
     }
 
     #[tokio::test]
-    async fn fires_sink_after_completion_if_job_not_yet_done()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let mgr = MockJobManager::new();
-        let job = JobId::default();
-        mgr.register(job).await;
-
-        let (tx, mut rx) = mpsc::channel(1);
-        mgr.on_complete(job, tx).await?;
-        assert!(rx.try_recv().is_err(), "no event before complete()");
-
-        mgr.complete(job, JobOutcome::Cancelled).await;
-        let evt = tokio::time::timeout(Duration::from_millis(100), rx.recv())
-            .await?
-            .ok_or("sender dropped")?;
-        assert_eq!(evt.job_id, job);
-        assert!(matches!(evt.outcome, JobOutcome::Cancelled));
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn status_and_result_reflect_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
-        let mgr = MockJobManager::new();
-        let job = JobId::default();
-
-        // Unknown job -> UnknownJob.
-        assert!(matches!(
-            mgr.status(job).await,
-            Err(JobError::UnknownJob(_))
-        ));
-
-        mgr.register(job).await;
-        assert!(matches!(mgr.status(job).await?, JobStatus::Running));
-        // Not yet completed -> BackendUnavailable from result.
-        assert!(matches!(
-            mgr.result(job).await,
-            Err(JobError::BackendUnavailable(_))
-        ));
-
-        mgr.complete(
-            job,
-            JobOutcome::Failed {
-                message: "boom".into(),
-            },
-        )
-        .await;
-        assert!(matches!(mgr.status(job).await?, JobStatus::Failed));
-        assert!(matches!(mgr.result(job).await?, JobOutcome::Failed { .. }));
-
-        Ok(())
+    async fn mock_job_manager_satisfies_job_manager_contract() {
+        run_contract_suite::<MockHarness>().await;
     }
 }
