@@ -11,11 +11,6 @@ use cogito_protocol::ids::TurnId;
 use cogito_protocol::job::{JobId, JobOutcome};
 use cogito_protocol::tool::ToolResult;
 
-/// Convenience alias: the paused-call context tuple returned by
-/// `find_paused_call_context`.
-/// `(call_id, completed_before_pause, pending_after_pause)`
-type PausedCallContext = (String, Vec<(String, ToolResult)>, Vec<ResumePendingCall>);
-
 /// Output of H03 Resume Coordinator. Pure projection from the event log.
 /// Never persisted (see spec §6 落盘语义).
 #[derive(Debug, Clone, PartialEq)]
@@ -92,9 +87,11 @@ pub enum ResumePoint {
         job_id: JobId,
         /// Outcome of the completed job.
         outcome: JobOutcome,
-        /// Resolved by walking back to the latest unmatched `ToolUseRecorded`
-        /// before `TurnPaused` (Sprint 3 invariant: ≤1 async dispatch per
-        /// turn; Sprint 4 may add `call_id` to `TurnPaused` payload).
+        /// Resolved via `lookup_call_id_in_events` — the most recent
+        /// `JobSubmitted { job_id, .. }` carries the originating
+        /// `call_id`. See the Sprint 8 spec
+        /// `docs/superpowers/specs/2026-05-24-sprint-8-async-jobs-design.md`
+        /// §9.1.
         call_id: String,
         /// Tool calls dispatched and completed before the pause.
         completed_before_pause: Vec<(String, ToolResult)>,
@@ -152,14 +149,19 @@ pub enum ResumeError {
 /// exact state to resume into. Pure function: same input always produces
 /// the same output; no I/O, no clock, no randomness.
 ///
-/// Implements the 9-row decision table from spec §5 (Sprint 3).
+/// Implements the 9-row decision table from spec §5 (Sprint 3). The
+/// paused-job arms derive `call_id` via [`lookup_call_id_in_events`]
+/// against the Sprint 8 `JobSubmitted` event; see the Sprint 8 spec
+/// `docs/superpowers/specs/2026-05-24-sprint-8-async-jobs-design.md` §9.1.
 ///
 /// # Errors
 ///
 /// Returns `ResumeError::UnsupportedSchema` if any event has a
 /// `schema_version` newer than this build supports, or
 /// `ResumeError::Malformed` if the log is structurally inconsistent
-/// (e.g., `JobCompletedRecorded` with no preceding `TurnPaused`).
+/// (e.g., `JobCompletedRecorded` with no preceding `TurnPaused`, or
+/// `TurnPaused { job_id }` without a preceding
+/// `JobSubmitted { job_id, .. }`).
 pub fn replay(events: &[ConversationEvent]) -> Result<ResumeDecision, ResumeError> {
     // 1. Schema check (must come first).
     if let Some(e) = events.iter().find(|e| e.schema_version > SCHEMA_VERSION) {
@@ -225,41 +227,7 @@ pub fn replay(events: &[ConversationEvent]) -> Result<ResumeDecision, ResumeErro
             })
         }
         EventPayload::TurnPaused { job_id } => {
-            let tail = &events[boundary_idx + 1..];
-            let job_done = tail.iter().find_map(|e| match &e.payload {
-                EventPayload::JobCompletedRecorded {
-                    job_id: jid,
-                    outcome,
-                } if jid == job_id => Some(outcome.clone()),
-                _ => None,
-            });
-            let turn_id = boundary
-                .turn_id
-                .ok_or_else(|| ResumeError::Malformed("TurnPaused without turn_id".into()))?;
-            match job_done {
-                None => Ok(ResumeDecision {
-                    point: ResumePoint::ResumePausedJob {
-                        turn_id,
-                        job_id: *job_id,
-                    },
-                    last_event_seq,
-                }),
-                Some(outcome) => {
-                    let (call_id, completed_before_pause, pending_after_pause) =
-                        find_paused_call_context(events, boundary_idx)?;
-                    Ok(ResumeDecision {
-                        point: ResumePoint::ResumeAfterJobCompletion {
-                            turn_id,
-                            job_id: *job_id,
-                            outcome,
-                            call_id,
-                            completed_before_pause,
-                            pending_after_pause,
-                        },
-                        last_event_seq,
-                    })
-                }
-            }
+            resume_from_turn_paused(events, boundary, boundary_idx, *job_id, last_event_seq)
         }
         EventPayload::TurnStarted { .. } => {
             let turn_id = boundary
@@ -305,6 +273,58 @@ fn check_no_nested_turn_started(events: &[ConversationEvent]) -> Result<(), Resu
         }
     }
     Ok(())
+}
+
+/// Handles the `TurnPaused` boundary case: classifies into either
+/// `ResumePausedJob` (no `JobCompletedRecorded` for this `job_id` yet) or
+/// `ResumeAfterJobCompletion` (the job finished but the actor crashed
+/// before consuming the result). `call_id` is derived via
+/// [`lookup_call_id_in_events`]; see Sprint 8 spec §9.1.
+fn resume_from_turn_paused(
+    events: &[ConversationEvent],
+    boundary: &ConversationEvent,
+    boundary_idx: usize,
+    job_id: JobId,
+    last_event_seq: Option<u64>,
+) -> Result<ResumeDecision, ResumeError> {
+    let turn_id = boundary
+        .turn_id
+        .ok_or_else(|| ResumeError::Malformed("TurnPaused without turn_id".into()))?;
+    let job_done = events[boundary_idx + 1..]
+        .iter()
+        .find_map(|e| match &e.payload {
+            EventPayload::JobCompletedRecorded {
+                job_id: jid,
+                outcome,
+            } if *jid == job_id => Some(outcome.clone()),
+            _ => None,
+        });
+    match job_done {
+        None => Ok(ResumeDecision {
+            point: ResumePoint::ResumePausedJob { turn_id, job_id },
+            last_event_seq,
+        }),
+        Some(outcome) => {
+            let call_id = lookup_call_id_in_events(events, job_id).ok_or_else(|| {
+                ResumeError::Malformed(format!(
+                    "TurnPaused for job {job_id:?} has no preceding JobSubmitted"
+                ))
+            })?;
+            let (completed_before_pause, pending_after_pause) =
+                collect_paused_call_context(events, boundary_idx);
+            Ok(ResumeDecision {
+                point: ResumePoint::ResumeAfterJobCompletion {
+                    turn_id,
+                    job_id,
+                    outcome,
+                    call_id,
+                    completed_before_pause,
+                    pending_after_pause,
+                },
+                last_event_seq,
+            })
+        }
+    }
 }
 
 /// Handles the `TurnStarted` boundary case: classifies the in-progress turn
@@ -453,20 +473,43 @@ fn rebuild_model_output(slice: &[ConversationEvent]) -> Result<ModelOutput, Resu
     })
 }
 
-/// Extracts call context from a paused turn: finds the unmatched
-/// `ToolUseRecorded` that caused the pause, collects completed results,
-/// and returns an empty `pending_after_pause` (Sprint 3 invariant: ≤1
-/// async dispatch per turn).
-fn find_paused_call_context(
+/// Find the `call_id` associated with `job_id` by scanning events in
+/// reverse for the most recent `JobSubmitted { job_id, .. }`.
+///
+/// Returns `None` if no such event exists — a structurally malformed log
+/// (every `TurnPaused { job_id }` must be preceded by a matching
+/// `JobSubmitted { job_id, .. }` per H08's write-before-transition
+/// contract; see Sprint 8 spec
+/// `docs/superpowers/specs/2026-05-24-sprint-8-async-jobs-design.md` §9.1).
+/// Callers should surface this as `ResumeError::Malformed`.
+pub(crate) fn lookup_call_id_in_events(
+    events: &[ConversationEvent],
+    job_id: JobId,
+) -> Option<String> {
+    events.iter().rev().find_map(|e| match &e.payload {
+        EventPayload::JobSubmitted {
+            call_id,
+            job_id: jid,
+            ..
+        } if *jid == job_id => Some(call_id.clone()),
+        _ => None,
+    })
+}
+
+/// Collects completed tool results within the paused turn so the caller
+/// can rehydrate `completed_before_pause`. `pending_after_pause` is
+/// returned alongside for parity with the `ResumeAfterJobCompletion`
+/// shape; Sprint 3 invariant (≤1 async dispatch per turn) keeps it empty.
+///
+/// Scans from the latest `TurnStarted` up to `paused_idx`.
+/// `ToolResultRecorded` events are written by the actor after
+/// `ModelCallCompleted` as tools return, so the scan must cover the
+/// whole turn-after-start region rather than anchoring on
+/// `ModelCallCompleted`.
+fn collect_paused_call_context(
     events: &[ConversationEvent],
     paused_idx: usize,
-) -> Result<PausedCallContext, ResumeError> {
-    // Scan from the latest TurnStarted within this turn up to TurnPaused.
-    // `ToolUseRecorded` is written during streaming (BEFORE the sealing
-    // `ModelCallCompleted`); `ToolResultRecorded` is written during dispatch
-    // (AFTER `ModelCallCompleted`). Anchoring on `ModelCallCompleted` would
-    // miss the tool-use events entirely, so the scan covers the whole
-    // turn-after-start region.
+) -> (Vec<(String, ToolResult)>, Vec<ResumePendingCall>) {
     let turn_start_idx = events[..paused_idx]
         .iter()
         .rposition(|e| matches!(e.payload, EventPayload::TurnStarted { .. }))
@@ -474,43 +517,18 @@ fn find_paused_call_context(
     let dispatch_slice = &events[turn_start_idx..paused_idx];
 
     let mut completed: Vec<(String, ToolResult)> = Vec::new();
-    let mut completed_ids: Vec<String> = Vec::new();
-    let mut all_tool_uses: Vec<(String, String, serde_json::Value)> = Vec::new();
-
     for e in dispatch_slice {
-        match &e.payload {
-            EventPayload::ToolUseRecorded {
-                call_id,
-                tool_name,
-                args,
-            } => {
-                all_tool_uses.push((call_id.clone(), tool_name.clone(), args.clone()));
-            }
-            EventPayload::ToolResultRecorded { call_id, result } => {
-                completed.push((call_id.clone(), result.clone()));
-                completed_ids.push(call_id.clone());
-            }
-            _ => {}
+        if let EventPayload::ToolResultRecorded { call_id, result } = &e.payload {
+            completed.push((call_id.clone(), result.clone()));
         }
     }
 
-    // Spec §4.3: pick the LATEST unmatched ToolUseRecorded before TurnPaused.
-    // Using rev() ensures correctness for Sprint 4 multi-async dispatch; Sprint 3
-    // ≤1-async invariant means functional behavior is identical either way today.
-    let paused_call = all_tool_uses
-        .iter()
-        .rev()
-        .find(|(id, _, _)| !completed_ids.iter().any(|c| c == id))
-        .ok_or_else(|| {
-            ResumeError::Malformed("TurnPaused without preceding unmatched ToolUseRecorded".into())
-        })?;
-    let call_id = paused_call.0.clone();
-
-    // Sprint 3 invariant: ≤1 async dispatch per turn, so pending_after_pause is
-    // always empty. Keeping the structure for Sprint 4 forward compatibility.
+    // Sprint 3 invariant: ≤1 async dispatch per turn, so pending_after_pause
+    // is always empty. Keeping the structure for Sprint 4 forward
+    // compatibility.
     let pending_after_pause: Vec<ResumePendingCall> = Vec::new();
 
-    Ok((call_id, completed, pending_after_pause))
+    (completed, pending_after_pause)
 }
 
 #[cfg(test)]
@@ -901,9 +919,18 @@ mod tests {
                 },
                 Some(t),
             ),
-            evt(4, EventPayload::TurnPaused { job_id: j }, Some(t)),
             evt(
-                5,
+                4,
+                EventPayload::JobSubmitted {
+                    call_id: "c_async".into(),
+                    job_id: j,
+                    tool_name: "long_tool".into(),
+                },
+                Some(t),
+            ),
+            evt(5, EventPayload::TurnPaused { job_id: j }, Some(t)),
+            evt(
+                6,
                 EventPayload::JobCompletedRecorded {
                     job_id: j,
                     outcome: JobOutcome::Cancelled,
@@ -924,6 +951,144 @@ mod tests {
                 assert_eq!(call_id, "c_async");
             }
             other => panic!("expected ResumeAfterJobCompletion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resume_after_job_completion_reads_call_id_from_job_submitted() {
+        // Sprint 8 §9.1: ResumeAfterJobCompletion.call_id is derived from
+        // the JobSubmitted event, not by scanning for the latest unmatched
+        // ToolUseRecorded. Prove that by using a JobSubmitted whose call_id
+        // differs from the preceding ToolUseRecorded — the JobSubmitted
+        // value must win.
+        let t = TurnId::new();
+        let j = JobId::default();
+        let events = vec![
+            evt(
+                0,
+                EventPayload::SessionStarted {
+                    meta: SessionMeta::default(),
+                },
+                None,
+            ),
+            evt(
+                1,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
+            evt(
+                2,
+                EventPayload::ModelCallStarted { model: "m".into() },
+                Some(t),
+            ),
+            evt(
+                3,
+                EventPayload::ToolUseRecorded {
+                    call_id: "call_async".into(),
+                    tool_name: "run_tests".into(),
+                    args: serde_json::json!({}),
+                },
+                Some(t),
+            ),
+            evt(
+                4,
+                EventPayload::ModelCallCompleted {
+                    stop_reason: StopReason::ToolUse,
+                    usage: Usage::default(),
+                },
+                Some(t),
+            ),
+            evt(
+                5,
+                EventPayload::JobSubmitted {
+                    call_id: "call_async".into(),
+                    job_id: j,
+                    tool_name: "run_tests".into(),
+                },
+                Some(t),
+            ),
+            evt(6, EventPayload::TurnPaused { job_id: j }, Some(t)),
+            evt(
+                7,
+                EventPayload::JobCompletedRecorded {
+                    job_id: j,
+                    outcome: JobOutcome::Success {
+                        result: ToolResult::text("done"),
+                    },
+                },
+                Some(t),
+            ),
+        ];
+        let d = replay(&events).unwrap();
+        match d.point {
+            ResumePoint::ResumeAfterJobCompletion { call_id, .. } => {
+                assert_eq!(call_id, "call_async");
+            }
+            other => panic!("expected ResumeAfterJobCompletion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resume_after_job_completion_without_job_submitted_is_malformed() {
+        // Sprint 8 §9.1: a TurnPaused { job_id } without a preceding
+        // JobSubmitted { job_id, .. } is structurally malformed — no
+        // guessing via ToolUseRecorded scanning.
+        let t = TurnId::new();
+        let j = JobId::default();
+        let events = vec![
+            evt(
+                0,
+                EventPayload::TurnStarted {
+                    user_input: vec![],
+                    activate_skills: vec![],
+                },
+                Some(t),
+            ),
+            evt(
+                1,
+                EventPayload::ModelCallStarted { model: "m".into() },
+                Some(t),
+            ),
+            evt(
+                2,
+                EventPayload::ToolUseRecorded {
+                    call_id: "c_async".into(),
+                    tool_name: "long_tool".into(),
+                    args: serde_json::json!({}),
+                },
+                Some(t),
+            ),
+            evt(
+                3,
+                EventPayload::ModelCallCompleted {
+                    stop_reason: StopReason::ToolUse,
+                    usage: Usage::default(),
+                },
+                Some(t),
+            ),
+            // Missing: JobSubmitted { job_id: j, .. }
+            evt(4, EventPayload::TurnPaused { job_id: j }, Some(t)),
+            evt(
+                5,
+                EventPayload::JobCompletedRecorded {
+                    job_id: j,
+                    outcome: JobOutcome::Cancelled,
+                },
+                Some(t),
+            ),
+        ];
+        let err = replay(&events).unwrap_err();
+        match err {
+            ResumeError::Malformed(msg) => {
+                assert!(
+                    msg.contains("JobSubmitted"),
+                    "expected error to mention JobSubmitted, got: {msg}"
+                );
+            }
+            other => panic!("expected Malformed, got {other:?}"),
         }
     }
 
