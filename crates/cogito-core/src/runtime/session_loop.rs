@@ -30,7 +30,7 @@ use cogito_protocol::content::ContentBlock;
 use cogito_protocol::context::ContextPipeline;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::{SessionId, TurnId};
-use cogito_protocol::job::{JobCompletionEvent, JobId, JobManager, JobOutcome};
+use cogito_protocol::job::{JobCompletionEvent, JobError, JobId, JobManager, JobOutcome};
 use cogito_protocol::session::SessionMeta;
 use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::store::ConversationStore;
@@ -224,7 +224,9 @@ pub(super) async fn run_session(
     // 4. SessionStarted: already gated in builder.rs::open_session.
 
     // 5. Dispatch the resume point. Errors here are startup-fatal.
-    if let Err(outcome) = apply_resume_point(&mut state, decision.point, &deps) {
+    if let Err(outcome) =
+        apply_resume_point(&mut state, &initial_events, decision.point, &deps).await
+    {
         return outcome;
     }
 
@@ -271,11 +273,18 @@ pub(super) async fn run_session(
 ///   `TurnEntry::FromModelCompleted`.
 /// - `ResumeFromToolDispatching` — spawn `TurnDriver` with
 ///   `TurnEntry::FromToolDispatching`.
-/// - `ResumePausedJob` / `ResumeAfterJobCompletion` — v0.1 returns
-///   `ShutdownOutcome::JobManagerUnavailable`; `JobManager` injection is a
-///   Sprint 4 deliverable.
-fn apply_resume_point(
+/// - `ResumePausedJob` — restore `InFlight::PausedOnJob` and register
+///   `on_complete` with the current `JobManager`. If the manager returns
+///   `UnknownJob` (the in-memory map was lost across the restart),
+///   synthesize a `Failed { message: "lost across process restart" }`
+///   completion on the session's own Arm 3 channel so the same FIFO path
+///   carries it as if a live job had just failed.
+/// - `ResumeAfterJobCompletion` — translate the already-persisted outcome
+///   to a `ToolResult` and spawn `TurnDriver` with
+///   `TurnEntry::FromToolDispatching` carrying the resolved completion.
+async fn apply_resume_point(
     state: &mut SessionState,
+    initial_events: &[cogito_protocol::ConversationEvent],
     point: ResumePoint,
     deps: &SessionDeps,
 ) -> Result<(), ShutdownOutcome> {
@@ -327,10 +336,78 @@ fn apply_resume_point(
             Ok(())
         }
 
-        ResumePoint::ResumePausedJob { .. } | ResumePoint::ResumeAfterJobCompletion { .. } => {
-            Err(ShutdownOutcome::JobManagerUnavailable(
-                "Sprint 4 deliverable - v0.1 has no JobManager injection".into(),
-            ))
+        ResumePoint::ResumePausedJob { turn_id, job_id } => {
+            // Resolve the originating `call_id` from the persisted log so
+            // the eventual `JobCompleted` mailbox command (live or
+            // synthetic) can stitch the result back into the resumed
+            // turn's `completed_before_pause` via
+            // `TurnEntry::FromToolDispatching`.
+            let call_id = crate::harness::resume::lookup_call_id_in_events(initial_events, job_id)
+                .ok_or_else(|| {
+                    ShutdownOutcome::ResumeFailed(format!(
+                        "ResumePausedJob: no JobSubmitted for job {job_id}"
+                    ))
+                })?;
+            state.in_flight = Some(InFlight::PausedOnJob {
+                turn_id,
+                job_id,
+                call_id,
+            });
+
+            match deps
+                .job_mgr
+                .on_complete(job_id, state.job_completion_tx.clone())
+                .await
+            {
+                Ok(()) => {
+                    // Sink registered; will fire when the job terminates.
+                    Ok(())
+                }
+                Err(JobError::UnknownJob(_)) => {
+                    // Lost across process restart. Synthesize a Failed
+                    // completion by posting on the session's own Arm 3
+                    // channel so it flows through the same FIFO path as a
+                    // live completion (`handle_command` consumes the
+                    // `JobCompleted` mailbox command, records
+                    // `JobCompletedRecorded`, then re-spawns the
+                    // TurnDriver with the AsyncFailed `ToolResult`).
+                    let synth = JobCompletionEvent {
+                        job_id,
+                        outcome: JobOutcome::Failed {
+                            message: "lost across process restart".into(),
+                        },
+                    };
+                    if let Err(e) = state.job_completion_tx.send(synth).await {
+                        return Err(ShutdownOutcome::ResumeFailed(format!(
+                            "could not post synthetic JobCompletion: {e}"
+                        )));
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(ShutdownOutcome::ResumeFailed(e.to_string())),
+            }
+        }
+
+        ResumePoint::ResumeAfterJobCompletion {
+            turn_id,
+            call_id,
+            outcome,
+            ..
+        } => {
+            // The `JobCompletedRecorded` event is already persisted; no
+            // need to re-record. Translate the outcome to a `ToolResult`
+            // and spawn the TurnDriver directly in `ToolDispatching`.
+            let tool_result = outcome_to_tool_result(outcome);
+            spawn_turn_driver(
+                state,
+                turn_id,
+                TurnEntry::FromToolDispatching {
+                    pending: vec![],
+                    completed: vec![(call_id, tool_result)],
+                },
+                deps,
+            );
+            Ok(())
         }
     }
 }
