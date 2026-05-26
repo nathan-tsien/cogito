@@ -44,7 +44,7 @@ use cogito_protocol::ContentBlock;
 use cogito_protocol::event::{ConversationEvent, EventPayload};
 use cogito_protocol::gateway::{ModelEvent, ModelGateway, StopReason, Usage};
 use cogito_protocol::ids::SessionId;
-use cogito_protocol::job::JobManager;
+use cogito_protocol::job::{JobManager, LocalJobSubmitter};
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
@@ -58,7 +58,9 @@ async fn mid_pause_user_input_drained_latest_wins() -> Result<(), Box<dyn std::e
     let store = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
 
     let job_mgr = LocalJobManager::new();
-    let sleep_tool: Arc<dyn ToolProvider> = Arc::new(SleepTool::new(Arc::clone(&job_mgr)));
+    let sleep_tool: Arc<dyn ToolProvider> = Arc::new(SleepTool::new(
+        Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>
+    ));
 
     // Turn 1: tool_use(sleep, 200 ms) + text. Turn 2 (the queued
     // "b"-triggered turn): single text + end_turn. We script three

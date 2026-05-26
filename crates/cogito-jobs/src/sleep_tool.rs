@@ -19,13 +19,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cogito_protocol::ExecCtx;
-use cogito_protocol::job::JobOutcome;
+use cogito_protocol::job::{JobOutcome, LocalJobSubmitter};
 use cogito_protocol::tool::{
     ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
 };
 use serde::Deserialize;
-
-use crate::LocalJobManager;
 
 /// Tool name exposed to the model.
 const TOOL_NAME: &str = "sleep";
@@ -38,20 +36,26 @@ struct SleepArgs {
 }
 
 /// Deterministic async-tool fixture. Submits a `tokio::time::sleep` future
-/// into the wrapped [`LocalJobManager`] and returns the resulting `JobId`
+/// into the wrapped [`LocalJobSubmitter`] and returns the resulting `JobId`
 /// to the dispatcher.
 ///
-/// Construct via [`SleepTool::new`] with the same `Arc<LocalJobManager>`
-/// that the `RuntimeBuilder` will receive — otherwise the job submitted
-/// here is invisible to the Brain registering `on_complete`.
+/// Construct via [`SleepTool::new`] with the same `Arc<dyn LocalJobSubmitter>`
+/// (typically an `Arc<LocalJobManager>` which coerces automatically) the
+/// `RuntimeBuilder` will receive — otherwise the job submitted here is
+/// invisible to the Brain registering `on_complete`.
 pub struct SleepTool {
-    job_mgr: Arc<LocalJobManager>,
+    job_mgr: Arc<dyn LocalJobSubmitter>,
 }
 
 impl SleepTool {
     /// Build a new `SleepTool` bound to `job_mgr`.
+    ///
+    /// `Arc<LocalJobManager>` coerces to `Arc<dyn LocalJobSubmitter>`
+    /// automatically (since `LocalJobManager` impls the trait), so
+    /// CLI / test callers can pass either form. See ADR-0025 for why
+    /// the parameter is a trait object rather than the concrete type.
     #[must_use]
-    pub fn new(job_mgr: Arc<LocalJobManager>) -> Self {
+    pub fn new(job_mgr: Arc<dyn LocalJobSubmitter>) -> Self {
         Self { job_mgr }
     }
 }
@@ -98,12 +102,16 @@ impl ToolProvider for SleepTool {
             }
         };
         let dur = Duration::from_millis(parsed.duration_ms);
-        let job_id = self.job_mgr.submit(async move {
-            tokio::time::sleep(dur).await;
-            JobOutcome::Success {
-                result: ToolResult::text("slept"),
-            }
-        });
+        let job_id = self
+            .job_mgr
+            .clone()
+            .submit_boxed(Box::pin(async move {
+                tokio::time::sleep(dur).await;
+                JobOutcome::Success {
+                    result: ToolResult::text("slept"),
+                }
+            }))
+            .await;
         InvokeOutcome::Async(job_id)
     }
 }
@@ -112,6 +120,7 @@ impl ToolProvider for SleepTool {
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
+    use crate::LocalJobManager;
     use cogito_protocol::ids::{SessionId, TurnId};
     use cogito_protocol::job::{JobManager, JobStatus};
 
@@ -133,7 +142,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn invoke_returns_async_and_resolves_with_slept() {
         let job_mgr = LocalJobManager::new();
-        let tool = SleepTool::new(Arc::clone(&job_mgr));
+        let tool = SleepTool::new(Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>);
         let outcome = tool
             .invoke("sleep", serde_json::json!({ "duration_ms": 10 }), ctx())
             .await;
