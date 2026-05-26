@@ -133,6 +133,9 @@ async fn cancel_turn_works_after_first_turn() -> Result<(), Box<dyn std::error::
     // FSM transition), so draining to TWO `TurnCompleted` broadcast events
     // guarantees the actor has cleared in_flight.
     handle.submit_user_text("first").await?;
+    // NOTE: turn 1's TurnCompleted is currently broadcast twice (see
+    // TODO(double-turn-completed) in runtime/session_loop.rs). When that
+    // bug is fixed, change the expected count to 1.
     let saw_two_completes = tokio::time::timeout(Duration::from_secs(5), async {
         let mut completed = 0u32;
         loop {

@@ -485,6 +485,13 @@ async fn on_turn_complete(state: &mut SessionState, turn_id: TurnId, outcome: Tu
     state.in_flight = None;
     let mut rec = state.recorder.lock().await;
     let result: Result<(), _> = match outcome {
+        // TODO(double-turn-completed): the TurnDriver's model_completed::transit
+        // already writes TurnCompleted via record_turn_completed before returning
+        // TurnOutcome::Completed. Calling record_turn_completed again here
+        // produces a duplicate persisted event AND a duplicate broadcast.
+        // Fix in a separate change; tests/cancel_after_first_turn.rs currently
+        // drains 2x TurnCompleted to tolerate this — that workaround must drop
+        // to 1 when this is corrected.
         TurnOutcome::Completed => rec
             .record_turn_completed(turn_id, TurnOutcome::Completed)
             .await
