@@ -30,13 +30,13 @@ use cogito_protocol::content::ContentBlock;
 use cogito_protocol::context::ContextPipeline;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::{SessionId, TurnId};
-use cogito_protocol::job::{JobCompletionEvent, JobId};
+use cogito_protocol::job::{JobCompletionEvent, JobId, JobOutcome};
 use cogito_protocol::session::SessionMeta;
 use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
-use cogito_protocol::tool::ToolProvider;
+use cogito_protocol::tool::{ToolErrorKind, ToolProvider, ToolResult};
 use cogito_protocol::turn::{TurnFailureReason, TurnOutcome};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
@@ -65,11 +65,6 @@ pub(super) enum InFlight {
     /// `on_turn_complete` when a turn returns `TurnOutcome::Paused` and
     /// consumed by `handle_command` on the subsequent `JobCompleted`
     /// mailbox command to rebuild a `TurnEntry::FromToolDispatching`.
-    // TODO(sprint-8-task-8): drop this `#[allow(dead_code)]` once
-    // `handle_command(JobCompleted)` reads the fields below. The variant
-    // is constructed by `on_turn_complete` (Task 7) but no consumer
-    // pattern-matches the fields yet, so the dead_code lint fires.
-    #[allow(dead_code)]
     PausedOnJob {
         /// The turn that was paused.
         turn_id: TurnId,
@@ -397,8 +392,72 @@ async fn handle_command(
             try_start_turn(state, trigger, deps).await;
             None
         }
-        SessionCommand::JobCompleted { .. } => {
-            // Sprint 4: resume a paused turn.
+        SessionCommand::JobCompleted { event } => {
+            let JobCompletionEvent { job_id, outcome } = event;
+
+            // Verify the session is paused on this exact job. Mismatch /
+            // wrong state is logged and dropped — the only safe action when
+            // an unexpected completion arrives is to refuse to resume.
+            let Some(InFlight::PausedOnJob {
+                turn_id,
+                job_id: expected,
+                call_id,
+            }) = std::mem::take(&mut state.in_flight)
+            else {
+                tracing::error!(
+                    session_id = %state.session_id,
+                    %job_id,
+                    "JobCompleted received but session is not PausedOnJob; dropping"
+                );
+                return None;
+            };
+
+            if expected != job_id {
+                tracing::error!(
+                    session_id = %state.session_id,
+                    expected = %expected,
+                    received = %job_id,
+                    "JobCompleted job_id mismatch; restoring in_flight and dropping event"
+                );
+                // Restore the paused state so the legitimate completion
+                // can still resume the turn when it eventually arrives.
+                state.in_flight = Some(InFlight::PausedOnJob {
+                    turn_id,
+                    job_id: expected,
+                    call_id,
+                });
+                return None;
+            }
+
+            // Write-before-transition: record JobCompleted before re-spawning
+            // the TurnDriver so the persisted log reflects the completion
+            // even if the actor dies between the record and the spawn.
+            {
+                let mut rec = state.recorder.lock().await;
+                if let Err(e) = rec
+                    .record_job_completed(turn_id, job_id, outcome.clone())
+                    .await
+                {
+                    tracing::error!(
+                        session_id = %state.session_id,
+                        %turn_id,
+                        error = %e,
+                        "failed to record JobCompleted; aborting session"
+                    );
+                    return Some(ShutdownOutcome::ResumeFailed(e.to_string()));
+                }
+            }
+
+            let tool_result = outcome_to_tool_result(outcome);
+            spawn_turn_driver(
+                state,
+                turn_id,
+                TurnEntry::FromToolDispatching {
+                    pending: vec![],
+                    completed: vec![(call_id, tool_result)],
+                },
+                deps,
+            );
             None
         }
         SessionCommand::InternalCancel { ack } => {
@@ -417,6 +476,35 @@ async fn handle_command(
                 in_flight_cancelled: None,
             })
         }
+    }
+}
+
+/// Translate a terminal `JobOutcome` into the `ToolResult` that the resumed
+/// turn sees in its `completed` list. `JobOutcome` is `#[non_exhaustive]`,
+/// so unknown future variants surface as an `AsyncFailed` error rather than
+/// a panic — the model still gets a well-formed `ToolResult` and the turn
+/// can continue.
+fn outcome_to_tool_result(outcome: JobOutcome) -> ToolResult {
+    match outcome {
+        JobOutcome::Success { result } => result,
+        JobOutcome::Failed { message } => ToolResult::Error {
+            kind: ToolErrorKind::AsyncFailed,
+            message,
+            retryable: false,
+        },
+        JobOutcome::Cancelled => ToolResult::Error {
+            kind: ToolErrorKind::Cancelled,
+            message: "job cancelled".into(),
+            retryable: false,
+        },
+        // `JobOutcome` is `#[non_exhaustive]`; future variants land as a
+        // generic AsyncFailed so the model still gets a structured error
+        // rather than a panicking Brain.
+        _ => ToolResult::Error {
+            kind: ToolErrorKind::AsyncFailed,
+            message: "unknown job outcome variant".into(),
+            retryable: false,
+        },
     }
 }
 

@@ -1,7 +1,7 @@
 //! Channel-protocol value types used between caller, actor, store writer,
 //! and `JobManager`.
 
-use cogito_protocol::job::{JobCompletionEvent, JobId, JobOutcome};
+use cogito_protocol::job::JobCompletionEvent;
 use tokio::sync::oneshot;
 
 // Re-export the canonical session identifier from the protocol layer so all
@@ -63,10 +63,8 @@ pub enum SessionCommand {
     /// Synthesized by the actor after receiving a `JobCompletionEvent` on
     /// the `job_completion` channel. Re-spawns `TurnDriver` with resume state.
     JobCompleted {
-        /// Identifies which background job completed.
-        job_id: JobId,
-        /// The terminal result of the job.
-        outcome: JobOutcome,
+        /// The terminal job-completion event delivered by `JobManager`.
+        event: JobCompletionEvent,
     },
 
     /// Sent by `SessionHandle::cancel_turn` when the actor is in
@@ -92,9 +90,6 @@ pub enum SessionCommand {
 /// actor uses this `From` impl whenever it dequeues from `job_completion_rx`.
 impl From<JobCompletionEvent> for SessionCommand {
     fn from(event: JobCompletionEvent) -> Self {
-        SessionCommand::JobCompleted {
-            job_id: event.job_id,
-            outcome: event.outcome,
-        }
+        SessionCommand::JobCompleted { event }
     }
 }
