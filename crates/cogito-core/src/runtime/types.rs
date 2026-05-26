@@ -1,7 +1,7 @@
 //! Channel-protocol value types used between caller, actor, store writer,
 //! and `JobManager`.
 
-use cogito_protocol::job::{JobCompletionEvent, JobId, JobOutcome};
+use cogito_protocol::job::{JobCompletionEvent, JobId};
 use tokio::sync::oneshot;
 
 // Re-export the canonical session identifier from the protocol layer so all
@@ -63,10 +63,8 @@ pub enum SessionCommand {
     /// Synthesized by the actor after receiving a `JobCompletionEvent` on
     /// the `job_completion` channel. Re-spawns `TurnDriver` with resume state.
     JobCompleted {
-        /// Identifies which background job completed.
-        job_id: JobId,
-        /// The terminal result of the job.
-        outcome: JobOutcome,
+        /// The terminal job-completion event delivered by `JobManager`.
+        event: JobCompletionEvent,
     },
 
     /// Sent by `SessionHandle::cancel_turn` when the actor is in
@@ -85,6 +83,26 @@ pub enum SessionCommand {
         /// Signals the caller with the outcome once the actor exits.
         ack: oneshot::Sender<ShutdownOutcome>,
     },
+
+    /// Cancel a still-running job for the currently paused turn. Forwarded
+    /// from `SessionHandle::cancel_turn` when `state.in_flight` is
+    /// `PausedOnJob`. The actor calls `JobManager::cancel(job_id)`; the
+    /// subsequent `JobCompleted { outcome: Cancelled }` flows through Arm
+    /// 3 as normal.
+    CancelJob {
+        /// The job to cancel.
+        job_id: JobId,
+    },
+
+    /// Probe `in_flight` from the handle. The actor replies with the
+    /// `JobId` if the session is `PausedOnJob`, otherwise `None`. Used by
+    /// `SessionHandle::cancel_turn` to decide whether to follow up with a
+    /// `CancelJob` command.
+    SnapshotInFlight {
+        /// Reply channel: receives the paused job id, or `None` if the
+        /// session is not currently `PausedOnJob`.
+        reply: oneshot::Sender<Option<JobId>>,
+    },
 }
 
 /// Translate a `JobCompletionEvent` from the dedicated job-completion mpsc
@@ -92,9 +110,6 @@ pub enum SessionCommand {
 /// actor uses this `From` impl whenever it dequeues from `job_completion_rx`.
 impl From<JobCompletionEvent> for SessionCommand {
     fn from(event: JobCompletionEvent) -> Self {
-        SessionCommand::JobCompleted {
-            job_id: event.job_id,
-            outcome: event.outcome,
-        }
+        SessionCommand::JobCompleted { event }
     }
 }

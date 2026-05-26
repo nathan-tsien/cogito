@@ -20,6 +20,17 @@ schemars.workspace = true
 futures.workspace = true
 regex.workspace = true
 
+[features]
+# Opt-in shared test infrastructure. Downstream crates that consume the
+# harness traits / contract suites under `crate::test_support` enable it
+# in their dev-dependencies:
+#
+#     cogito-protocol = { workspace = true, features = ["test-support"] }
+#
+# Production builds leave the feature off, so the test scaffolding is
+# never compiled into shipped binaries.
+test-support = ["tokio/time", "tokio/macros"]
+
 [dev-dependencies]
 cogito-test-fixtures = { workspace = true }
 insta.workspace = true

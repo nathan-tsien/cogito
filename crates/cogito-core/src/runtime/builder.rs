@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
+use cogito_jobs::LocalJobManager;
 use cogito_protocol::gateway::ModelGateway;
+use cogito_protocol::job::JobManager;
 use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
@@ -41,6 +43,15 @@ pub struct Runtime {
     /// Optional Skill loader provider. Required only when the strategy
     /// selects `SystemPromptInjectorConfig::Skill`; otherwise `None`.
     skills: Option<Arc<dyn SkillProvider>>,
+    /// Async job manager shared across every session opened on this
+    /// runtime. Defaulted to `LocalJobManager::new()` in
+    /// `RuntimeBuilder::build`; tests inject a mock via
+    /// `RuntimeBuilder::job_manager`. Surface code (CLI / consumer
+    /// service) is expected to construct the same `Arc<LocalJobManager>`
+    /// they thread into their `BuiltinToolProvider` and pass it here so
+    /// that async tool submissions and Brain `on_complete` registrations
+    /// resolve against the same manager instance.
+    job_mgr: Arc<dyn JobManager>,
 }
 
 impl Runtime {
@@ -180,6 +191,12 @@ impl Runtime {
             in_flight: None,
             current_cancel_token: Arc::clone(&cancel),
             job_completion_rx: job_rx,
+            // Keep a clone of the sender on the actor state so every
+            // per-turn `TurnDeps` (built in `spawn_turn_driver`) can hand
+            // it to `JobManager::on_complete`. The `SessionShared` clone
+            // (below) is the path used by `SessionHandle::submit` / the
+            // legacy external path; both halves point at the same channel.
+            job_completion_tx: job_tx.clone(),
             turn_result_rx,
             turn_result_tx,
             broadcast_tx: broadcast_tx.clone(),
@@ -189,11 +206,13 @@ impl Runtime {
             metrics,
             context_pipeline,
             skills: self.skills.clone(),
+            pending_user_input: None,
         };
 
         let deps = SessionDeps {
             model: Arc::clone(&self.model),
             tools: Arc::clone(&self.tools),
+            job_mgr: Arc::clone(&self.job_mgr),
         };
 
         let mailbox_tx_for_loop = mailbox_tx.clone();
@@ -225,7 +244,12 @@ impl Runtime {
             session_id: id,
             mailbox_tx,
             events_tx: broadcast_tx,
-            current_cancel_token: parking_lot::Mutex::new(cancel.lock().clone()),
+            // Share the SAME Arc<Mutex<CancellationToken>> with SessionState
+            // so that the actor's per-turn swap (in spawn_turn_driver) is
+            // visible to every SessionHandle clone. A sibling clone of the
+            // initial token would silently no-op for every cancel after
+            // turn 1 — see the cancel_after_first_turn regression test.
+            current_cancel_token: Arc::clone(&cancel),
             job_completion_tx: job_tx,
         });
         let handle = SessionHandle::new(shared);
@@ -250,6 +274,7 @@ pub struct RuntimeBuilder {
     tools: Option<Arc<dyn ToolProvider>>,
     strategy: Option<HarnessStrategy>,
     skills: Option<Arc<dyn SkillProvider>>,
+    job_mgr: Option<Arc<dyn JobManager>>,
 }
 
 impl RuntimeBuilder {
@@ -303,6 +328,18 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Override the default `LocalJobManager`. Surface code passes the
+    /// same `Arc<LocalJobManager>` it already handed to
+    /// `BuiltinToolProvider::with_jobs` so async tool submissions and
+    /// the Brain's `on_complete` registrations resolve against one
+    /// shared manager (see ADR-0008). Tests use this hook to inject a
+    /// `MockJobManager` for deterministic control over job completion.
+    #[must_use]
+    pub fn job_manager(mut self, job_mgr: Arc<dyn JobManager>) -> Self {
+        self.job_mgr = Some(job_mgr);
+        self
+    }
+
     /// Finalize.
     ///
     /// # Errors
@@ -323,6 +360,16 @@ impl RuntimeBuilder {
             .strategy
             .ok_or(RuntimeError::MissingDependency("strategy"))?;
 
+        // Default to an in-process `LocalJobManager`. `LocalJobManager::new`
+        // already returns `Arc<LocalJobManager>` which coerces to the trait
+        // object via the unsized-coercion impl on `Arc<T>`. The
+        // `job_manager` setter takes precedence so surface code can hand
+        // the SAME `Arc<LocalJobManager>` to both `BuiltinToolProvider`
+        // (typed for `submit`) and the Runtime (typed for `on_complete`).
+        let job_mgr: Arc<dyn JobManager> = self
+            .job_mgr
+            .unwrap_or_else(|| LocalJobManager::new() as Arc<dyn JobManager>);
+
         Ok(Arc::new(Runtime {
             handle,
             sessions: DashMap::new(),
@@ -332,6 +379,7 @@ impl RuntimeBuilder {
             tools,
             strategy,
             skills: self.skills,
+            job_mgr,
         }))
     }
 }

@@ -12,6 +12,7 @@ use cogito_core::harness::step_recorder::StepRecorder;
 use cogito_core::harness::turn_driver::deps::TurnDeps;
 use cogito_core::harness::turn_driver::state::TurnCtx;
 use cogito_core::harness::turn_driver::{TurnEntry, enter_turn};
+use cogito_jobs::LocalJobManager;
 use cogito_mock_model::MockModelGateway;
 use cogito_protocol::ExecCtx;
 use cogito_protocol::NoOpMetricsRecorder;
@@ -24,7 +25,7 @@ use cogito_store_jsonl::JsonlStore;
 use cogito_tools::ReadFile;
 use cogito_tools::provider::BuiltinToolProvider;
 use futures::StreamExt as _;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, mpsc};
 
 #[tokio::test]
 async fn sensitive_content_hook_rejects_tool_with_aws_key() -> Result<(), Box<dyn std::error::Error>>
@@ -81,6 +82,7 @@ async fn sensitive_content_hook_rejects_tool_with_aws_key() -> Result<(), Box<dy
             Arc::new(SensitiveContentHook::new()) as Arc<dyn HookHandler>,
         ]));
 
+    let (job_completion_tx, _job_completion_rx) = mpsc::channel(32);
     let deps = TurnDeps {
         step: Arc::clone(&recorder),
         store: Arc::clone(&store),
@@ -92,6 +94,8 @@ async fn sensitive_content_hook_rejects_tool_with_aws_key() -> Result<(), Box<dy
             &cogito_protocol::context::ContextConfig::default(),
         )),
         skills: None,
+        job_mgr: LocalJobManager::new(),
+        job_completion_tx,
     };
 
     let ctx = TurnCtx {

@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 cogito-protocol.workspace = true
 cogito-context.workspace = true
+cogito-jobs.workspace = true
 jsonschema.workspace = true
 
 tokio.workspace = true
@@ -35,6 +36,7 @@ cogito-mock-model.workspace = true
 cogito-context.workspace = true
 cogito-store-jsonl.workspace = true
 cogito-skills.workspace = true
+async-stream.workspace = true
 tokio-test.workspace = true
 rstest.workspace = true
 insta.workspace = true

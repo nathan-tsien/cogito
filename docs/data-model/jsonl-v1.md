@@ -45,15 +45,16 @@
 | `turn_id` | ULID string \| `null` | ✓ | `null` for session-level events (e.g. `session_started`). |
 | `seq` | uint64 | ✓ | Monotonic per session, starts at 0. Used by Resume Coordinator. |
 | `ts` | RFC 3339 timestamp (UTC) | ✓ | Wall-clock at write time. Use for display only; causality is `seq`. |
-| `type` | string | ✓ | One of the payload variants below (snake_case); 10 shipped as of Sprint 2, with `model_call_completed` pending Sprint 3 P2.2. |
+| `type` | string | ✓ | One of the payload variants below (snake_case). Variant set has grown additively under ADR-0007 each sprint; consult the "Payload variants" header for the current count. |
 | `data` | object | ✓ | Variant-specific payload; see "Payload variants" below. |
 
-## Payload variants (12 shipped; 1 planned)
+## Payload variants (13 shipped; 1 planned)
 
 The original 9 variants (`session_started` through `turn_failed`) shipped in Sprint 1.
 Sprint 2 added `model_call_started` (documented below). Sprint 3 P2.2 will add
 `model_call_completed` (see its section below — marked pending). Sprint 4.7 added
-`thinking_block_recorded`. Sprint 5 added `hook_rejected`.
+`thinking_block_recorded`. Sprint 5 added `hook_rejected`. Sprint 8 added
+`job_submitted` (next to `job_completed_recorded`).
 
 ### `session_started`
 
@@ -178,6 +179,35 @@ is lowercase `output` (not `Output`). The `Output` variant carries
 `Vec<serde_json::Value>` — opaque JSON values, not nested `ContentBlock`s.
 The v0.2 multimodal upgrade will swap this for `Vec<ContentBlock>`
 (`ToolResult` doc comment in `cogito-protocol::tool`).
+
+### `job_submitted`
+
+Written by H08 Tool Dispatcher when `ToolProvider::invoke` returns
+`InvokeOutcome::Async(job_id)`. Recorded **before** H08 registers the
+`on_complete` sink with `JobManager`, and **before** the subsequent
+`turn_paused` event — so a crash between record and registration leaves
+a recoverable state where H03 can synthesize a `JobOutcome::Failed` for
+the unknown job (the in-memory `LocalJobManager` does not survive
+restart). This event also carries the `call_id` that H03 uses to map
+the eventual `job_completed_recorded` back to the originating
+`tool_use_recorded` — replacing the legacy Sprint 3 walk-back.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `call_id` | string | The `tool_use` block's `call_id` that produced this async job. Matches a preceding `tool_use_recorded.call_id` within the same turn. |
+| `job_id` | ULID string | Identifier minted by `JobManager`. Matches the subsequent `turn_paused.job_id` and the eventual `job_completed_recorded.job_id`. |
+| `tool_name` | string | Tool name. Informational; aids debugging / log readers. |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":8,"ts":"2026-05-24T10:00:00.500Z","type":"job_submitted","data":{"call_id":"toolu_01","job_id":"01J9C0R0K0JOB0JOB0JOB0JOB0","tool_name":"run_tests"}}
+```
+
+Added: Sprint 8 as an additive variant under ADR-0007. No
+`SCHEMA_VERSION` bump.
 
 ### `turn_paused`
 

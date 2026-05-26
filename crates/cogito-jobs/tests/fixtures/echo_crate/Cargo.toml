@@ -1,0 +1,21 @@
+# Fixture crate consumed by the `run_tests_happy_path` integration test.
+#
+# Deliberately NOT a workspace member — the parent workspace's root
+# `Cargo.toml` lists it under `[workspace.exclude]` so `cargo nextest run`
+# invoked from this directory treats it as a standalone crate. The empty
+# `[workspace]` table below also defends against cargo walking back up to
+# the outer workspace if the exclude is ever lost.
+[package]
+name = "echo_crate"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+
+# Treat this directory as its own (single-crate) workspace root so cargo
+# never re-attaches it to the outer cogito workspace.
+[workspace]

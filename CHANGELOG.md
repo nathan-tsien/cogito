@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint 8 — Async Jobs
+
+- **Added** `cogito-jobs::LocalJobManager` — in-memory async job manager; jobs run as `tokio::task`s with `on_complete` sink registration.
+- **Added** `cogito-jobs::RunTestsTool` — `ExecutionClass::AlwaysAsync` tool that spawns `cargo nextest run`, kills on cancel/deadline (default 10 min), truncates output to 64 KiB.
+- **Added** `cogito-jobs::SleepTool` (test fixture, behind `test-tools` feature).
+- **Added** `EventPayload::JobSubmitted { call_id, job_id, tool_name }` — additive variant; no `SCHEMA_VERSION` bump.
+- **Activated** H08 async dispatch path; turn pauses on `InvokeOutcome::Async(job_id)`, resumes on `JobCompletionEvent`.
+- **Activated** `ResumePausedJob` and `ResumeAfterJobCompletion` paths in `apply_resume_point`; `ShutdownOutcome::JobManagerUnavailable` no longer returned.
+- **Added** single-slot mid-pause user-input queue (latest-wins, warn on overwrite).
+- **Changed** `SessionHandle::cancel_turn` mid-pause now calls `JobManager::cancel`.
+- **Fixed** cancel-token-disconnect — `SessionShared` and `SessionState` now share `Arc<parking_lot::Mutex<CancellationToken>>`, so `cancel_turn` works on every turn (not just the first).
+- **Removed** the H03 narrowing that inferred `call_id` from `ToolUseRecorded` near `TurnPaused`; now read directly from `JobSubmitted`.
+- **Added** chaos scenario `paused_async_job` with three crash boundaries.
+
 ### Sprint 7 — Skill loader (ADR-0020)
 
 - `cogito-skills` crate (Hands): SkillRegistry impl of SkillProvider; frontmatter parser; sigil regex + code-fence-aware scanner; Repo + User scope discovery.

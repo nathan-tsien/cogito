@@ -112,6 +112,22 @@ pub enum EventPayload {
         result: ToolResult,
     },
 
+    /// H08 submitted an async job for a tool call. Recorded immediately
+    /// after the tool's `invoke()` returns `InvokeOutcome::Async(job_id)`
+    /// and BEFORE the `on_complete` sink is registered.
+    ///
+    /// Added Sprint 8 as an additive variant under ADR-0007. No
+    /// `SCHEMA_VERSION` bump.
+    JobSubmitted {
+        /// Identifier matching the originating `ToolUseRecorded.call_id`.
+        call_id: String,
+        /// Opaque job identifier produced by `JobManager`.
+        job_id: JobId,
+        /// Tool name (redundant with the `call_id` lookup but kept for
+        /// log readability and debugging).
+        tool_name: String,
+    },
+
     /// The turn paused on an async tool call.
     TurnPaused {
         /// Identifier of the async job being awaited.
@@ -322,6 +338,7 @@ impl EventPayload {
             | Self::ModelCallStarted { .. }
             | Self::ModelCallCompleted { .. }
             | Self::TurnPaused { .. }
+            | Self::JobSubmitted { .. }
             | Self::JobCompletedRecorded { .. }
             | Self::TurnCompleted { .. }
             | Self::TurnFailed { .. }
@@ -380,7 +397,7 @@ mod tests {
 
     #[test]
     #[allow(clippy::too_many_lines)]
-    fn all_twenty_two_variants_roundtrip() -> serde_json::Result<()> {
+    fn all_twenty_three_variants_roundtrip() -> serde_json::Result<()> {
         // Covers every EventPayload variant. When a new variant is added,
         // add it here too and rename the test to match the new count.
         //
@@ -408,6 +425,11 @@ mod tests {
             EventPayload::ToolResultRecorded {
                 call_id: "c1".into(),
                 result: ToolResult::text("out"),
+            },
+            EventPayload::JobSubmitted {
+                call_id: "c1".into(),
+                job_id: JobId::default(),
+                tool_name: "run_tests".into(),
             },
             EventPayload::TurnPaused {
                 job_id: JobId::default(),

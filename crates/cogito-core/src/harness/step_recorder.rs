@@ -107,6 +107,18 @@ impl StepRecorder {
         &self.events_tx
     }
 
+    /// Crate-internal iterator over the in-memory mirror of events appended
+    /// through this recorder instance.
+    ///
+    /// Used by the session loop to recover the `call_id` associated with a
+    /// just-paused job (see `runtime::session_loop::lookup_call_id_in_recorder`)
+    /// without re-reading the persisted store. Only events appended through
+    /// this instance are visible; resume-path callers that need prior events
+    /// must consult the store directly (cf. `ensure_prior_history_loaded`).
+    pub(crate) fn history_cache_iter(&self) -> impl DoubleEndedIterator<Item = &ConversationEvent> {
+        self.history_cache.iter()
+    }
+
     /// Record the session-open event. Called once per session, before any
     /// turn starts. Does not emit a [`StreamEvent`] — session-level state
     /// is observable via the persisted log only.
@@ -281,6 +293,30 @@ impl StepRecorder {
         let _ = self.events_tx.send(StreamEvent::TurnPaused);
         self.append(Some(turn_id), EventPayload::TurnPaused { job_id })
             .await
+    }
+
+    /// Record that H08 submitted an async job for a tool call.
+    ///
+    /// Persists a [`EventPayload::JobSubmitted`] event but does NOT
+    /// broadcast a [`StreamEvent`] — the broadcast happens later, at
+    /// the subsequent [`StepRecorder::record_turn_paused`] call, so
+    /// that subscribers observe the canonical pause boundary.
+    pub async fn record_job_submitted(
+        &mut self,
+        turn_id: TurnId,
+        call_id: String,
+        job_id: JobId,
+        tool_name: String,
+    ) -> Result<EventId, StoreError> {
+        self.append(
+            Some(turn_id),
+            EventPayload::JobSubmitted {
+                call_id,
+                job_id,
+                tool_name,
+            },
+        )
+        .await
     }
 
     /// Record that a previously-awaited job completed and broadcast

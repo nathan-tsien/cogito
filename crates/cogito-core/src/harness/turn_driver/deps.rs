@@ -7,10 +7,11 @@ use std::sync::Arc;
 use cogito_protocol::ContextPipeline;
 use cogito_protocol::MetricsRecorder;
 use cogito_protocol::gateway::ModelGateway;
+use cogito_protocol::job::{JobCompletionEvent, JobManager};
 use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::tool::ToolProvider;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 
 use crate::harness::hooks::CompositeHookPipeline;
 use crate::harness::step_recorder::StepRecorder;
@@ -50,4 +51,15 @@ pub struct TurnDeps {
     /// gate sigil detection; H11's `SkillInjector` holds its own `Arc`
     /// internally.
     pub skills: Option<Arc<dyn SkillProvider>>,
+    /// Async job manager shared across all sessions. H08's async tool
+    /// dispatch path (Task 12) submits jobs against this manager and
+    /// registers `job_completion_tx` as the completion sink so terminal
+    /// outcomes land on the session loop's job-completion arm.
+    pub job_mgr: Arc<dyn JobManager>,
+    /// Per-session completion sink. Cloned from `SessionState` on every
+    /// turn spawn; the dispatcher hands this sender to
+    /// `JobManager::on_complete(job_id, sink)` so the `JobCompletionEvent`
+    /// is routed back to the session's mailbox loop (Arm 3 in
+    /// `run_session`).
+    pub job_completion_tx: mpsc::Sender<JobCompletionEvent>,
 }

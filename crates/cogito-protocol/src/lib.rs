@@ -45,6 +45,8 @@ pub mod skill;
 pub mod store;
 pub mod strategy;
 pub mod stream;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 pub mod tool;
 pub mod turn;
 pub mod turn_trigger;

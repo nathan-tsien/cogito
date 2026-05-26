@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cogito_protocol::job::JobCompletionEvent;
+use cogito_protocol::job::{JobCompletionEvent, JobId};
 use cogito_protocol::stream::StreamEvent;
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
@@ -21,14 +21,19 @@ pub(super) struct SessionShared {
     pub(super) mailbox_tx: mpsc::Sender<SessionCommand>,
     /// Outbound broadcast of real-time events to all subscribers.
     pub(super) events_tx: broadcast::Sender<StreamEvent>,
-    /// Token for the *currently* in-flight turn. The actor replaces it on
-    /// each turn start; the caller's `cancel_turn` always operates on
-    /// whichever token is current at call time.
+    /// Token slot for the *currently* in-flight turn. Held as an
+    /// `Arc<parking_lot::Mutex<...>>` so the actor's swap on each
+    /// `spawn_turn_driver` is observable to every `SessionHandle` clone —
+    /// `cancel_turn` then locks this Arc, reads the live token, and fires it.
+    ///
+    /// Sharing one Arc with `SessionState.current_cancel_token` is mandatory:
+    /// a sibling clone of the initial token would only ever cancel turn 1
+    /// (see the `cancel_after_first_turn` regression test).
     ///
     /// Uses `parking_lot::Mutex` for non-poisoning ergonomics — this lock
     /// sits in the cancel hot path and a poison on actor panic would force
     /// every subsequent cancel to bubble an unrelated `PoisonError`.
-    pub(super) current_cancel_token: parking_lot::Mutex<CancellationToken>,
+    pub(super) current_cancel_token: Arc<parking_lot::Mutex<CancellationToken>>,
     /// Sender side of the job-completion channel exposed so `JobManager`
     /// can deliver events to this session (Sprint 4).
     #[allow(dead_code)] // Sprint 4 wires JobManager -> SessionHandle
@@ -92,15 +97,23 @@ impl SessionHandle {
 
     /// Cancel the current turn (if any). Cooperative: tools that want to
     /// honor cancellation must `select!` on `ExecCtx.cancel`. Has no
-    /// effect if no turn is running. Also sends an `InternalCancel` command
-    /// so the actor can cancel jobs in `PausedOnJob` state.
+    /// effect if no turn is running. If the session is paused on a
+    /// background job, additionally asks the actor to call
+    /// `JobManager::cancel(job_id)` so the spawned task actually stops —
+    /// the per-session cancel token alone cannot reach a job that the
+    /// `JobManager` owns.
     ///
     /// # Errors
     ///
     /// Returns `SessionError::SessionClosed` if the actor has exited.
     pub async fn cancel_turn(&self) -> Result<(), SessionError> {
         // Fire the token first so the running TurnDriver can cooperate.
+        // Preserved as the first action so the existing per-turn cancel
+        // behavior (covered by `cancel_after_first_turn`) is unchanged.
         self.shared.current_cancel_token.lock().cancel();
+
+        // Preserve the existing CancelAck round-trip so callers continue
+        // to observe ordered "cancel-then-resume" semantics.
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.shared
             .mailbox_tx
@@ -109,9 +122,37 @@ impl SessionHandle {
             .map_err(|_| SessionError::SessionClosed {
                 session_id: self.shared.session_id,
             })?;
-        // Wait for the actor to acknowledge the cancel.
         let _ = rx.await;
+
+        // If the session is paused on a job, route the cancel through
+        // the JobManager. A best-effort send: if the mailbox closed
+        // between the ack above and now, we already returned earlier or
+        // there is nothing else to do.
+        if let Some(job_id) = self.snapshot_paused_job_id().await {
+            let _ = self
+                .shared
+                .mailbox_tx
+                .send(SessionCommand::CancelJob { job_id })
+                .await;
+        }
         Ok(())
+    }
+
+    /// Ask the actor for the currently paused job id, if any. Returns
+    /// `None` when the session is not in `PausedOnJob`, when the actor
+    /// has already exited, or when the reply channel was dropped.
+    async fn snapshot_paused_job_id(&self) -> Option<JobId> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if self
+            .shared
+            .mailbox_tx
+            .send(SessionCommand::SnapshotInFlight { reply: tx })
+            .await
+            .is_err()
+        {
+            return None;
+        }
+        rx.await.ok().flatten()
     }
 
     /// Gracefully shut the session down. Drains the mailbox, waits up to

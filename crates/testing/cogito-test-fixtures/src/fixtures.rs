@@ -147,9 +147,21 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
                 result: ToolResult::text("file contents"),
             },
         ),
-        envelope(5, Some(turn), EventPayload::TurnPaused { job_id: job }),
+        // Sprint 8: H08 records job submission before the turn pauses, so
+        // the resume coordinator can look up the originating call_id without
+        // inferring from ToolUseRecorded.
         envelope(
-            6,
+            5,
+            Some(turn),
+            EventPayload::JobSubmitted {
+                call_id: "toolu_01".into(),
+                job_id: job,
+                tool_name: "read_file".into(),
+            },
+        ),
+        envelope(6, Some(turn), EventPayload::TurnPaused { job_id: job }),
+        envelope(
+            7,
             Some(turn),
             EventPayload::JobCompletedRecorded {
                 job_id: job,
@@ -161,14 +173,14 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
             },
         ),
         envelope(
-            7,
+            8,
             Some(turn),
             EventPayload::TurnCompleted {
                 outcome: TurnOutcome::Completed,
             },
         ),
         envelope(
-            8,
+            9,
             Some(turn),
             EventPayload::TurnFailed {
                 // TurnFailureReason has no `Cancelled` variant — the
@@ -180,10 +192,10 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
             },
         ),
         // Sprint 2: exercise the new context-management transition events.
-        envelope(9, Some(turn), EventPayload::ContextManageEntered {}),
+        envelope(10, Some(turn), EventPayload::ContextManageEntered {}),
         // Sprint 3: exercise the new model-call sealing event.
         envelope(
-            10,
+            11,
             Some(turn),
             EventPayload::ModelCallCompleted {
                 stop_reason: cogito_protocol::gateway::StopReason::ToolUse,
@@ -195,7 +207,7 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
         ),
         // ADR-0019: exercise the new thinking-block persistence event.
         envelope(
-            11,
+            12,
             Some(turn),
             EventPayload::ThinkingBlockRecorded {
                 text: "I should grep for the symbol.".into(),

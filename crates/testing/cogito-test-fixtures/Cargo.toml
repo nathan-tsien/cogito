@@ -20,6 +20,11 @@ ulid.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
+# Re-declare cogito-protocol with the `test-support` feature so the
+# shared `JobManager` contract suite (and any future harness traits) is
+# in scope during test compilation. Production builds of this crate
+# still pick up the dependency-section entry above, without the feature.
+cogito-protocol = { workspace = true, features = ["test-support"] }
 cogito-store-jsonl.workspace = true
 tempfile.workspace = true
 

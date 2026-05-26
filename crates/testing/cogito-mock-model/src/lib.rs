@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use cogito_protocol::ExecCtx;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::gateway::{
-    Message, ModelError, ModelEvent, ModelGateway, ModelInput, ModelLimits,
+    Message, ModelError, ModelEvent, ModelGateway, ModelInput, ModelLimits, StopReason, Usage,
 };
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
@@ -70,6 +70,62 @@ impl MockModelGateway {
         self.scripts
             .lock()
             .push_back(MockScript::Error(message.into()));
+    }
+
+    /// Queue a canonical two-call sequence: turn 1 emits a single
+    /// `tool_use` block (`name`, `args`) and `stop_reason = ToolUse`;
+    /// turn 2 emits one text block (`final_text`) and `stop_reason =
+    /// EndTurn`. Used by integration tests that exercise an async-tool
+    /// round-trip without hand-rolling the event lists.
+    ///
+    /// `call_id` is hard-coded to `"c1"` — tests rarely care about its
+    /// value, but it is stable so assertions on the persisted log can
+    /// match against it.
+    pub fn script_tool_then_text(
+        &self,
+        name: impl Into<String>,
+        args: serde_json::Value,
+        final_text: impl Into<String>,
+    ) {
+        let name = name.into();
+        let final_text = final_text.into();
+        self.push_reply(vec![
+            ModelEvent::ToolUseStarted {
+                block_index: 0,
+                call_id: "c1".into(),
+                tool_name: name.clone(),
+            },
+            ModelEvent::ToolUseCompleted {
+                block_index: 0,
+                call_id: "c1".into(),
+                tool_name: name,
+                args,
+            },
+            ModelEvent::MessageCompleted {
+                stop_reason: StopReason::ToolUse,
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
+            },
+        ]);
+        self.push_reply(vec![
+            ModelEvent::TextDelta {
+                block_index: 0,
+                chunk: final_text.clone(),
+            },
+            ModelEvent::TextBlockCompleted {
+                block_index: 0,
+                text: final_text,
+            },
+            ModelEvent::MessageCompleted {
+                stop_reason: StopReason::EndTurn,
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
+            },
+        ]);
     }
 
     /// Inspect how many scripts remain (for test assertions).
