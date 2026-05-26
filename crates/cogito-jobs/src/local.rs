@@ -168,6 +168,13 @@ impl JobManager for LocalJobManager {
         })
     }
 
+    // TODO(subprocess-cancel-orphan): abort_handle.abort() terminates the task
+    // at its next .await — any subprocess the task spawned via tokio::process
+    // is orphaned. Async tools that spawn OS processes (e.g., RunTestsTool)
+    // must currently rely on the process's own SIGKILL handling. Proper fix:
+    // add a per-job CancellationToken stored alongside abort_handle and have
+    // cancel() signal it BEFORE calling abort, so the future has one yield
+    // point to clean up child processes.
     async fn cancel(&self, job_id: JobId) -> Result<(), JobError> {
         let (abort, sink) = {
             let mut jobs = self.jobs.lock();

@@ -184,6 +184,15 @@ async fn run_cargo_nextest(
     let stdout_task = tokio::spawn(read_to_end(stdout));
     let stderr_task = tokio::spawn(read_to_end(stderr));
 
+    // TODO(subprocess-cancel-orphan): LocalJobManager::cancel(job_id) currently
+    // fires the spawned task's AbortHandle, which terminates this future at its
+    // next .await BEFORE the `cancel.cancelled()` select arm has a chance to fire
+    // child.kill().await. As a result, a manager-driven cancel orphans the cargo
+    // nextest subprocess. The `cancel.cancelled()` path here only fires if some
+    // other code signals the CancellationToken (e.g., the host runtime's
+    // shutdown). Fix: thread a per-job CancellationToken into LocalJobManager
+    // (see ADR follow-up), and have cancel() signal it before calling abort().
+    // Sprint 8 closure note — see plan TODO.
     let wait_outcome = tokio::select! {
         status = child.wait() => WaitOutcome::Exited(status),
         () = cancel.cancelled() => {
