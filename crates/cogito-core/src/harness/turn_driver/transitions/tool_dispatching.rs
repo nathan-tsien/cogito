@@ -66,19 +66,28 @@ pub async fn transit(
             continue;
         }
 
-        let result = match dispatch(inv.clone(), deps.tools.as_ref(), ctx.exec_ctx.clone()).await {
+        let outcome = dispatch(
+            inv.clone(),
+            deps.tools.as_ref(),
+            ctx.exec_ctx.clone(),
+            deps.job_mgr.as_ref(),
+            &deps.job_completion_tx,
+            &deps.step,
+            ctx.turn_id,
+        )
+        .await;
+        let result = match outcome {
             DispatchOutcome::SyncResult(r) => r,
-            DispatchOutcome::AsyncJob(_job_id) => {
-                // Async jobs are not wired until Sprint 4. Return a structured
-                // error so the model can be informed without aborting the turn.
-                ToolResult::Error {
-                    kind: ToolErrorKind::InvocationFailed,
-                    message: format!(
-                        "tool `{}` returned Async; JobManager is not wired in Sprint 2",
-                        inv.name
-                    ),
-                    retryable: false,
-                }
+            DispatchOutcome::AsyncJob(job_id) => {
+                // The dispatcher already persisted `JobSubmitted` and
+                // registered the per-session completion sink. Pause the
+                // turn so the outer FSM loop emits `TurnOutcome::Paused`,
+                // which the actor's `on_turn_complete` translates into
+                // `InFlight::PausedOnJob`. Any tool calls already completed
+                // in this round are stitched back into the resumed turn's
+                // `completed_before_pause` tail via the `JobCompleted`
+                // command path (Task 7).
+                return TurnState::Paused { job_id };
             }
         };
 
