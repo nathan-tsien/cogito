@@ -6,6 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Test-only async tools (e.g. `SleepTool`) used by integration and chaos
+# tests. Off by default so the fixtures do not ship in production builds.
+test-tools = []
+
 [dependencies]
 cogito-protocol.workspace = true
 

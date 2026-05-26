@@ -8,3 +8,8 @@
 
 mod local;
 pub use local::LocalJobManager;
+
+#[cfg(any(test, feature = "test-tools"))]
+mod sleep_tool;
+#[cfg(any(test, feature = "test-tools"))]
+pub use sleep_tool::SleepTool;
