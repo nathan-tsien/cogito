@@ -315,14 +315,11 @@ fn spawn_turn_driver(
     entry: TurnEntry,
     deps: &SessionDeps,
 ) {
-    // TODO(cancel-token-disconnect): SessionShared.current_cancel_token holds
-    // a sibling token cloned from the *initial* token at session-open time,
-    // not a shared Arc<Mutex<...>> with SessionState. Replacing the inner token
-    // here means SessionHandle::cancel_turn() fires the original sibling and
-    // does not reach this newly minted token. Fix by sharing one
-    // Arc<Mutex<CancellationToken>> across SessionState and SessionShared so
-    // mutations are visible to both. Tracked separately; current chaos tests
-    // do not exercise mid-turn cancellation past the first turn.
+    // Swap a fresh CancellationToken into the per-session slot. The slot is
+    // an Arc<Mutex<...>> shared with every SessionHandle (built in
+    // runtime::builder::open_session), so this swap is immediately visible
+    // to `SessionHandle::cancel_turn`. See the `cancel_after_first_turn`
+    // regression test for why the Arc must be shared (not sibling-cloned).
     let new_token = CancellationToken::new();
     *state.current_cancel_token.lock() = new_token.clone();
 

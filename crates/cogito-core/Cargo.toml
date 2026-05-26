@@ -35,6 +35,7 @@ cogito-mock-model.workspace = true
 cogito-context.workspace = true
 cogito-store-jsonl.workspace = true
 cogito-skills.workspace = true
+async-stream.workspace = true
 tokio-test.workspace = true
 rstest.workspace = true
 insta.workspace = true

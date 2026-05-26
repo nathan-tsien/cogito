@@ -225,7 +225,12 @@ impl Runtime {
             session_id: id,
             mailbox_tx,
             events_tx: broadcast_tx,
-            current_cancel_token: parking_lot::Mutex::new(cancel.lock().clone()),
+            // Share the SAME Arc<Mutex<CancellationToken>> with SessionState
+            // so that the actor's per-turn swap (in spawn_turn_driver) is
+            // visible to every SessionHandle clone. A sibling clone of the
+            // initial token would silently no-op for every cancel after
+            // turn 1 — see the cancel_after_first_turn regression test.
+            current_cancel_token: Arc::clone(&cancel),
             job_completion_tx: job_tx,
         });
         let handle = SessionHandle::new(shared);

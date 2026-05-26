@@ -21,14 +21,19 @@ pub(super) struct SessionShared {
     pub(super) mailbox_tx: mpsc::Sender<SessionCommand>,
     /// Outbound broadcast of real-time events to all subscribers.
     pub(super) events_tx: broadcast::Sender<StreamEvent>,
-    /// Token for the *currently* in-flight turn. The actor replaces it on
-    /// each turn start; the caller's `cancel_turn` always operates on
-    /// whichever token is current at call time.
+    /// Token slot for the *currently* in-flight turn. Held as an
+    /// `Arc<parking_lot::Mutex<...>>` so the actor's swap on each
+    /// `spawn_turn_driver` is observable to every `SessionHandle` clone —
+    /// `cancel_turn` then locks this Arc, reads the live token, and fires it.
+    ///
+    /// Sharing one Arc with `SessionState.current_cancel_token` is mandatory:
+    /// a sibling clone of the initial token would only ever cancel turn 1
+    /// (see the `cancel_after_first_turn` regression test).
     ///
     /// Uses `parking_lot::Mutex` for non-poisoning ergonomics — this lock
     /// sits in the cancel hot path and a poison on actor panic would force
     /// every subsequent cancel to bubble an unrelated `PoisonError`.
-    pub(super) current_cancel_token: parking_lot::Mutex<CancellationToken>,
+    pub(super) current_cancel_token: Arc<parking_lot::Mutex<CancellationToken>>,
     /// Sender side of the job-completion channel exposed so `JobManager`
     /// can deliver events to this session (Sprint 4).
     #[allow(dead_code)] // Sprint 4 wires JobManager -> SessionHandle

@@ -404,6 +404,7 @@ dependencies = [
 name = "cogito-core"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "async-trait",
  "chrono",
  "cogito-context",
