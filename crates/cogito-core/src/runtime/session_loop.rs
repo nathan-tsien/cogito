@@ -61,15 +61,27 @@ pub(super) enum InFlight {
         #[allow(dead_code)] // reserved for metrics / tracing in later sprints
         started_at: Instant,
     },
-    /// Turn paused awaiting a background job (Sprint 4).
-    #[allow(dead_code)] // Sprint 4 will construct this variant
+    /// Turn paused awaiting a background job. Constructed by
+    /// `on_turn_complete` when a turn returns `TurnOutcome::Paused` and
+    /// consumed by `handle_command` on the subsequent `JobCompleted`
+    /// mailbox command to rebuild a `TurnEntry::FromToolDispatching`.
+    // TODO(sprint-8-task-8): drop this `#[allow(dead_code)]` once
+    // `handle_command(JobCompleted)` reads the fields below. The variant
+    // is constructed by `on_turn_complete` (Task 7) but no consumer
+    // pattern-matches the fields yet, so the dead_code lint fires.
+    #[allow(dead_code)]
     PausedOnJob {
         /// The turn that was paused.
-        #[allow(dead_code)]
         turn_id: TurnId,
         /// The background job this session is waiting on.
-        #[allow(dead_code)]
         job_id: JobId,
+        /// `call_id` of the originating `ToolUseRecorded` — required to
+        /// stitch the completed job back into the resumed turn's
+        /// `completed_before_pause` tail. Derived from the in-memory
+        /// recorder cache at pause time via `lookup_call_id_in_recorder`,
+        /// so the live path matches the resume-from-log path
+        /// (`harness::resume::lookup_call_id_in_events`).
+        call_id: String,
     },
 }
 
@@ -482,7 +494,21 @@ async fn try_start_turn(state: &mut SessionState, trigger: TurnTrigger, deps: &S
 
 /// Record the terminal event after a turn finishes.
 async fn on_turn_complete(state: &mut SessionState, turn_id: TurnId, outcome: TurnOutcome) {
+    // For the Paused outcome, resolve the `call_id` from the recorder cache
+    // BEFORE acquiring the recorder lock below — `lookup_call_id_in_recorder`
+    // takes the same `tokio::sync::Mutex` and we must not double-lock.
+    let pause_call_id = match &outcome {
+        TurnOutcome::Paused { job_id } => {
+            Some(lookup_call_id_in_recorder(&state.recorder, *job_id).await)
+        }
+        _ => None,
+    };
+
+    // Default to clearing in_flight; the Paused arm overrides this below
+    // *before* the persisted TurnPaused event is written so that an actor
+    // crash between record + assignment can be reconstructed from the log.
     state.in_flight = None;
+
     let mut rec = state.recorder.lock().await;
     let result: Result<(), _> = match outcome {
         // TODO(double-turn-completed): the TurnDriver's model_completed::transit
@@ -496,7 +522,26 @@ async fn on_turn_complete(state: &mut SessionState, turn_id: TurnId, outcome: Tu
             .record_turn_completed(turn_id, TurnOutcome::Completed)
             .await
             .map(|_| ()),
-        TurnOutcome::Paused { job_id } => rec.record_turn_paused(turn_id, job_id).await.map(|_| ()),
+        TurnOutcome::Paused { job_id } => {
+            // `pause_call_id` was computed above; unwrap-via-match is safe
+            // because the outer match guarantees the Some-branch here.
+            let call_id = pause_call_id.flatten().unwrap_or_else(|| {
+                tracing::error!(
+                    session_id = %state.session_id,
+                    %turn_id,
+                    %job_id,
+                    "TurnPaused without a preceding JobSubmitted in recorder cache; \
+                     resuming will need to recover call_id from the persisted log"
+                );
+                String::new()
+            });
+            state.in_flight = Some(InFlight::PausedOnJob {
+                turn_id,
+                job_id,
+                call_id,
+            });
+            rec.record_turn_paused(turn_id, job_id).await.map(|_| ())
+        }
         TurnOutcome::Cancelled => rec
             .record_turn_failed(turn_id, TurnFailureReason::TurnTimedOut)
             .await
@@ -522,6 +567,31 @@ async fn on_turn_complete(state: &mut SessionState, turn_id: TurnId, outcome: Tu
             "failed to record terminal turn event"
         );
     }
+}
+
+/// Live-path counterpart to [`crate::harness::resume::lookup_call_id_in_events`].
+///
+/// Reads the [`StepRecorder`]'s in-memory history cache for the most recent
+/// `JobSubmitted { job_id, .. }` whose `job_id` matches and returns its
+/// `call_id`. Returns `None` when no matching event is present in the cache
+/// (structurally impossible if H08 honored its write-before-transition
+/// contract, but treated as a soft failure here — the caller logs and
+/// falls back rather than panicking).
+async fn lookup_call_id_in_recorder(
+    recorder: &Arc<Mutex<StepRecorder>>,
+    job_id: JobId,
+) -> Option<String> {
+    let rec = recorder.lock().await;
+    rec.history_cache_iter()
+        .rev()
+        .find_map(|e| match &e.payload {
+            cogito_protocol::event::EventPayload::JobSubmitted {
+                call_id,
+                job_id: jid,
+                ..
+            } if *jid == job_id => Some(call_id.clone()),
+            _ => None,
+        })
 }
 
 /// Cancel the running turn and wait (up to `deadline`) for it to finish.
