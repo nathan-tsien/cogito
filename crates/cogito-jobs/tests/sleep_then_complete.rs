@@ -36,7 +36,7 @@ use cogito_mock_model::MockModelGateway;
 use cogito_protocol::event::{ConversationEvent, EventPayload};
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::SessionId;
-use cogito_protocol::job::JobManager;
+use cogito_protocol::job::{JobManager, LocalJobSubmitter};
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
@@ -53,7 +53,9 @@ async fn sleep_then_complete_drives_full_async_loop() -> Result<(), Box<dyn std:
     // background future) and the Runtime (which registers `on_complete`).
     // Per ADR-0008, they MUST be the same instance.
     let job_mgr = LocalJobManager::new();
-    let sleep_tool: Arc<dyn ToolProvider> = Arc::new(SleepTool::new(Arc::clone(&job_mgr)));
+    let sleep_tool: Arc<dyn ToolProvider> = Arc::new(SleepTool::new(
+        Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>
+    ));
 
     let mock = Arc::new(MockModelGateway::new());
     mock.script_tool_then_text(

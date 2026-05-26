@@ -31,7 +31,7 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
-use crate::LocalJobManager;
+use cogito_protocol::job::LocalJobSubmitter;
 
 /// Tool name exposed to the model.
 const TOOL_NAME: &str = "run_tests";
@@ -58,19 +58,25 @@ struct RunTestsArgs {
     filter: Option<String>,
 }
 
-/// Async tool that runs `cargo nextest run` as a [`LocalJobManager`] job.
+/// Async tool that runs `cargo nextest run` as a [`LocalJobSubmitter`] job.
 ///
-/// Construct via [`RunTestsTool::new`] with the same `Arc<LocalJobManager>`
-/// the `RuntimeBuilder` will receive — otherwise the job submitted here
-/// is invisible to the Brain registering `on_complete`.
+/// Construct via [`RunTestsTool::new`] with the same `Arc<dyn LocalJobSubmitter>`
+/// (typically an `Arc<LocalJobManager>` which coerces automatically) the
+/// `RuntimeBuilder` will receive — otherwise the job submitted here is
+/// invisible to the Brain registering `on_complete`.
 pub struct RunTestsTool {
-    job_mgr: Arc<LocalJobManager>,
+    job_mgr: Arc<dyn LocalJobSubmitter>,
 }
 
 impl RunTestsTool {
     /// Build a new `RunTestsTool` bound to `job_mgr`.
+    ///
+    /// `Arc<LocalJobManager>` coerces to `Arc<dyn LocalJobSubmitter>`
+    /// automatically (since `LocalJobManager` impls the trait), so
+    /// CLI / test callers can pass either form. See ADR-0025 for why
+    /// the parameter is a trait object rather than the concrete type.
     #[must_use]
-    pub fn new(job_mgr: Arc<LocalJobManager>) -> Self {
+    pub fn new(job_mgr: Arc<dyn LocalJobSubmitter>) -> Self {
         Self { job_mgr }
     }
 }
@@ -133,7 +139,11 @@ impl ToolProvider for RunTestsTool {
         let cancel = ctx.cancel.clone();
         let job_id = self
             .job_mgr
-            .submit(async move { run_cargo_nextest(parsed, deadline, cancel).await });
+            .clone()
+            .submit_boxed(Box::pin(async move {
+                run_cargo_nextest(parsed, deadline, cancel).await
+            }))
+            .await;
         InvokeOutcome::Async(job_id)
     }
 }
@@ -285,6 +295,7 @@ fn ceil_char_boundary(s: &str, idx: usize) -> usize {
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
+    use crate::LocalJobManager;
     use cogito_protocol::ids::{SessionId, TurnId};
 
     #[test]

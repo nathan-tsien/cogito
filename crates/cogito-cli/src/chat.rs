@@ -9,7 +9,7 @@ use crate::render::Renderer;
 use anyhow::{Context, Result, anyhow};
 use clap::{Args, ValueEnum};
 use cogito_core::runtime::{OpenMode, Runtime};
-use cogito_jobs::LocalJobManager;
+use cogito_jobs::{LocalJobManager, RunTestsTool};
 use cogito_model::build_gateway;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::event::EventPayload;
@@ -21,7 +21,7 @@ use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
 use cogito_protocol::tool::ToolResult;
 use cogito_store_jsonl::JsonlStore;
-use cogito_tools::{BuiltinToolProvider, ReadFile};
+use cogito_tools::{BuiltinToolProvider, CompositeToolProvider, NamingPolicy, ReadFile};
 use futures::StreamExt;
 use std::io::Write as _;
 
@@ -248,28 +248,40 @@ fn resolve_mode(args: &ChatArgs) -> Result<ChatMode> {
     }
 }
 
-/// Build the chat session's `ToolProvider`: registers builtins, brings
-/// up MCP servers (per `cogito.toml`), prints the startup banner to
-/// stderr, and composes the two via `CompositeToolProvider::Strict`
-/// when MCP brought up at least one server.
+/// Construct the local tool inventory: sync builtins
+/// (`BuiltinToolProvider`) plus the async `run_tests` tool, composed
+/// via `CompositeToolProvider` with strict naming. Also brings up MCP
+/// servers (per `cogito.toml`), prints the startup banner to stderr,
+/// and layers MCP on top of the local composite when at least one
+/// server came up.
 ///
-/// Returns the builtin-only provider when no MCP servers were
+/// Adding a new async tool means appending another
+/// `Arc<dyn ToolProvider>` to the local composite below — no edits
+/// required in `cogito-tools` or `cogito-jobs`. See ADR-0025
+/// §"Decision" item 4.
+///
+/// Returns the local-only composite when no MCP servers were
 /// configured or all of them failed (see ADR-0018 §3.5 — MCP failures
 /// are non-fatal to Runtime).
 async fn build_tool_provider(
     cfg: &cogito_config::RuntimeConfig,
     job_mgr: Arc<LocalJobManager>,
 ) -> Result<Arc<dyn cogito_protocol::tool::ToolProvider>> {
-    // Thread the SAME `Arc<LocalJobManager>` into the builtin provider
-    // that the surface passes to `RuntimeBuilder::job_manager` below.
-    // Without this, async tools (Task 16+) would submit against a
-    // private manager the Brain never registers `on_complete` with,
-    // and the tool call would hang forever. See ADR-0008.
     let builtin: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(
         BuiltinToolProvider::builder()
             .with_tool(Arc::new(ReadFile))
-            .with_jobs(job_mgr)
             .build(),
+    );
+    // `RunTestsTool` implements `ToolProvider` directly (its dispatch
+    // outcome is `InvokeOutcome::Async`). `Arc<LocalJobManager>`
+    // coerces to `Arc<dyn LocalJobSubmitter>` via the unsized-coercion
+    // impl, so the same job-manager handle threads through here and
+    // `RuntimeBuilder::job_manager` below.
+    let run_tests: Arc<dyn cogito_protocol::tool::ToolProvider> =
+        Arc::new(RunTestsTool::new(job_mgr));
+    let local: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(
+        CompositeToolProvider::new(vec![builtin, run_tests], NamingPolicy::Strict)
+            .map_err(|e| anyhow!("compose builtin + run_tests: {e}"))?,
     );
 
     let mcp_build = cogito_mcp::build_mcp_provider(&cfg.mcp_servers).await;
@@ -315,13 +327,10 @@ async fn build_tool_provider(
     // debug_assert in BuiltinToolProviderBuilder enforces this).
     let tools: Arc<dyn cogito_protocol::tool::ToolProvider> = match mcp_build.provider {
         Some(mcp) => Arc::new(
-            cogito_tools::CompositeToolProvider::new(
-                vec![builtin, mcp],
-                cogito_tools::NamingPolicy::Strict,
-            )
-            .map_err(|e| anyhow!("compose builtins + mcp: {e}"))?,
+            CompositeToolProvider::new(vec![local, mcp], NamingPolicy::Strict)
+                .map_err(|e| anyhow!("compose local + mcp: {e}"))?,
         ),
-        None => builtin,
+        None => local,
     };
     Ok(tools)
 }
@@ -352,11 +361,12 @@ pub async fn run(args: ChatArgs) -> Result<()> {
     let store_for_replay: Arc<dyn ConversationStore> = store.clone();
 
     // Construct the `LocalJobManager` singleton up here so the SAME
-    // `Arc` flows into both `BuiltinToolProvider::with_jobs` (typed
-    // for `submit`) and `RuntimeBuilder::job_manager` (typed for
-    // `on_complete`). If these diverged the async tools would submit
-    // to one manager while the Brain registered sinks on a different
-    // one — every async tool call would hang. See ADR-0008.
+    // `Arc` flows into both the async-tool provider (typed for
+    // `submit` via the `LocalJobSubmitter` coercion) and
+    // `RuntimeBuilder::job_manager` (typed for `on_complete`). If
+    // these diverged the async tools would submit to one manager
+    // while the Brain registered sinks on a different one — every
+    // async tool call would hang. See ADR-0008 and ADR-0025.
     let job_mgr: Arc<LocalJobManager> = LocalJobManager::new();
 
     let tools = build_tool_provider(&cfg, Arc::clone(&job_mgr)).await?;
@@ -368,8 +378,10 @@ pub async fn run(args: ChatArgs) -> Result<()> {
     }
 
     // `Arc<LocalJobManager>` -> `Arc<dyn JobManager>` via the unsized
-    // coercion impl on `Arc<T>`. One-way cast — keep the typed handle
-    // alive via the `Arc::clone` above if any later code needs `submit`.
+    // coercion impl on `Arc<T>`. The typed `Arc<LocalJobManager>` was
+    // already cloned into `build_tool_provider` above for
+    // `RunTestsTool::new`; here we consume the original to produce the
+    // dyn-typed handle the `RuntimeBuilder::job_manager` setter wants.
     let job_mgr_dyn: Arc<dyn JobManager> = job_mgr;
     let mut builder = Runtime::builder()
         .store(store)

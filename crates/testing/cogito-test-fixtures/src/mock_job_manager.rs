@@ -16,8 +16,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cogito_protocol::job::{
-    JobCompletionEvent, JobError, JobId, JobManager, JobOutcome, JobStatus,
+    JobCompletionEvent, JobError, JobId, JobManager, JobOutcome, JobStatus, LocalJobSubmitter,
 };
+use futures::future::BoxFuture;
 use tokio::sync::{Mutex, mpsc};
 
 /// Mock implementation of [`JobManager`] for tests.
@@ -75,6 +76,17 @@ impl MockJobManager {
         let Some(job) = jobs.get_mut(&job_id) else {
             return;
         };
+        // Idempotency: if a prior terminal transition (another `complete`
+        // call, or `cancel`) already moved the job to a terminal state,
+        // do not overwrite the outcome and do not re-fire the sink.
+        // Mirrors LocalJobManager::complete_internal so the mock and the
+        // production manager share the same exactly-once delivery contract.
+        if matches!(
+            job.status,
+            JobStatus::Completed | JobStatus::Failed | JobStatus::Cancelled
+        ) {
+            return;
+        }
         // `JobOutcome` is `#[non_exhaustive]`. The explicit `Failed` arm
         // and the wildcard arm coincide today, but we want them spelled
         // out separately: the wildcard exists purely as a forward-compat
@@ -163,8 +175,29 @@ impl JobManager for MockJobManager {
     }
 }
 
+#[async_trait]
+impl LocalJobSubmitter for MockJobManager {
+    async fn submit_boxed(self: Arc<Self>, fut: BoxFuture<'static, JobOutcome>) -> JobId {
+        // Spawn-and-complete shim: MockJobManager is normally driven from
+        // test code via `register` + `complete`, but tools that hold
+        // `Arc<dyn LocalJobSubmitter>` call `submit_boxed`. We honor it
+        // by registering a new job, spawning the future, and calling
+        // `complete` ourselves when it resolves. Tests retain the
+        // explicit `register` / `complete` API for cases that need
+        // fine-grained timing control.
+        let job_id = JobId::default();
+        self.register(job_id).await;
+        let mgr = Arc::clone(&self);
+        tokio::spawn(async move {
+            let outcome = fut.await;
+            mgr.complete(job_id, outcome).await;
+        });
+        job_id
+    }
+}
+
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
@@ -217,5 +250,151 @@ mod tests {
     #[tokio::test]
     async fn mock_job_manager_satisfies_job_manager_contract() {
         run_contract_suite::<MockHarness>().await;
+    }
+
+    use cogito_protocol::job::LocalJobSubmitter;
+    use cogito_protocol::tool::ToolResult;
+
+    /// `submit_boxed` resolves a happy-path future and fires the
+    /// registered `on_complete` sink exactly once with the produced
+    /// outcome.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn submit_boxed_drives_future_to_completion_and_fires_sink() {
+        let mgr = Arc::new(MockJobManager::new());
+        let job_id = Arc::clone(&mgr)
+            .submit_boxed(Box::pin(async {
+                JobOutcome::Success {
+                    result: ToolResult::text("ok"),
+                }
+            }))
+            .await;
+
+        let (tx, mut rx) = mpsc::channel(1);
+        mgr.on_complete(job_id, tx).await.expect("on_complete ok");
+
+        let evt = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("sink fired within 2s")
+            .expect("sender not dropped");
+        assert!(matches!(evt.outcome, JobOutcome::Success { .. }));
+        assert!(matches!(
+            mgr.status(job_id).await.unwrap(),
+            JobStatus::Completed
+        ));
+    }
+
+    /// If `cancel` races a still-running `submit_boxed` future, the
+    /// eventual late `complete` from the spawned task is a no-op:
+    /// status stays `Cancelled` and the sink (if registered) does NOT
+    /// fire a second time with the future's outcome.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancel_then_late_complete_is_noop() {
+        let mgr = Arc::new(MockJobManager::new());
+        let (gate_tx, gate_rx) = tokio::sync::oneshot::channel::<()>();
+
+        let job_id = Arc::clone(&mgr)
+            .submit_boxed(Box::pin(async move {
+                // Park until the test releases the gate, then "succeed".
+                let _ = gate_rx.await;
+                JobOutcome::Success {
+                    result: ToolResult::text("late"),
+                }
+            }))
+            .await;
+
+        let (tx, mut rx) = mpsc::channel(2);
+        mgr.on_complete(job_id, tx).await.expect("on_complete ok");
+
+        // Cancel before the gate fires. cancel() sets status=Cancelled
+        // but (by MockJobManager design) does not itself fire the sink.
+        mgr.cancel(job_id).await.expect("cancel ok");
+        assert!(matches!(
+            mgr.status(job_id).await.unwrap(),
+            JobStatus::Cancelled
+        ));
+
+        // Release the future. It will resolve to Success and the
+        // spawned task will attempt complete(Success) -- which the
+        // idempotency guard turns into a no-op.
+        let _ = gate_tx.send(());
+
+        // Give the spawned task time to attempt its complete call.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Status must still be Cancelled -- late Success must not
+        // clobber the terminal state.
+        assert!(matches!(
+            mgr.status(job_id).await.unwrap(),
+            JobStatus::Cancelled
+        ));
+
+        // The sink must not have fired (cancel doesn't fire it, and
+        // the late complete is a no-op so it doesn't fire either).
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv())
+                .await
+                .is_err(),
+            "sink fired despite the late complete being a no-op"
+        );
+    }
+
+    /// A second `complete` call for the same `job_id` must be a no-op:
+    /// the original outcome is preserved and the sink (if it has
+    /// already fired once) is not re-fired.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn second_complete_is_noop() {
+        let mgr = Arc::new(MockJobManager::new());
+        let job_id = JobId::default();
+        mgr.register(job_id).await;
+
+        let (tx, mut rx) = mpsc::channel(2);
+        mgr.on_complete(job_id, tx).await.expect("on_complete ok");
+
+        mgr.complete(
+            job_id,
+            JobOutcome::Success {
+                result: ToolResult::text("first"),
+            },
+        )
+        .await;
+
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("first sink fire within 2s")
+            .expect("sender not dropped");
+        match first.outcome {
+            JobOutcome::Success { result } => assert_eq!(result, ToolResult::text("first")),
+            other => panic!("expected first Success, got {other:?}"),
+        }
+
+        // Second complete with a different outcome should be discarded.
+        mgr.complete(
+            job_id,
+            JobOutcome::Success {
+                result: ToolResult::text("second"),
+            },
+        )
+        .await;
+
+        // Sink must not fire again. After the first complete, the stored
+        // sender has been `take()`-en and dropped, so the receiver will
+        // observe channel closure (`Ok(None)`) rather than a timeout --
+        // either way, what matters is that no second `JobCompletionEvent`
+        // is delivered.
+        let after = tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
+        match after {
+            // Err(_): timed out -- nothing fired, good.
+            // Ok(None): sender was dropped after the first fire, good.
+            Err(_) | Ok(None) => {}
+            Ok(Some(evt)) => {
+                panic!("sink re-fired on second complete; idempotency broken: {evt:?}")
+            }
+        }
+
+        // result() must still return the first outcome.
+        match mgr.result(job_id).await.unwrap() {
+            JobOutcome::Success { result } => assert_eq!(result, ToolResult::text("first")),
+            other => panic!("result drifted after second complete: {other:?}"),
+        }
     }
 }

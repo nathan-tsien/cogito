@@ -329,11 +329,12 @@ impl RuntimeBuilder {
     }
 
     /// Override the default `LocalJobManager`. Surface code passes the
-    /// same `Arc<LocalJobManager>` it already handed to
-    /// `BuiltinToolProvider::with_jobs` so async tool submissions and
-    /// the Brain's `on_complete` registrations resolve against one
-    /// shared manager (see ADR-0008). Tests use this hook to inject a
-    /// `MockJobManager` for deterministic control over job completion.
+    /// same `Arc<LocalJobManager>` it threads into `RunTestsTool::new`
+    /// (or any other async-tool constructor) so async tool submissions
+    /// and the Brain's `on_complete` registrations resolve against one
+    /// shared manager (see ADR-0008 and ADR-0025). Tests use this hook
+    /// to inject a `MockJobManager` for deterministic control over job
+    /// completion.
     #[must_use]
     pub fn job_manager(mut self, job_mgr: Arc<dyn JobManager>) -> Self {
         self.job_mgr = Some(job_mgr);

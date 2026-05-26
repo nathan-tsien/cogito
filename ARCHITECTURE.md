@@ -374,6 +374,7 @@ Design notes:
 - **`Sandbox`** is Hands-internal. Brain never holds a `dyn Sandbox`. Tool implementations that need subprocess isolation inject one.
 - **`StorageSystem`** and **`BrainSpawner`** are Brain-adjacent: in `cogito-protocol`, but Brain does not call them directly. Tools receive `StorageSystem` via `ExecCtx`; `SubagentToolProvider` receives `BrainSpawner` via DI from Runtime.
 - Multiple providers are composed by `CompositeToolProvider` (utility in `cogito-tools`); the consumer constructs the composite and hands it to Runtime as a single `Arc<dyn ToolProvider>`.
+- **Hands sub-layer boundary (ADR-0025):** the internal classification (JobManager impl / ToolProvider impl / internal primitive / Surface composition) is canonical in ADR-0025. The crate inventory may shift as tools migrate; the ADR is the rule.
 
 ## Content blocks
 

@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** cancel-token-disconnect — `SessionShared` and `SessionState` now share `Arc<parking_lot::Mutex<CancellationToken>>`, so `cancel_turn` works on every turn (not just the first).
 - **Removed** the H03 narrowing that inferred `call_id` from `ToolUseRecorded` near `TurnPaused`; now read directly from `JobSubmitted`.
 - **Added** chaos scenario `paused_async_job` with three crash boundaries.
+- **Added** `cogito-protocol::job::LocalJobSubmitter` — dyn-compatible submission trait (`submit_boxed(self: Arc<Self>, BoxFuture) -> JobId`) for async tools. Replaces concrete `Arc<LocalJobManager>` parameters in `RunTestsTool::new` and `SleepTool::new` (ADR-0025).
+- **Changed** `cogito-tools` no longer depends on `cogito-jobs`. `BuiltinToolProvider::with_jobs` and the embedded `run_tests` special-case are removed; `cogito-cli` composes builtins + async tools via `CompositeToolProvider::new(.., NamingPolicy::Strict)`.
+- **Added** ADR-0025 — Hands sub-layer boundary.
 
 ### Sprint 7 — Skill loader (ADR-0020)
 

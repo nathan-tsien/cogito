@@ -40,7 +40,7 @@ use cogito_mock_model::MockModelGateway;
 use cogito_protocol::event::{ConversationEvent, EventPayload};
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::SessionId;
-use cogito_protocol::job::{JobManager, JobOutcome};
+use cogito_protocol::job::{JobManager, JobOutcome, LocalJobSubmitter};
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
@@ -56,7 +56,9 @@ async fn cancel_while_paused_unwinds_to_tool_error_cancelled()
     let store = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
 
     let job_mgr = LocalJobManager::new();
-    let sleep_tool: Arc<dyn ToolProvider> = Arc::new(SleepTool::new(Arc::clone(&job_mgr)));
+    let sleep_tool: Arc<dyn ToolProvider> = Arc::new(SleepTool::new(
+        Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>
+    ));
 
     // Turn 1: tool_use(sleep, 60 s). Turn 2: clean text + end_turn so the
     // resumed (cancelled) turn has somewhere to land instead of failing.
