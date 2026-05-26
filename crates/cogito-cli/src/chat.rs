@@ -248,27 +248,22 @@ fn resolve_mode(args: &ChatArgs) -> Result<ChatMode> {
     }
 }
 
-/// Build the chat session's `ToolProvider`: registers builtins, brings
-/// up MCP servers (per `cogito.toml`), prints the startup banner to
-/// stderr, and composes the two via `CompositeToolProvider::Strict`
-/// when MCP brought up at least one server.
+/// Construct the builtin (sync) tool provider. Async tools (e.g.
+/// `run_tests`) are composed by the caller via `CompositeToolProvider`;
+/// see `run()` below. Also brings up MCP servers (per `cogito.toml`),
+/// prints the startup banner to stderr, and composes the two via
+/// `CompositeToolProvider::Strict` when MCP brought up at least one
+/// server.
 ///
 /// Returns the builtin-only provider when no MCP servers were
 /// configured or all of them failed (see ADR-0018 §3.5 — MCP failures
 /// are non-fatal to Runtime).
 async fn build_tool_provider(
     cfg: &cogito_config::RuntimeConfig,
-    job_mgr: Arc<LocalJobManager>,
 ) -> Result<Arc<dyn cogito_protocol::tool::ToolProvider>> {
-    // Thread the SAME `Arc<LocalJobManager>` into the builtin provider
-    // that the surface passes to `RuntimeBuilder::job_manager` below.
-    // Without this, async tools (Task 16+) would submit against a
-    // private manager the Brain never registers `on_complete` with,
-    // and the tool call would hang forever. See ADR-0008.
     let builtin: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(
         BuiltinToolProvider::builder()
             .with_tool(Arc::new(ReadFile))
-            .with_jobs(job_mgr)
             .build(),
     );
 
@@ -352,14 +347,17 @@ pub async fn run(args: ChatArgs) -> Result<()> {
     let store_for_replay: Arc<dyn ConversationStore> = store.clone();
 
     // Construct the `LocalJobManager` singleton up here so the SAME
-    // `Arc` flows into both `BuiltinToolProvider::with_jobs` (typed
-    // for `submit`) and `RuntimeBuilder::job_manager` (typed for
-    // `on_complete`). If these diverged the async tools would submit
-    // to one manager while the Brain registered sinks on a different
-    // one — every async tool call would hang. See ADR-0008.
+    // `Arc` will eventually flow into both the async-tool provider
+    // (typed for `submit`) and `RuntimeBuilder::job_manager` (typed
+    // for `on_complete`). If these diverged the async tools would
+    // submit to one manager while the Brain registered sinks on a
+    // different one — every async tool call would hang. See ADR-0008.
+    // Currently only `RuntimeBuilder::job_manager` consumes it; the
+    // async-tool wiring is restored in the next commit via
+    // `CompositeToolProvider` (ADR-0025).
     let job_mgr: Arc<LocalJobManager> = LocalJobManager::new();
 
-    let tools = build_tool_provider(&cfg, Arc::clone(&job_mgr)).await?;
+    let tools = build_tool_provider(&cfg).await?;
     let skills = crate::chat_config::build_skill_provider(&cfg)?;
 
     let mut strategy = HarnessStrategy::default_with_model(&model_id);
@@ -368,8 +366,9 @@ pub async fn run(args: ChatArgs) -> Result<()> {
     }
 
     // `Arc<LocalJobManager>` -> `Arc<dyn JobManager>` via the unsized
-    // coercion impl on `Arc<T>`. One-way cast — keep the typed handle
-    // alive via the `Arc::clone` above if any later code needs `submit`.
+    // coercion impl on `Arc<T>`. One-way cast — when async tools are
+    // re-wired (Task 8) we will `Arc::clone(&job_mgr)` first so the
+    // typed handle remains available for `submit`.
     let job_mgr_dyn: Arc<dyn JobManager> = job_mgr;
     let mut builder = Runtime::builder()
         .store(store)
