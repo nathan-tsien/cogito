@@ -45,8 +45,12 @@ pub struct Runtime {
     skills: Option<Arc<dyn SkillProvider>>,
     /// Async job manager shared across every session opened on this
     /// runtime. Defaulted to `LocalJobManager::new()` in
-    /// `RuntimeBuilder::build`; the `RuntimeBuilder::job_manager` setter
-    /// for test injection lands in Task 14.
+    /// `RuntimeBuilder::build`; tests inject a mock via
+    /// `RuntimeBuilder::job_manager`. Surface code (CLI / consumer
+    /// service) is expected to construct the same `Arc<LocalJobManager>`
+    /// they thread into their `BuiltinToolProvider` and pass it here so
+    /// that async tool submissions and Brain `on_complete` registrations
+    /// resolve against the same manager instance.
     job_mgr: Arc<dyn JobManager>,
 }
 
@@ -270,6 +274,7 @@ pub struct RuntimeBuilder {
     tools: Option<Arc<dyn ToolProvider>>,
     strategy: Option<HarnessStrategy>,
     skills: Option<Arc<dyn SkillProvider>>,
+    job_mgr: Option<Arc<dyn JobManager>>,
 }
 
 impl RuntimeBuilder {
@@ -323,6 +328,18 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Override the default `LocalJobManager`. Surface code passes the
+    /// same `Arc<LocalJobManager>` it already handed to
+    /// `BuiltinToolProvider::with_jobs` so async tool submissions and
+    /// the Brain's `on_complete` registrations resolve against one
+    /// shared manager (see ADR-0008). Tests use this hook to inject a
+    /// `MockJobManager` for deterministic control over job completion.
+    #[must_use]
+    pub fn job_manager(mut self, job_mgr: Arc<dyn JobManager>) -> Self {
+        self.job_mgr = Some(job_mgr);
+        self
+    }
+
     /// Finalize.
     ///
     /// # Errors
@@ -344,11 +361,14 @@ impl RuntimeBuilder {
             .ok_or(RuntimeError::MissingDependency("strategy"))?;
 
         // Default to an in-process `LocalJobManager`. `LocalJobManager::new`
-        // already returns `Arc<LocalJobManager>`; coerce to the trait object
-        // here so `SessionDeps::job_mgr` stays `Arc<dyn JobManager>` and a
-        // future test-injection setter (Task 14) can swap in any other
-        // implementation without churning the call site.
-        let job_mgr: Arc<dyn JobManager> = LocalJobManager::new();
+        // already returns `Arc<LocalJobManager>` which coerces to the trait
+        // object via the unsized-coercion impl on `Arc<T>`. The
+        // `job_manager` setter takes precedence so surface code can hand
+        // the SAME `Arc<LocalJobManager>` to both `BuiltinToolProvider`
+        // (typed for `submit`) and the Runtime (typed for `on_complete`).
+        let job_mgr: Arc<dyn JobManager> = self
+            .job_mgr
+            .unwrap_or_else(|| LocalJobManager::new() as Arc<dyn JobManager>);
 
         Ok(Arc::new(Runtime {
             handle,

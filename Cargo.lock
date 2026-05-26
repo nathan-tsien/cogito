@@ -348,6 +348,7 @@ dependencies = [
  "clap",
  "cogito-config",
  "cogito-core",
+ "cogito-jobs",
  "cogito-mcp",
  "cogito-model",
  "cogito-protocol",
@@ -611,6 +612,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "cogito-jobs",
  "cogito-protocol",
  "schemars 0.8.22",
  "serde",
