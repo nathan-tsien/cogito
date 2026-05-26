@@ -11,7 +11,7 @@ use cogito_protocol::job::{JobId, JobManager, JobOutcome, JobStatus};
 use cogito_protocol::test_support::contract_job_manager::{JobManagerHarness, run_contract_suite};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 
 struct LocalHarness {
     mgr: Arc<LocalJobManager>,
@@ -71,4 +71,28 @@ impl JobManagerHarness for LocalHarness {
 #[tokio::test(flavor = "multi_thread")]
 async fn local_job_manager_satisfies_contract() {
     run_contract_suite::<LocalHarness>().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_aborts_running_job_and_fires_sink() {
+    let mgr = LocalJobManager::new();
+    let (tx, mut rx) = mpsc::channel(1);
+    let job_id = mgr.submit(async {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        JobOutcome::Success {
+            result: cogito_protocol::tool::ToolResult::text("late"),
+        }
+    });
+    mgr.on_complete(job_id, tx).await.expect("on_complete ok");
+    mgr.cancel(job_id).await.expect("cancel ok");
+
+    let evt = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+        .await
+        .expect("sink fired within 1s")
+        .expect("sender not dropped");
+    assert!(matches!(evt.outcome, JobOutcome::Cancelled));
+    assert!(matches!(
+        mgr.status(job_id).await.unwrap(),
+        JobStatus::Cancelled
+    ));
 }

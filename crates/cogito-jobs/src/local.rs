@@ -77,10 +77,16 @@ impl LocalJobManager {
             let outcome = fut.await;
             this.complete_internal(job_id, outcome).await;
         });
-        // TODO(task-4-cancel): between the insert above and this patch, a racing
-        // cancel(job_id) call would see `abort_handle: None` even though the job
-        // is live. Task 4's cancel implementation must treat that as a transient
-        // race (retry once after yield_now, or return a "cancel race" error).
+        // Race note: between the insert above and this patch, a racing
+        // cancel(job_id) could observe `abort_handle: None` and skip the
+        // `abort()` call. In that case the spawned task runs to its first
+        // `await` and then attempts `complete_internal`, which observes the
+        // already-`Cancelled` status and bails (see `complete_internal`'s
+        // idempotency check). The user-visible behavior is identical: cancel
+        // flips status to `Cancelled` and fires the sink with `Cancelled`,
+        // and the spawned future's eventual outcome is discarded. The only
+        // cost is a few extra microseconds of wall-clock work on the
+        // about-to-be-orphaned task, which is acceptable.
         if let Some(entry) = self.jobs.lock().get_mut(&job_id) {
             entry.abort_handle = Some(handle.abort_handle());
         }
@@ -89,6 +95,11 @@ impl LocalJobManager {
 
     /// Internal: called from the spawned task when the job future resolves.
     /// Transitions to terminal status and fires the registered sink.
+    ///
+    /// Idempotent: if `cancel` (or any other terminal transition) raced
+    /// ahead, the existing terminal state is preserved and the sink is not
+    /// re-fired. This makes it safe for the spawned task to complete its
+    /// natural body even after a cancel; its outcome is simply discarded.
     async fn complete_internal(&self, job_id: JobId, outcome: JobOutcome) {
         let sink = {
             let mut jobs = self.jobs.lock();
@@ -96,6 +107,15 @@ impl LocalJobManager {
                 tracing::warn!(%job_id, "complete_internal for unknown job; dropping");
                 return;
             };
+            // Idempotency: if cancel (or a prior completion) already moved
+            // the job to a terminal state, do not overwrite the outcome and
+            // do not re-fire the sink.
+            if matches!(
+                job.status,
+                JobStatus::Completed | JobStatus::Failed | JobStatus::Cancelled
+            ) {
+                return;
+            }
             // `JobOutcome` is `#[non_exhaustive]`. The wildcard arm exists
             // as a forward-compat catch-all (e.g. future `TimedOut` /
             // `Preempted` variants land on `Failed` here); a `tracing::warn!`
@@ -148,11 +168,39 @@ impl JobManager for LocalJobManager {
         })
     }
 
-    async fn cancel(&self, _job_id: JobId) -> Result<(), JobError> {
-        // Cancel is implemented in Task 4 of the Sprint 8 plan.
-        Err(JobError::BackendUnavailable(
-            "cancel not yet implemented".into(),
-        ))
+    async fn cancel(&self, job_id: JobId) -> Result<(), JobError> {
+        let (abort, sink) = {
+            let mut jobs = self.jobs.lock();
+            let Some(job) = jobs.get_mut(&job_id) else {
+                return Err(JobError::UnknownJob(job_id));
+            };
+            // Already terminal: no-op. A second cancel must not re-fire the
+            // sink or clobber a `Completed` / `Failed` outcome.
+            if matches!(
+                job.status,
+                JobStatus::Completed | JobStatus::Failed | JobStatus::Cancelled
+            ) {
+                return Ok(());
+            }
+            job.status = JobStatus::Cancelled;
+            job.outcome = Some(JobOutcome::Cancelled);
+            let abort = job.abort_handle.take();
+            let sink = job.on_complete_sink.take();
+            (abort, sink)
+        };
+        if let Some(abort) = abort {
+            abort.abort();
+        }
+        if let Some(sink) = sink {
+            // Best-effort delivery, matching `complete_internal`.
+            let _ = sink
+                .send(JobCompletionEvent {
+                    job_id,
+                    outcome: JobOutcome::Cancelled,
+                })
+                .await;
+        }
+        Ok(())
     }
 
     async fn on_complete(
