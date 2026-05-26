@@ -51,5 +51,13 @@ required-features = ["test-tools"]
 name = "mid_pause_user_input"
 required-features = ["test-tools"]
 
+# `run_tests_happy_path` exercises the production `RunTestsTool` (not gated
+# on `test-tools`) against a tiny fixture crate under `tests/fixtures/`.
+# Marked with `harness = true` (the default) so test runner flags such as
+# `--test-threads=1` (required by the process-wide chdir guard) are honored.
+[[test]]
+name = "run_tests_happy_path"
+harness = true
+
 [lints]
 workspace = true

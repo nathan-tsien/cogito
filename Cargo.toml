@@ -18,6 +18,13 @@ members = [
     "crates/testing/cogito-mock-model",
     "tools/cogito-gen-schema",
 ]
+# Per-test fixture crates that exist only to be consumed by integration
+# tests. They are NOT part of the workspace; cargo would otherwise try to
+# attach any nested `Cargo.toml` under a workspace member as a sibling
+# package and fail. Sprint 8 added `echo_crate` for the run_tests E2E test.
+exclude = [
+    "crates/cogito-jobs/tests/fixtures",
+]
 
 [workspace.package]
 edition = "2024"
