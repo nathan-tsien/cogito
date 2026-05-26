@@ -30,7 +30,7 @@ use cogito_protocol::content::ContentBlock;
 use cogito_protocol::context::ContextPipeline;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::{SessionId, TurnId};
-use cogito_protocol::job::{JobCompletionEvent, JobId, JobOutcome};
+use cogito_protocol::job::{JobCompletionEvent, JobId, JobManager, JobOutcome};
 use cogito_protocol::session::SessionMeta;
 use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::store::ConversationStore;
@@ -130,6 +130,11 @@ pub(super) struct SessionDeps {
     pub model: Arc<dyn ModelGateway>,
     /// Tool provider.
     pub tools: Arc<dyn ToolProvider>,
+    /// Job manager. Used by `SessionCommand::CancelJob` to abort a
+    /// background job when the caller cancels a turn that is paused on
+    /// one. Task 11 will additionally plumb this into `TurnDeps` so the
+    /// async dispatcher path (Task 12) can submit and register jobs.
+    pub job_mgr: Arc<dyn JobManager>,
 }
 
 impl SessionState {
@@ -395,6 +400,11 @@ fn spawn_turn_driver(
 /// `mailbox_tx` is retained for `JobCompleted` re-injection on Arm 3 of the
 /// mailbox loop (which still owns the sender directly) and for future
 /// commands that need to enqueue follow-ups; it is not used here today.
+///
+/// The line count is structural (one arm per `SessionCommand` variant) and
+/// breaking it up would only force the reader to hop between helpers; the
+/// per-arm bodies are independently small.
+#[allow(clippy::too_many_lines)]
 async fn handle_command(
     state: &mut SessionState,
     cmd: SessionCommand,
@@ -506,6 +516,36 @@ async fn handle_command(
             Some(ShutdownOutcome::Clean {
                 in_flight_cancelled: None,
             })
+        }
+        SessionCommand::CancelJob { job_id } => {
+            // Best-effort cancel of the background job. The `JobManager`
+            // implementation flips the job to `Cancelled` and fires the
+            // already-registered completion sink, which the actor
+            // dequeues on Arm 3 and re-injects as a `JobCompleted`
+            // mailbox command. That command unwinds the paused turn via
+            // the normal Arm-2 path, surfacing `ToolResult::Error {
+            // kind: Cancelled }` to the next model call.
+            if let Err(e) = deps.job_mgr.cancel(job_id).await {
+                tracing::warn!(
+                    session_id = %state.session_id,
+                    %job_id,
+                    error = %e,
+                    "JobManager::cancel failed; turn may remain paused"
+                );
+            }
+            None
+        }
+        SessionCommand::SnapshotInFlight { reply } => {
+            // Mailbox-probe pattern: the handle asks the actor to look
+            // at `state.in_flight` rather than holding a shared mutex,
+            // which keeps `SessionState` single-owner per ADR-0006 §"Actor
+            // model — why and how". A dropped receiver is harmless.
+            let job_id = match &state.in_flight {
+                Some(InFlight::PausedOnJob { job_id, .. }) => Some(*job_id),
+                _ => None,
+            };
+            let _ = reply.send(job_id);
+            None
         }
     }
 }

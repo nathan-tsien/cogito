@@ -1,7 +1,7 @@
 //! Channel-protocol value types used between caller, actor, store writer,
 //! and `JobManager`.
 
-use cogito_protocol::job::JobCompletionEvent;
+use cogito_protocol::job::{JobCompletionEvent, JobId};
 use tokio::sync::oneshot;
 
 // Re-export the canonical session identifier from the protocol layer so all
@@ -82,6 +82,26 @@ pub enum SessionCommand {
         deadline: std::time::Duration,
         /// Signals the caller with the outcome once the actor exits.
         ack: oneshot::Sender<ShutdownOutcome>,
+    },
+
+    /// Cancel a still-running job for the currently paused turn. Forwarded
+    /// from `SessionHandle::cancel_turn` when `state.in_flight` is
+    /// `PausedOnJob`. The actor calls `JobManager::cancel(job_id)`; the
+    /// subsequent `JobCompleted { outcome: Cancelled }` flows through Arm
+    /// 3 as normal.
+    CancelJob {
+        /// The job to cancel.
+        job_id: JobId,
+    },
+
+    /// Probe `in_flight` from the handle. The actor replies with the
+    /// `JobId` if the session is `PausedOnJob`, otherwise `None`. Used by
+    /// `SessionHandle::cancel_turn` to decide whether to follow up with a
+    /// `CancelJob` command.
+    SnapshotInFlight {
+        /// Reply channel: receives the paused job id, or `None` if the
+        /// session is not currently `PausedOnJob`.
+        reply: oneshot::Sender<Option<JobId>>,
     },
 }
 

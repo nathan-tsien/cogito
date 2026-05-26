@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
+use cogito_jobs::LocalJobManager;
 use cogito_protocol::gateway::ModelGateway;
+use cogito_protocol::job::JobManager;
 use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
@@ -41,6 +43,11 @@ pub struct Runtime {
     /// Optional Skill loader provider. Required only when the strategy
     /// selects `SystemPromptInjectorConfig::Skill`; otherwise `None`.
     skills: Option<Arc<dyn SkillProvider>>,
+    /// Async job manager shared across every session opened on this
+    /// runtime. Defaulted to `LocalJobManager::new()` in
+    /// `RuntimeBuilder::build`; the `RuntimeBuilder::job_manager` setter
+    /// for test injection lands in Task 14.
+    job_mgr: Arc<dyn JobManager>,
 }
 
 impl Runtime {
@@ -195,6 +202,7 @@ impl Runtime {
         let deps = SessionDeps {
             model: Arc::clone(&self.model),
             tools: Arc::clone(&self.tools),
+            job_mgr: Arc::clone(&self.job_mgr),
         };
 
         let mailbox_tx_for_loop = mailbox_tx.clone();
@@ -329,6 +337,13 @@ impl RuntimeBuilder {
             .strategy
             .ok_or(RuntimeError::MissingDependency("strategy"))?;
 
+        // Default to an in-process `LocalJobManager`. `LocalJobManager::new`
+        // already returns `Arc<LocalJobManager>`; coerce to the trait object
+        // here so `SessionDeps::job_mgr` stays `Arc<dyn JobManager>` and a
+        // future test-injection setter (Task 14) can swap in any other
+        // implementation without churning the call site.
+        let job_mgr: Arc<dyn JobManager> = LocalJobManager::new();
+
         Ok(Arc::new(Runtime {
             handle,
             sessions: DashMap::new(),
@@ -338,6 +353,7 @@ impl RuntimeBuilder {
             tools,
             strategy,
             skills: self.skills,
+            job_mgr,
         }))
     }
 }

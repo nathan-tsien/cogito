@@ -408,6 +408,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "cogito-context",
+ "cogito-jobs",
  "cogito-mock-model",
  "cogito-protocol",
  "cogito-skills",

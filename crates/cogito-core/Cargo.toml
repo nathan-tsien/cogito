@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 cogito-protocol.workspace = true
 cogito-context.workspace = true
+cogito-jobs.workspace = true
 jsonschema.workspace = true
 
 tokio.workspace = true
