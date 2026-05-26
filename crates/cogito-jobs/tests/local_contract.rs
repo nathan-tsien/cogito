@@ -68,7 +68,7 @@ impl JobManagerHarness for LocalHarness {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn local_job_manager_satisfies_contract() {
     run_contract_suite::<LocalHarness>().await;
 }

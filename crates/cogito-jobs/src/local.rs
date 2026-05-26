@@ -77,6 +77,10 @@ impl LocalJobManager {
             let outcome = fut.await;
             this.complete_internal(job_id, outcome).await;
         });
+        // TODO(task-4-cancel): between the insert above and this patch, a racing
+        // cancel(job_id) call would see `abort_handle: None` even though the job
+        // is live. Task 4's cancel implementation must treat that as a transient
+        // race (retry once after yield_now, or return a "cancel race" error).
         if let Some(entry) = self.jobs.lock().get_mut(&job_id) {
             entry.abort_handle = Some(handle.abort_handle());
         }
@@ -92,18 +96,21 @@ impl LocalJobManager {
                 tracing::warn!(%job_id, "complete_internal for unknown job; dropping");
                 return;
             };
-            // `JobOutcome` is `#[non_exhaustive]`. The explicit `Failed`
-            // arm and the wildcard fallback coincide today, but the
-            // wildcard exists purely as a forward-compat catch-all
-            // (e.g. future `TimedOut` / `Preempted` variants land on
-            // `Failed` here); `match_same_arms` would have us collapse
-            // the meaningful `Failed` arm into it.
-            #[allow(clippy::match_same_arms)]
+            // `JobOutcome` is `#[non_exhaustive]`. The wildcard arm exists
+            // as a forward-compat catch-all (e.g. future `TimedOut` /
+            // `Preempted` variants land on `Failed` here); a `tracing::warn!`
+            // surfaces the drift so telemetry catches it.
             let new_status = match &outcome {
                 JobOutcome::Success { .. } => JobStatus::Completed,
                 JobOutcome::Failed { .. } => JobStatus::Failed,
                 JobOutcome::Cancelled => JobStatus::Cancelled,
-                _ => JobStatus::Failed,
+                other => {
+                    tracing::warn!(
+                        ?other,
+                        "unknown JobOutcome variant; mapping to JobStatus::Failed"
+                    );
+                    JobStatus::Failed
+                }
             };
             job.status = new_status;
             job.outcome = Some(outcome.clone());

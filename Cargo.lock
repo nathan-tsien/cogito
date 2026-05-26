@@ -454,7 +454,6 @@ dependencies = [
  "async-trait",
  "cogito-protocol",
  "cogito-test-fixtures",
- "futures",
  "parking_lot",
  "serde",
  "serde_json",
