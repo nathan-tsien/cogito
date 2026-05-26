@@ -14,23 +14,13 @@
 //!
 //! Assertions (against the persisted JSONL log via `store.replay`):
 //! - The sequence of payload kinds includes `JobSubmitted`, `TurnPaused`,
-//!   `JobCompletedRecorded`, `TurnCompleted` in *appearance* order
-//!   (strict ordering check: every named event must show up, and each
+//!   `JobCompletedRecorded`, `ToolResultRecorded`, `TurnCompleted` in
+//!   *appearance* order — the spec §5.1 ordering invariant
+//!   `JobSubmitted < TurnPaused < JobCompletedRecorded < ToolResultRecorded`
+//!   is enforced strictly here (every named event must show up, and each
 //!   must appear before the next in the log).
 //! - `JobCompletedRecorded.outcome` is a `JobOutcome::Success` carrying
 //!   the canonical `"slept"` tool result that `SleepTool` emits.
-//!
-//! Note on the spec-required `ToolResultRecorded` event: the design spec
-//! at `docs/superpowers/specs/2026-05-24-sprint-8-async-jobs-design.md`
-//! §5.1 names the ordering
-//! `JobSubmitted < TurnPaused < JobCompletedRecorded < ToolResultRecorded`.
-//! The current `session_loop::handle_command(JobCompleted)` re-spawns the
-//! `TurnDriver` with `TurnEntry::FromToolDispatching { pending: [],
-//! completed: [(call_id, tool_result)] }` but does NOT call
-//! `record_tool_result`; the synchronous-tool path is the only writer
-//! today. We assert the actually-emitted prefix here and surface the
-//! gap as a Task 17 concern rather than silently asserting on a fictional
-//! sequence (or refactoring production code from a test PR).
 //!
 //! The test is intentionally fast (50 ms sleep + scheduling slack); end-
 //! to-end wall time should be well under a second on any developer box.
@@ -136,6 +126,7 @@ async fn sleep_then_complete_drives_full_async_loop() -> Result<(), Box<dyn std:
         "JobSubmitted",
         "TurnPaused",
         "JobCompletedRecorded",
+        "ToolResultRecorded",
         "TurnCompleted",
     ];
     let mut cursor = 0usize;
@@ -148,8 +139,7 @@ async fn sleep_then_complete_drives_full_async_loop() -> Result<(), Box<dyn std:
     }
 
     // The `JobCompletedRecorded.outcome` must carry the canonical "slept"
-    // success that `SleepTool` emits. (See module docs for why we don't
-    // also assert on `ToolResultRecorded` here.)
+    // success that `SleepTool` emits.
     let outcome = log
         .iter()
         .find_map(|e| match &e.payload {

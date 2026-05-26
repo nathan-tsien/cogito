@@ -282,6 +282,11 @@ pub(super) async fn run_session(
 /// - `ResumeAfterJobCompletion` — translate the already-persisted outcome
 ///   to a `ToolResult` and spawn `TurnDriver` with
 ///   `TurnEntry::FromToolDispatching` carrying the resolved completion.
+///
+/// The line count is structural (one arm per `ResumePoint` variant); each
+/// per-arm body is small and splitting the dispatch would only force the
+/// reader to chase helpers for what is already a flat match.
+#[allow(clippy::too_many_lines)]
 async fn apply_resume_point(
     state: &mut SessionState,
     initial_events: &[cogito_protocol::ConversationEvent],
@@ -395,9 +400,31 @@ async fn apply_resume_point(
             ..
         } => {
             // The `JobCompletedRecorded` event is already persisted; no
-            // need to re-record. Translate the outcome to a `ToolResult`
-            // and spawn the TurnDriver directly in `ToolDispatching`.
+            // need to re-record it. Per spec §5.1, the canonical ordering
+            // is `JobCompletedRecorded < ToolResultRecorded`; the live
+            // path writes both under the same recorder lock, but if the
+            // actor crashed BETWEEN those two appends, only the former
+            // is in the log and we must synthesize the latter here so
+            // every `ToolUseRecorded` keeps its matching
+            // `ToolResultRecorded`. Skip if the log already has it
+            // (crash happened AFTER both appends) to avoid a duplicate.
             let tool_result = outcome_to_tool_result(outcome);
+            let already_recorded = initial_events.iter().any(|e| {
+                matches!(
+                    &e.payload,
+                    cogito_protocol::event::EventPayload::ToolResultRecorded { call_id: c, .. }
+                        if *c == call_id
+                )
+            });
+            if !already_recorded {
+                let mut rec = state.recorder.lock().await;
+                if let Err(e) = rec
+                    .record_tool_result(turn_id, call_id.clone(), tool_result.clone())
+                    .await
+                {
+                    return Err(ShutdownOutcome::ResumeFailed(e.to_string()));
+                }
+            }
             spawn_turn_driver(
                 state,
                 turn_id,
@@ -558,12 +585,10 @@ async fn handle_command(
             // Write-before-transition: record JobCompleted before re-spawning
             // the TurnDriver so the persisted log reflects the completion
             // even if the actor dies between the record and the spawn.
+            let tool_result = outcome_to_tool_result(outcome.clone());
             {
                 let mut rec = state.recorder.lock().await;
-                if let Err(e) = rec
-                    .record_job_completed(turn_id, job_id, outcome.clone())
-                    .await
-                {
+                if let Err(e) = rec.record_job_completed(turn_id, job_id, outcome).await {
                     tracing::error!(
                         session_id = %state.session_id,
                         %turn_id,
@@ -572,9 +597,28 @@ async fn handle_command(
                     );
                     return Some(ShutdownOutcome::ResumeFailed(e.to_string()));
                 }
+                // Spec §5.1 ordering invariant:
+                // JobCompletedRecorded < ToolResultRecorded. The resumed
+                // TurnDriver enters at `ToolDispatching` with an empty
+                // `pending` and the already-resolved completion in
+                // `completed`, so `tool_dispatching::transit`'s
+                // pending-pop loop never records the result. We must do
+                // it here so every `ToolUseRecorded` keeps its matching
+                // `ToolResultRecorded` in the persisted log.
+                if let Err(e) = rec
+                    .record_tool_result(turn_id, call_id.clone(), tool_result.clone())
+                    .await
+                {
+                    tracing::error!(
+                        session_id = %state.session_id,
+                        %turn_id,
+                        error = %e,
+                        "failed to record ToolResult for async completion; aborting session"
+                    );
+                    return Some(ShutdownOutcome::ResumeFailed(e.to_string()));
+                }
             }
 
-            let tool_result = outcome_to_tool_result(outcome);
             spawn_turn_driver(
                 state,
                 turn_id,

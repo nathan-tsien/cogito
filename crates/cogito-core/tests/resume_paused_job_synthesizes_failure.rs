@@ -271,5 +271,35 @@ async fn resume_paused_job_synthesizes_failure_when_job_is_unknown()
         other => panic!("expected JobOutcome::Failed, got {other:?}"),
     }
 
+    // Spec §5.1 ordering invariant: `JobCompletedRecorded <
+    // ToolResultRecorded`. After the synthetic JobCompleted unwinds the
+    // pause, `handle_command(JobCompleted)` must also persist the
+    // matching `ToolResultRecorded` for the async tool's `call_id` so
+    // the log keeps the one-tool-use / one-tool-result invariant.
+    let positions: Vec<(usize, &EventPayload)> = log
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (i, &e.payload))
+        .collect();
+    let job_completed_idx = positions
+        .iter()
+        .find_map(|(i, p)| matches!(p, EventPayload::JobCompletedRecorded { .. }).then_some(*i))
+        .expect("JobCompletedRecorded missing from persisted log");
+    let tool_result_idx = positions
+        .iter()
+        .find_map(|(i, p)| match p {
+            EventPayload::ToolResultRecorded { call_id, .. } if call_id == &async_call_id => {
+                Some(*i)
+            }
+            _ => None,
+        })
+        .expect("ToolResultRecorded for async call_id missing from persisted log");
+    assert!(
+        job_completed_idx < tool_result_idx,
+        "spec §5.1: JobCompletedRecorded must precede ToolResultRecorded \
+         (got JobCompletedRecorded@{job_completed_idx}, \
+         ToolResultRecorded@{tool_result_idx})"
+    );
+
     Ok(())
 }
