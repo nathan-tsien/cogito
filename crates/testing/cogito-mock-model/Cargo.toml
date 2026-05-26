@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 async-stream = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]

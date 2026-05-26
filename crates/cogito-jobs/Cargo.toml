@@ -24,9 +24,32 @@ tokio-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+cogito-core.workspace = true
+cogito-mock-model.workspace = true
 cogito-protocol = { workspace = true, features = ["test-support"] }
+cogito-store-jsonl.workspace = true
 cogito-test-fixtures.workspace = true
+cogito-tools.workspace = true
+futures = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util", "process"] }
+
+# Integration tests that wire `SleepTool` through the full Runtime require
+# the `test-tools` feature so the gated module compiles. `required-features`
+# silently skips them when the feature is not on — `make test` and `cargo
+# test --all-features` enable it for us.
+[[test]]
+name = "sleep_then_complete"
+required-features = ["test-tools"]
+
+[[test]]
+name = "cancel_while_paused"
+required-features = ["test-tools"]
+
+[[test]]
+name = "mid_pause_user_input"
+required-features = ["test-tools"]
 
 [lints]
 workspace = true

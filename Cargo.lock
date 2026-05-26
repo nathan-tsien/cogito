@@ -455,11 +455,17 @@ name = "cogito-jobs"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "cogito-core",
+ "cogito-mock-model",
  "cogito-protocol",
+ "cogito-store-jsonl",
  "cogito-test-fixtures",
+ "cogito-tools",
+ "futures",
  "parking_lot",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
@@ -496,6 +502,7 @@ dependencies = [
  "cogito-protocol",
  "futures",
  "parking_lot",
+ "serde_json",
  "tokio",
 ]
 
