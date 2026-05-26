@@ -53,6 +53,7 @@ use cogito_protocol::ExecCtx;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::SessionId;
+use cogito_protocol::job::{JobId, JobManager, JobOutcome};
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
@@ -63,6 +64,7 @@ use cogito_protocol::{ConversationEvent, EventPayload};
 use cogito_store_jsonl::JsonlStore;
 use cogito_test_fixtures::chaos_scenarios::{self, ChaosScenario};
 use cogito_test_fixtures::fault_store::{FaultInjectingStore, FaultTrigger};
+use cogito_test_fixtures::mock_job_manager::MockJobManager;
 use futures::TryStreamExt as _;
 
 /// In-test `ToolProvider` that returns `MOCK_TOOL_RESULT` for any invocation.
@@ -409,6 +411,22 @@ fn nil_event_id() -> cogito_protocol::ids::EventId {
     cogito_protocol::ids::EventId::recorder_failure_placeholder()
 }
 
+/// Nil sentinel `JobId` used to normalize run-specific job identifiers in
+/// async-job payloads. Each phase of the chaos test instantiates its own
+/// `JobManager` (and the async-tool fixture mints a fresh `JobId` on
+/// every invoke), so the persisted `JobSubmitted` / `TurnPaused` /
+/// `JobCompletedRecorded` events from golden vs resumed runs carry
+/// non-equal ULIDs even though they describe the same logical job in the
+/// same logical position. Normalizing to a fixed sentinel makes
+/// prefix-immutability comparable; the per-call_id pairing remains
+/// asserted via `assert_tool_mapping_equivalent`.
+fn nil_job_id() -> cogito_protocol::job::JobId {
+    serde_json::from_value::<cogito_protocol::job::JobId>(serde_json::Value::String(
+        ulid::Ulid::nil().to_string(),
+    ))
+    .expect("nil ULID parses as JobId")
+}
+
 /// Return a canonicalized payload that replaces run-specific ID fields with
 /// stable sentinel values so golden and resumed logs compare equal.
 fn normalize_payload(payload: EventPayload) -> EventPayload {
@@ -446,6 +464,23 @@ fn normalize_payload(payload: EventPayload) -> EventPayload {
             system_prompt_event: nil_event_id(),
             tool_filter_event: nil_event_id(),
             errors,
+        },
+        // Sprint 8: async-job payloads embed a `JobId` minted per phase
+        // (each `JobManager` instance mints its own ULIDs). Normalize so
+        // golden and resumed logs compare equal up to logical structure.
+        EventPayload::JobSubmitted {
+            call_id, tool_name, ..
+        } => EventPayload::JobSubmitted {
+            call_id,
+            job_id: nil_job_id(),
+            tool_name,
+        },
+        EventPayload::TurnPaused { .. } => EventPayload::TurnPaused {
+            job_id: nil_job_id(),
+        },
+        EventPayload::JobCompletedRecorded { outcome, .. } => EventPayload::JobCompletedRecorded {
+            job_id: nil_job_id(),
+            outcome,
         },
         // All other variants carry no run-specific IDs inside the payload.
         other => other,
@@ -1256,3 +1291,505 @@ fn assert_turn2_suffix_has_skill_body(events: &[ConversationEvent]) {
 // for `ToolUseRecorded` BEFORE `ModelCallCompleted` (matching the actual
 // H06 write order). Both are pre-existing v0.1 gaps, not regressions
 // introduced by this test.
+
+// === Sprint 8: paused_async_job chaos scenario ==============================
+//
+// Spec: docs/superpowers/specs/2026-05-24-sprint-8-async-jobs-design.md §10.
+//
+// Goal: verify that the H08 async-job loop and H03's paused-job resume
+// points survive a mid-flight crash. Three crash boundaries are exercised:
+//
+//   (a) After `JobSubmitted` but BEFORE `TurnPaused`. H03 sees the latest
+//       turn boundary is `TurnStarted` (JobSubmitted is not a turn-boundary
+//       event), so `resume_from_turn_started` classifies the in-flight turn
+//       into `ResumeFromToolDispatching` with the async tool's
+//       ToolUseRecorded still pending. The dispatcher re-invokes the tool,
+//       which submits a NEW job_id against the fresh `MockJobManager`. The
+//       fresh manager auto-fires `complete(new_job_id, Success)` from the
+//       same canned future, the turn pauses on the new job, then resumes
+//       cleanly to `TurnCompleted`. Prefix immutability holds up to the
+//       crash point; the duplicate `JobSubmitted` (one persisted, one
+//       new) lives strictly past the prefix.
+//
+//   (b) After `TurnPaused` but BEFORE `JobCompletedRecorded`. H03 sees
+//       `TurnPaused` as the latest turn boundary and scans forward for a
+//       matching `JobCompletedRecorded`. None present, so the decision is
+//       `ResumePausedJob`. `apply_resume_point` calls `on_complete(job_id)`
+//       on the fresh `MockJobManager`, which returns `JobError::UnknownJob`
+//       because the persisted `job_id` was minted by the phase-1 manager
+//       that died with the actor. The session loop then synthesises a
+//       `JobOutcome::Failed { message: "lost across process restart" }` on
+//       the session's own Arm 3 channel. The synthetic completion writes
+//       `JobCompletedRecorded { Failed }` then `ToolResultRecorded
+//       { AsyncFailed }`, respawns the TurnDriver, and drives the second
+//       model call. This is Task 13's lost-job synthesis path.
+//
+//   (c) After `JobCompletedRecorded` but BEFORE `ToolResultRecorded`. H03
+//       sees `TurnPaused` as the latest turn boundary AND finds a matching
+//       `JobCompletedRecorded { Success }` after it. The decision is
+//       `ResumeAfterJobCompletion`. `apply_resume_point` checks whether
+//       `ToolResultRecorded` for the async call_id is already in the log
+//       (Task 17's dedup); if not, records it once and spawns the
+//       TurnDriver with the resolved completion. The second model call
+//       drives the turn to `TurnCompleted` carrying the same `"slept"`
+//       outcome the golden run produced.
+//
+// Oracle invariants per boundary:
+//
+//   (a) and (c) — all 4 standard oracles satisfy. The resumed log's
+//       canonical projection beyond the crash point may differ in detail
+//       (a re-dispatched JobSubmitted carries a new ULID; the dedup path
+//       inserts ToolResultRecorded exactly once) but the four equivalence
+//       invariants (prefix, terminal kind, tool mapping, final text) hold.
+//
+//   (b) — lost-job synthesis produces a tool mapping
+//       `(c_async -> (mock_async, {}, AsyncFailed))` while the golden run
+//       has `(c_async -> (mock_async, {}, "slept"))`. This is a
+//       *legitimate* divergence: the spec explicitly states that the lost
+//       job becomes a structured failure on the model side, not a
+//       reproduction of the original success. Oracle 3 is therefore
+//       relaxed for this boundary; we still verify oracles 1, 2, 4 and
+//       additionally assert that the resumed log contains the canonical
+//       `Failed { "lost across process restart" }` outcome.
+
+/// Async-tool fixture for the chaos scenario. Each `invoke` call registers
+/// a new `JobId` with the bound [`MockJobManager`] and spawns a tokio task
+/// that fires `complete(job_id, Success { result: "slept" })` after a
+/// short delay. The tool is shaped like `cogito_jobs::SleepTool` but uses
+/// `MockJobManager` so the test can swap a fresh manager into phase 2 and
+/// trigger Task 13's lost-job synthesis path on demand.
+struct AsyncMockSleepTool {
+    /// Shared job manager used by both `invoke` (which registers + spawns
+    /// the completion future) and the Runtime (which calls
+    /// `on_complete`). The same `Arc` MUST be threaded into both halves
+    /// per ADR-0008; otherwise the manager that fires `complete()` is
+    /// disjoint from the one the actor registered against and the sink
+    /// never fires.
+    job_mgr: Arc<MockJobManager>,
+}
+
+impl AsyncMockSleepTool {
+    fn new(job_mgr: Arc<MockJobManager>) -> Self {
+        Self { job_mgr }
+    }
+}
+
+#[async_trait]
+impl ToolProvider for AsyncMockSleepTool {
+    fn list(&self) -> Vec<ToolDescriptor> {
+        vec![ToolDescriptor {
+            name: "mock_async".into(),
+            description: "Async-tool fixture for chaos coverage; resolves with 'slept'.".into(),
+            schema: serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+            execution_class: ExecutionClass::AlwaysAsync,
+            outputs_model_visible_multimodal: false,
+        }]
+    }
+
+    async fn invoke(&self, _name: &str, _args: serde_json::Value, _ctx: ExecCtx) -> InvokeOutcome {
+        let job_id = JobId::default();
+        self.job_mgr.register(job_id).await;
+        // Auto-complete the job from a spawned task. The delay is short
+        // enough to keep the test fast but long enough that the dispatcher
+        // can record `JobSubmitted` + register the `on_complete` sink
+        // before the completion fires. (`MockJobManager::complete` honors
+        // the "fire immediately if a sink is already registered, store the
+        // outcome otherwise" contract, so the ordering between dispatch
+        // and completion does not actually matter for correctness; we
+        // still sleep briefly to make the trajectory more realistic.)
+        let mgr = Arc::clone(&self.job_mgr);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            mgr.complete(
+                job_id,
+                JobOutcome::Success {
+                    result: ToolResult::text("slept"),
+                },
+            )
+            .await;
+        });
+        InvokeOutcome::Async(job_id)
+    }
+}
+
+/// Build the scripted mock model for the `paused_async_job` scenario. Two
+/// model calls in turn 1: the first emits `tool_use(mock_async)`, the
+/// second (regardless of tool outcome) emits a constant final text +
+/// `EndTurn`. The fallback matcher is `InputMatcher::Any` for the second
+/// call, gated by the presence of a tool result in the input messages so
+/// that ordering is deterministic across the success path (golden +
+/// boundary c) and the lost-job synthesis path (boundary b's `AsyncFailed`
+/// result).
+fn build_async_chaos_model() -> ScriptedMockModel {
+    use cogito_protocol::gateway::{ModelEvent, StopReason, Usage};
+
+    // Turn 1 call 1: announce + tool_use(mock_async), stop_reason=tool_use.
+    let call1 = OutputScript {
+        events: vec![
+            ModelEvent::ToolUseStarted {
+                block_index: 0,
+                call_id: "c_async".into(),
+                tool_name: "mock_async".into(),
+            },
+            ModelEvent::ToolUseCompleted {
+                block_index: 0,
+                call_id: "c_async".into(),
+                tool_name: "mock_async".into(),
+                args: serde_json::json!({}),
+            },
+            ModelEvent::MessageCompleted {
+                stop_reason: StopReason::ToolUse,
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
+            },
+        ],
+    };
+    // Turn 1 call 2 (post-tool): assistant emits a constant reply +
+    // EndTurn. Independent of the tool result shape so the lost-job
+    // synthesis path produces the same final text as the success path.
+    let call2 = OutputScript {
+        events: vec![
+            ModelEvent::TextDelta {
+                block_index: 0,
+                chunk: "Done.".into(),
+            },
+            ModelEvent::TextBlockCompleted {
+                block_index: 0,
+                text: "Done.".into(),
+            },
+            ModelEvent::MessageCompleted {
+                stop_reason: StopReason::EndTurn,
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
+            },
+        ],
+    };
+    // The 2nd call's `ModelInput` will contain a ToolResult block (Output
+    // "slept" on the success path, Error{AsyncFailed} on the lost-job
+    // path). `LastToolResultContains("")` matches any ToolResult block
+    // (the empty substring is contained in every string), so it triggers
+    // on both shapes. The fallback `Any` matcher dispatches the first
+    // call.
+    ScriptedMockModel::new(vec![
+        (InputMatcher::LastToolResultContains(String::new()), call2),
+        (InputMatcher::Any, call1),
+    ])
+}
+
+/// Wire a `Runtime` for the `paused_async_job` chaos scenario. The
+/// `MockJobManager` is shared with `AsyncMockSleepTool` so the tool's job
+/// submission and the actor's `on_complete` registration resolve against
+/// the same instance. Each phase 1 / phase 2 builds a separate Runtime
+/// (and therefore a separate `MockJobManager`), which is exactly what
+/// drives boundary (b)'s lost-job synthesis: the phase-2 manager does not
+/// know the `job_id` persisted by phase 1.
+fn build_async_runtime(store: Arc<dyn ConversationStore>) -> (Arc<Runtime>, Arc<MockJobManager>) {
+    let mock = Arc::new(build_async_chaos_model());
+    let job_mgr = Arc::new(MockJobManager::new());
+    let tool: Arc<dyn ToolProvider> = Arc::new(AsyncMockSleepTool::new(Arc::clone(&job_mgr)));
+    let runtime = Runtime::builder()
+        .store(store)
+        .model(mock as Arc<dyn ModelGateway>)
+        .tools(tool)
+        .strategy(HarnessStrategy::default_with_model("mock"))
+        .job_manager(Arc::clone(&job_mgr) as Arc<dyn JobManager>)
+        .build()
+        .expect("runtime builds");
+    (runtime, job_mgr)
+}
+
+/// Run the `paused_async_job` scenario to natural completion without any
+/// injected faults. Returns the golden log + terminal payload.
+async fn async_run_to_completion() -> GoldenRun {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let (runtime, _job_mgr) = build_async_runtime(Arc::clone(&store));
+
+    let session_id = SessionId::new();
+    let handle = runtime
+        .open_session(session_id, OpenMode::New)
+        .await
+        .expect("open New");
+
+    let mut events_rx = handle.subscribe();
+    handle
+        .submit_user_text("run the async tool")
+        .await
+        .expect("submit_user_text");
+    // The paused-async-job flow emits TurnPaused before the auto-completed
+    // job drives the turn to TurnCompleted. The generic helper returns on
+    // TurnPaused, which would leave the golden log without the post-pause
+    // events we need to compare against. Wait for TurnCompleted / Failed /
+    // Cancelled specifically.
+    let _ = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match events_rx.recv().await {
+                Ok(
+                    StreamEvent::TurnCompleted
+                    | StreamEvent::TurnFailed { .. }
+                    | StreamEvent::TurnCancelled,
+                )
+                | Err(_) => return,
+                Ok(_) => {}
+            }
+        }
+    })
+    .await;
+
+    let events = read_log(store.as_ref(), session_id).await;
+    let terminal = terminal_payload(&events).clone();
+
+    let out = handle
+        .shutdown(Duration::from_secs(5))
+        .await
+        .expect("shutdown");
+    assert!(
+        matches!(out, ShutdownOutcome::Clean { .. }),
+        "expected Clean shutdown, got {out:?}"
+    );
+
+    drop(tmp);
+    GoldenRun { events, terminal }
+}
+
+/// Run the `paused_async_job` scenario with a `PanicAt(crash_after_n)` Y-path
+/// crash and then resume in a fresh `Runtime` (with a fresh
+/// `MockJobManager`). Returns the resumed log.
+///
+/// `crash_after_n` is a 1-indexed turn-event-seq (matching the existing
+/// chaos harness). The trigger fires after `crash_after_n + 1` total
+/// appends to account for the seq=0 `SessionStarted` write.
+async fn async_run_with_y_fault(crash_after_n: u64) -> Vec<ConversationEvent> {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let session_id = SessionId::new();
+
+    // ----- Phase 1: drive until PanicAt fires inside the actor task. -----
+    let inner1: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let wrapper1: Arc<FaultInjectingStore<JsonlStore>> =
+        Arc::new(FaultInjectingStore::new(Arc::clone(&inner1)));
+    let store1: Arc<dyn ConversationStore> = Arc::clone(&wrapper1) as Arc<dyn ConversationStore>;
+    let (runtime1, _job_mgr1) = build_async_runtime(store1);
+
+    let handle1 = runtime1
+        .open_session(session_id, OpenMode::New)
+        .await
+        .expect("open New");
+    wrapper1
+        .set_trigger(FaultTrigger::PanicAt {
+            event_no: crash_after_n + 1,
+            message: "async chaos fault",
+        })
+        .await;
+
+    handle1
+        .submit_user_text("run the async tool")
+        .await
+        .expect("submit_user_text");
+
+    // Wait until the panic lands or the turn reaches a terminal. The
+    // async tool auto-completes after ~20 ms, so without a crash the turn
+    // reaches `TurnCompleted` quickly; with a crash, the actor task dies
+    // silently and we detect it via `wrapper.written_count > crash_after_n`.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let events = read_log(inner1.as_ref(), session_id).await;
+        let has_terminal = events.iter().any(|e| {
+            matches!(
+                e.payload,
+                EventPayload::TurnCompleted { .. }
+                    | EventPayload::TurnFailed { .. }
+                    | EventPayload::TurnPaused { .. }
+            )
+        });
+        // Phase 1 is "done enough" once either: (a) the panic landed
+        // (written_count exceeded the boundary), or (b) a terminal hit
+        // disk. For an async-paused turn, `TurnPaused` is recorded but
+        // does NOT mean the turn is dead — the actor is alive waiting
+        // for the auto-complete. We must let the auto-complete fire and
+        // drive past TurnPaused so phase-2 boundaries that live past
+        // the pause (c) are actually reachable.
+        if wrapper1.written_count() > crash_after_n {
+            break;
+        }
+        // If `TurnCompleted` or `TurnFailed` is on disk, the turn is
+        // genuinely terminal; bail out.
+        let has_real_terminal = events.iter().any(|e| {
+            matches!(
+                e.payload,
+                EventPayload::TurnCompleted { .. } | EventPayload::TurnFailed { .. }
+            )
+        });
+        if has_real_terminal {
+            break;
+        }
+        // If the turn paused but the panic boundary is well past TurnPaused,
+        // keep spinning so the auto-complete can fire and the actor can
+        // re-enter ToolDispatching past TurnPaused into JobCompletedRecorded
+        // / ToolResultRecorded territory.
+        let _ = has_terminal;
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    drop(handle1);
+    drop(runtime1);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // ----- Phase 2: fresh Runtime (and fresh MockJobManager) on the same
+    // on-disk JSONL, Resume mode. The fresh manager NOT knowing the
+    // persisted `job_id` is the trigger for boundary (b)'s lost-job
+    // synthesis path. -----
+    let inner2: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let store2: Arc<dyn ConversationStore> = inner2.clone();
+    let (runtime2, _job_mgr2) = build_async_runtime(Arc::clone(&store2));
+
+    let handle2 = runtime2
+        .open_session(session_id, OpenMode::Resume)
+        .await
+        .expect("open Resume");
+
+    // Wait specifically for a CLOSED terminal (TurnCompleted / TurnFailed
+    // / TurnCancelled). The generic `wait_for_terminal_with_store` helper
+    // bails on `TurnPaused`, but for the paused-async-job flow
+    // `TurnPaused` is an intermediate state — the resume path must drive
+    // past it (re-dispatch the tool, or unwind the lost job, or apply the
+    // dedup branch). Bail early if the store already contains a closed
+    // terminal so we never hang waiting for a broadcast that will never
+    // fire.
+    let already_closed = read_log(store2.as_ref(), session_id).await.iter().any(|e| {
+        matches!(
+            e.payload,
+            EventPayload::TurnCompleted { .. } | EventPayload::TurnFailed { .. }
+        )
+    });
+    if !already_closed {
+        let mut events_rx = handle2.subscribe();
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match events_rx.recv().await {
+                    Ok(
+                        StreamEvent::TurnCompleted
+                        | StreamEvent::TurnFailed { .. }
+                        | StreamEvent::TurnCancelled,
+                    )
+                    | Err(_) => return,
+                    Ok(_) => {}
+                }
+            }
+        })
+        .await;
+    }
+
+    let events = read_log(store2.as_ref(), session_id).await;
+    let _ = handle2.shutdown(Duration::from_secs(5)).await;
+
+    drop(tmp);
+    events
+}
+
+/// Locate the three paused-async-job crash boundaries in the golden log.
+/// Returns 1-indexed turn-event-seqs matching `crash_after_n`:
+///
+/// - `b_post_job_submitted`: index of the `JobSubmitted` event (crash
+///   between `JobSubmitted` and `TurnPaused`).
+/// - `b_post_turn_paused`: index of the `TurnPaused` event (crash between
+///   `TurnPaused` and `JobCompletedRecorded` — lost-job synthesis path).
+/// - `b_post_job_completed`: index of the `JobCompletedRecorded` event
+///   (crash between `JobCompletedRecorded` and `ToolResultRecorded` — dedup
+///   path).
+fn async_crash_boundaries(events: &[ConversationEvent]) -> (Option<u64>, Option<u64>, Option<u64>) {
+    let mut job_submitted: Option<u64> = None;
+    let mut turn_paused: Option<u64> = None;
+    let mut job_completed: Option<u64> = None;
+    for (i, e) in events.iter().enumerate() {
+        let idx_1b = (i + 1) as u64;
+        match &e.payload {
+            EventPayload::JobSubmitted { .. } if job_submitted.is_none() => {
+                job_submitted = Some(idx_1b);
+            }
+            EventPayload::TurnPaused { .. } if turn_paused.is_none() => {
+                turn_paused = Some(idx_1b);
+            }
+            EventPayload::JobCompletedRecorded { .. } if job_completed.is_none() => {
+                job_completed = Some(idx_1b);
+            }
+            _ => {}
+        }
+    }
+    (job_submitted, turn_paused, job_completed)
+}
+
+/// Assert that the resumed log records the canonical lost-job synthesis
+/// outcome at least once. Used for boundary (b) where the phase-2
+/// `MockJobManager` does not know the persisted `job_id`.
+fn assert_lost_job_synthesis_recorded(events: &[ConversationEvent]) {
+    let found = events.iter().any(|e| match &e.payload {
+        EventPayload::JobCompletedRecorded {
+            outcome: JobOutcome::Failed { message },
+            ..
+        } => message == "lost across process restart",
+        _ => false,
+    });
+    assert!(
+        found,
+        "expected `JobCompletedRecorded {{ Failed {{ \"lost across process restart\" }} }}` \
+         in resumed log; got: {:?}",
+        events.iter().map(|e| &e.payload).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn paused_async_job() {
+    let golden = async_run_to_completion().await;
+    let total = golden.events.len() as u64;
+    let (b_submitted, b_paused, b_completed) = async_crash_boundaries(&golden.events);
+    let b_submitted = b_submitted.expect("golden must contain a JobSubmitted event");
+    let b_paused = b_paused.expect("golden must contain a TurnPaused event");
+    let b_completed =
+        b_completed.expect("golden must contain a JobCompletedRecorded event in the golden path");
+    eprintln!(
+        "scenario=paused_async_job golden_events={total} boundaries: \
+         post_JobSubmitted={b_submitted} post_TurnPaused={b_paused} \
+         post_JobCompletedRecorded={b_completed}"
+    );
+
+    // (boundary, expects_lost_job_synthesis) — the synthesis path
+    // legitimately diverges from the golden tool result, so oracle 3
+    // (tool mapping) is relaxed for that boundary and a dedicated
+    // `assert_lost_job_synthesis_recorded` runs instead.
+    let cases: [(u64, bool); 3] = [(b_submitted, false), (b_paused, true), (b_completed, false)];
+
+    for (crash_after_n, expects_synthesis) in cases {
+        let resumed = async_run_with_y_fault(crash_after_n).await;
+        eprintln!(
+            "  async chaos: crash_after_n={crash_after_n} \
+             expects_lost_job_synthesis={expects_synthesis} resumed_len={}",
+            resumed.len()
+        );
+
+        assert_context_managed_pairing(&resumed);
+        assert_prefix_immutable(&golden.events, &resumed, crash_after_n);
+        assert_terminal_equivalent(&golden.terminal, terminal_payload(&resumed));
+        assert_final_text_equivalent(&golden.events, &resumed);
+
+        if expects_synthesis {
+            // Lost-job synthesis produces ToolResult::Error{AsyncFailed}
+            // instead of the golden Output("slept"). Verify the synthesis
+            // actually fired (Task 13's canonical signature) in lieu of
+            // oracle 3.
+            assert_lost_job_synthesis_recorded(&resumed);
+        } else {
+            assert_tool_mapping_equivalent(&golden.events, &resumed);
+        }
+    }
+}
