@@ -68,6 +68,7 @@ A tool MAY change crate when its dependencies change; this is not a layering vio
 - One extra `Box::pin` per async submission. Cost is two pointer writes; orders of magnitude under the cost of the tool's actual work. Acceptable.
 - `cogito-jobs` retains a small amount of "this is a tool, not a JobManager" code (`RunTestsTool`, `SleepTool`). The CLAUDE.md workspace-table description ("JobManager impl") becomes slightly stale; the table is informational and the ADR is canonical.
 - Surface code (CLI, consumer services) must explicitly register every async tool. There is no convenient "give me all builtins" facade. This is a feature: tool inventory becomes an explicit configuration decision.
+- **Future trait extension for subprocess-cancel-orphan fix.** `LocalJobManager::cancel` today aborts the spawned task at its next `.await`, which orphans any OS subprocesses the task spawned (see `TODO(subprocess-cancel-orphan)` in `cogito-jobs/src/{local.rs, run_tests.rs}`). The proper fix — per-job `CancellationToken` signaled before the abort — needs the tool's spawned future to listen on that token. With `submit_boxed` taking just a `BoxFuture`, the natural shape is to widen the signature to a struct (`JobSpec { fut, cancel }`) so the manager can mint and own the token. This is an additive trait extension, not a migration: existing callers add one struct field; `submit_boxed` stays object-safe.
 
 ## Alternatives considered
 

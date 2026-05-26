@@ -26,6 +26,14 @@ pub trait BuiltinTool: Send + Sync {
 ///
 /// Construct via the `builder()` -> `with_tool()` -> `build()` pattern so
 /// the descriptor cache is computed once.
+///
+/// This provider is sync-only by design: [`BuiltinTool::invoke`] returns
+/// [`ToolResult`] rather than [`InvokeOutcome`], so it structurally cannot
+/// express an async dispatch. Async tools — anything that returns
+/// [`InvokeOutcome::Async`], typically tools that submit work to a
+/// [`cogito_protocol::job::LocalJobSubmitter`] — implement
+/// [`ToolProvider`] directly and are composed alongside this provider via
+/// [`crate::CompositeToolProvider`] at the Surface layer. See ADR-0025.
 pub struct BuiltinToolProvider {
     tools: HashMap<String, Arc<dyn BuiltinTool>>,
     descriptors: Vec<ToolDescriptor>,

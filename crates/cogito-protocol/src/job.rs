@@ -5,15 +5,14 @@
 //! in cogito-jobs (only async-tool implementations submit jobs; Brain
 //! only observes via this trait). See spec §6.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc;
 use ulid::Ulid;
-
-use std::sync::Arc;
-
-use futures::future::BoxFuture;
 
 use crate::tool::ToolResult;
 
@@ -168,8 +167,10 @@ pub trait JobManager: Send + Sync {
 /// committing every future backend to it.
 ///
 /// The `BoxFuture` is `'static + Send` — same bounds as
-/// `tokio::spawn`. The single `Box::pin` per submission is negligible
-/// against tool execution cost.
+/// `tokio::spawn`. The cost of `Box::pin` at the submission boundary
+/// is orders of magnitude under the cost of the work the tool
+/// actually does (the dominant async tools spawn subprocesses or
+/// network calls); see ADR-0025 §"Consequences".
 ///
 /// The receiver is `self: Arc<Self>` (an object-safe receiver kind per
 /// the Rust reference) so the implementation can hand a strong
