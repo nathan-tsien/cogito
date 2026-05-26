@@ -46,7 +46,7 @@ use cogito_mock_model::MockModelGateway;
 use cogito_protocol::event::{ConversationEvent, EventPayload};
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::SessionId;
-use cogito_protocol::job::JobManager;
+use cogito_protocol::job::{JobManager, LocalJobSubmitter};
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
@@ -84,7 +84,9 @@ async fn run_tests_against_fixture_crate_succeeds() -> Result<(), Box<dyn std::e
     let store = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
 
     let job_mgr = LocalJobManager::new();
-    let run_tests_tool: Arc<dyn ToolProvider> = Arc::new(RunTestsTool::new(Arc::clone(&job_mgr)));
+    let run_tests_tool: Arc<dyn ToolProvider> = Arc::new(RunTestsTool::new(
+        Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>
+    ));
 
     let mock = Arc::new(MockModelGateway::new());
     mock.script_tool_then_text("run_tests", serde_json::json!({}), "tests passed");
