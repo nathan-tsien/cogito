@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cogito_jobs::LocalJobManager;
+use cogito_jobs::{LocalJobManager, RunTestsTool};
 use cogito_protocol::ExecCtx;
 use cogito_protocol::tool::{
     InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
@@ -39,10 +39,12 @@ pub trait BuiltinTool: Send + Sync {
 pub struct BuiltinToolProvider {
     tools: HashMap<String, Arc<dyn BuiltinTool>>,
     descriptors: Vec<ToolDescriptor>,
-    /// Concrete handle used by async tools to call `submit`. `None`
-    /// when no surface registered async tools; sync tools never need it.
-    #[allow(dead_code)] // Used once async tools land in Task 16.
-    job_mgr: Option<Arc<LocalJobManager>>,
+    /// Async tool wrapping `cargo nextest run`. Constructed in `build()`
+    /// when [`BuiltinToolProviderBuilder::with_jobs`] supplied a
+    /// `LocalJobManager`. When `None`, `run_tests` is not exposed and
+    /// any `invoke("run_tests", ..)` falls through to the sync table
+    /// (which will report "unknown tool").
+    run_tests: Option<Arc<RunTestsTool>>,
 }
 
 impl BuiltinToolProvider {
@@ -90,19 +92,29 @@ impl BuiltinToolProviderBuilder {
     }
 
     /// Finalize the provider, building the descriptor cache.
+    ///
+    /// When `with_jobs` was set, a [`RunTestsTool`] is registered
+    /// implicitly; its descriptor is appended after the sync tools
+    /// supplied via `with_tool`. The provider then dispatches
+    /// `run_tests` invocations directly to the async tool's
+    /// `ToolProvider::invoke`, returning [`InvokeOutcome::Async`].
     #[must_use]
     pub fn build(self) -> BuiltinToolProvider {
         let mut tools = HashMap::with_capacity(self.tools.len());
-        let mut descriptors = Vec::with_capacity(self.tools.len());
+        let mut descriptors = Vec::with_capacity(self.tools.len() + 1);
         for t in self.tools {
             let d = t.descriptor();
             descriptors.push(d.clone());
             tools.insert(d.name.clone(), t);
         }
+        let run_tests = self.job_mgr.map(|mgr| Arc::new(RunTestsTool::new(mgr)));
+        if let Some(rt) = run_tests.as_ref() {
+            descriptors.extend(rt.list());
+        }
         BuiltinToolProvider {
             tools,
             descriptors,
-            job_mgr: self.job_mgr,
+            run_tests,
         }
     }
 }
@@ -114,6 +126,16 @@ impl ToolProvider for BuiltinToolProvider {
     }
 
     async fn invoke(&self, name: &str, args: serde_json::Value, ctx: ExecCtx) -> InvokeOutcome {
+        // Async-tool branch: when the consumer wired a `LocalJobManager`
+        // via `with_jobs`, dispatch `run_tests` to the embedded
+        // `RunTestsTool` so it can return `InvokeOutcome::Async(JobId)`.
+        // Sync `BuiltinTool`s cannot model async outcomes, so this
+        // dispatch is out-of-band rather than going through `self.tools`.
+        if let Some(rt) = &self.run_tests {
+            if rt.list().iter().any(|d| d.name == name) {
+                return rt.invoke(name, args, ctx).await;
+            }
+        }
         match self.tools.get(name) {
             Some(t) => InvokeOutcome::Sync(t.invoke(args, ctx).await),
             None => InvokeOutcome::Sync(ToolResult::Error {

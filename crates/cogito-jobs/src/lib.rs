@@ -9,6 +9,9 @@
 mod local;
 pub use local::LocalJobManager;
 
+mod run_tests;
+pub use run_tests::RunTestsTool;
+
 #[cfg(any(test, feature = "test-tools"))]
 mod sleep_tool;
 #[cfg(any(test, feature = "test-tools"))]
