@@ -522,25 +522,46 @@ async fn on_turn_complete(state: &mut SessionState, turn_id: TurnId, outcome: Tu
             .record_turn_completed(turn_id, TurnOutcome::Completed)
             .await
             .map(|_| ()),
+        // JobSubmitted must precede TurnPaused per H08's
+        // write-before-transition contract. If the cache lookup misses, this
+        // is an internal-invariant violation — fail the turn loudly rather
+        // than store a sentinel `call_id` that would break Task 8's
+        // `TurnEntry::FromToolDispatching` (an empty `tool_use_id` would
+        // silently reach the model on resume). The persisted `TurnFailed`
+        // lets resume-from-log recover cleanly on next restart, where
+        // `harness::resume::lookup_call_id_in_events` walks the full log
+        // and can succeed where the in-memory cache could not.
         TurnOutcome::Paused { job_id } => {
-            // `pause_call_id` was computed above; unwrap-via-match is safe
-            // because the outer match guarantees the Some-branch here.
-            let call_id = pause_call_id.flatten().unwrap_or_else(|| {
+            if let Some(call_id) = pause_call_id.flatten() {
+                state.in_flight = Some(InFlight::PausedOnJob {
+                    turn_id,
+                    job_id,
+                    call_id,
+                });
+                rec.record_turn_paused(turn_id, job_id).await.map(|_| ())
+            } else {
                 tracing::error!(
                     session_id = %state.session_id,
                     %turn_id,
                     %job_id,
                     "TurnPaused without a preceding JobSubmitted in recorder cache; \
-                     resuming will need to recover call_id from the persisted log"
+                     fatal: missing JobSubmitted; failing turn"
                 );
-                String::new()
-            });
-            state.in_flight = Some(InFlight::PausedOnJob {
-                turn_id,
-                job_id,
-                call_id,
-            });
-            rec.record_turn_paused(turn_id, job_id).await.map(|_| ())
+                // Leave in_flight = None (already cleared above): the turn
+                // is over from the actor's perspective. Resume-from-log
+                // on the next session restart will re-derive the correct
+                // state from the persisted event sequence.
+                rec.record_turn_failed(
+                    turn_id,
+                    TurnFailureReason::TurnPanicked {
+                        location:
+                            "session_loop::on_turn_complete: TurnPaused without preceding JobSubmitted"
+                                .into(),
+                    },
+                )
+                .await
+                .map(|_| ())
+            }
         }
         TurnOutcome::Cancelled => rec
             .record_turn_failed(turn_id, TurnFailureReason::TurnTimedOut)
