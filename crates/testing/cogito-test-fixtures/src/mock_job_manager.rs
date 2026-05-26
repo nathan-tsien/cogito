@@ -16,8 +16,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cogito_protocol::job::{
-    JobCompletionEvent, JobError, JobId, JobManager, JobOutcome, JobStatus,
+    JobCompletionEvent, JobError, JobId, JobManager, JobOutcome, JobStatus, LocalJobSubmitter,
 };
+use futures::future::BoxFuture;
 use tokio::sync::{Mutex, mpsc};
 
 /// Mock implementation of [`JobManager`] for tests.
@@ -160,6 +161,27 @@ impl JobManager for MockJobManager {
             job.on_complete_sink = Some(sink);
         }
         Ok(())
+    }
+}
+
+#[async_trait]
+impl LocalJobSubmitter for MockJobManager {
+    async fn submit_boxed(self: Arc<Self>, fut: BoxFuture<'static, JobOutcome>) -> JobId {
+        // Spawn-and-complete shim: MockJobManager is normally driven from
+        // test code via `register` + `complete`, but tools that hold
+        // `Arc<dyn LocalJobSubmitter>` call `submit_boxed`. We honor it
+        // by registering a new job, spawning the future, and calling
+        // `complete` ourselves when it resolves. Tests retain the
+        // explicit `register` / `complete` API for cases that need
+        // fine-grained timing control.
+        let job_id = JobId::default();
+        self.register(job_id).await;
+        let mgr = Arc::clone(&self);
+        tokio::spawn(async move {
+            let outcome = fut.await;
+            mgr.complete(job_id, outcome).await;
+        });
+        job_id
     }
 }
 
