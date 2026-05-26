@@ -60,13 +60,18 @@ pub enum ResumePoint {
     },
 
     /// Turn paused on an async job. TurnPaused is the latest event and has no
-    /// following JobCompletedRecorded. Actor re-registers on_complete.
+    /// following JobCompletedRecorded. Actor re-registers `on_complete`.
+    /// Wired in Sprint 8; the lost-job synthesis path covers
+    /// `JobError::UnknownJob` returns from the in-memory `LocalJobManager`
+    /// after a Runtime restart (a Failed completion is synthesized so the
+    /// turn can drain instead of pausing forever).
     ResumePausedJob { turn_id: TurnId, job_id: JobId },
 
     /// Async job completed but Brain crashed before consuming
     /// JobCompletedRecorded. FSM enters ToolDispatching with the result
-    /// injected. call_id is resolved by walk-back (Sprint 3 invariant:
-    /// ≤1 async dispatch per turn; Sprint 5 may revise).
+    /// injected. `call_id` is read directly from the preceding
+    /// `JobSubmitted` event (added in Sprint 8); the legacy walk-back
+    /// over unmatched `ToolUseRecorded` was removed.
     ResumeAfterJobCompletion {
         turn_id: TurnId,
         job_id: JobId,
@@ -160,10 +165,12 @@ the actor after each tool returns, all of which appear after `latest_mcc`):
   ContentBlock::Text` and `ToolUseRecorded → ContentBlock::ToolUse` in seq
   order into `Vec<ContentBlock>`; attach `stop_reason` and `usage` from
   `latest_mcc`.
-- **`ResumeAfterJobCompletion.call_id`**: walk back before `TurnPaused` and
-  find the most recent unmatched `ToolUseRecorded` call_id. Sprint 3
-  invariant: ≤1 async dispatch per turn. Sprint 5 may add `call_id` directly
-  to the `TurnPaused` payload when multi-async-dispatch is introduced.
+- **`ResumeAfterJobCompletion.call_id`**: read directly from the
+  `JobSubmitted { call_id, job_id, tool_name }` event written by H08
+  immediately before `TurnPaused` (Sprint 8). The legacy Sprint 3
+  walk-back over unmatched `ToolUseRecorded` was removed once
+  `JobSubmitted` became authoritative; this also lifts the prior
+  "≤1 async dispatch per turn" narrowing on the resume path.
 
 ### Error cases
 
@@ -277,11 +284,12 @@ block Sprint 3 but remain visible):
   scan of all events. The algorithm only needs events from the most recent
   `TurnStarted` onward, but Sprint 3 does not optimize this. Incremental
   reads are deferred to a v0.6 hardening ADR.
-- **`TurnPaused` missing `call_id` payload** (risk 6): Sprint 3's walk-back
-  algorithm for resolving `call_id` in `ResumeAfterJobCompletion` depends on
-  the Sprint 3 invariant of ≤1 async dispatch per turn. When Sprint 5
-  introduces multi-async-dispatch, `TurnPaused` will need an explicit
-  `call_id` field; the walk-back approach will no longer be correct.
+- ~~**`TurnPaused` missing `call_id` payload** (risk 6)~~: resolved in
+  Sprint 8 by recording `JobSubmitted { call_id, job_id, tool_name }`
+  immediately before `TurnPaused`. H03 now reads `call_id` directly
+  from `JobSubmitted` rather than walking back over unmatched
+  `ToolUseRecorded`. See
+  `docs/superpowers/specs/2026-05-24-sprint-8-async-jobs-design.md`.
 
 ## Testing strategy
 
@@ -379,3 +387,7 @@ for future v0.6 fuzz / property tests.
 - `docs/superpowers/specs/2026-05-20-sprint-3-resume-coordinator-design.md`
   (decision rationale for §4 types, §5 actor recovery path, §6 persistence
   semantics, §8 chaos test design, §9 risks)
+- `docs/superpowers/specs/2026-05-24-sprint-8-async-jobs-design.md`
+  (Sprint 8 activation of `ResumePausedJob` / `ResumeAfterJobCompletion`;
+  `JobSubmitted` event; lost-job synthesis path; `paused_async_job` chaos
+  scenario)

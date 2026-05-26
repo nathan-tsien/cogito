@@ -6,13 +6,13 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 + 6 + 7 complete; Sprint 4
-> (MCP sync tools) in flight; Sprints 8–10 reshaped per
+> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 + 6 + 7 + 8 complete;
+> Sprint 4 (MCP sync tools) in flight; Sprints 9–10 reshaped per
 > [2026-05-22 roadmap rebalance](docs/superpowers/specs/2026-05-22-roadmap-rebalance-design.md)
 > (Hook impl + Context C2 trait freeze + Skill loader promoted into
 > v0.1; Async Jobs / Multi-model / TUI / hardening renumbered;
 > Storage+Multimodal deferred from v0.2 to v0.5).
-> **Current sprint: Sprint 8 (Async Jobs).**
+> **Current sprint: Sprint 9 (Multi-model Strategy + TUI).**
 
 ## Version plan
 
@@ -180,12 +180,15 @@ required.
 **Renumbered from old Sprint 5** by 2026-05-22 rebalance. Required by
 v0.3 Subagent S1 `wait_agent` semantics and v0.4 multi-replica resume.
 
-- [ ] `cogito-jobs` implements `JobManager` (tokio task + JSONL job log persistence)
-- [ ] `cogito-jobs` provides cross-process job state persistence (mirrors event log structure; required by Sprint 3 ResumePausedJob path — see Sprint 3 spec §5.6)
-- [ ] H08 Tool Dispatcher async path (handles `InvokeOutcome::Async(JobId)`)
-- [ ] One real long task tool (`run_tests` or similar)
-- [ ] Loop pauses on async, resumes on completion
-- [ ] Mid-pause user input handling: queued, processed after current turn
+- [x] `cogito-jobs` implements `JobManager` (in-memory; jobs run as `tokio::task`s with `on_complete` sink registration)
+- [x] Process-bounded jobs; conversation event log is the sole persistence; resume coordinator synthesizes `JobOutcome::Failed` for any open job whose process was lost. See `docs/superpowers/specs/2026-05-24-sprint-8-async-jobs-design.md`.
+- [x] H08 Tool Dispatcher async path (handles `InvokeOutcome::Async(JobId)`)
+- [x] One real long task tool (`RunTestsTool` wrapping `cargo nextest run`)
+- [x] Loop pauses on async, resumes on completion
+- [x] Mid-pause user input handling: single-slot queue (latest-wins, warn on overwrite); processed after current turn drains
+- [x] `EventPayload::JobSubmitted { call_id, job_id, tool_name }` additive variant (no `SCHEMA_VERSION` bump); H03 reads `call_id` directly instead of walk-back
+- [x] Fix cancel-token-disconnect: `SessionShared` and `SessionState` share `Arc<parking_lot::Mutex<CancellationToken>>` so `cancel_turn` works on every turn (closes Sprint 3 latent narrowing)
+- [x] Resume-chaos: new `paused_async_job` scenario with three crash boundaries
 
 #### Sprint 9 · Multi-model Strategy + TUI (2 days)
 
