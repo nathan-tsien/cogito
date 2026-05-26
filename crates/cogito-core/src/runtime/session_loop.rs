@@ -116,6 +116,12 @@ pub(super) struct SessionState {
     /// cloned into every turn's `TurnDeps`. `None` for sessions that do not
     /// use the Skill injector.
     pub(super) skills: Option<Arc<dyn SkillProvider>>,
+    /// Single-slot queue for user input received while a turn is in
+    /// flight or paused. Latest-wins: a second arrival overwrites the
+    /// first and logs a `tracing::warn!`. Drained in `on_turn_complete`
+    /// once the turn is fully terminal (not on `Paused`, which leaves
+    /// `in_flight = Some(PausedOnJob)`).
+    pub(super) pending_user_input: Option<TurnTrigger>,
 }
 
 /// External dependencies injected at spawn time.
@@ -130,6 +136,15 @@ impl SessionState {
     /// True iff a `TurnDriver` task is currently executing.
     pub(super) fn has_active_turn(&self) -> bool {
         matches!(self.in_flight, Some(InFlight::Active { .. }))
+    }
+
+    /// True iff the session is parked waiting on a background job — i.e. a
+    /// turn returned `TurnOutcome::Paused` and `on_turn_complete` left
+    /// `in_flight = Some(InFlight::PausedOnJob { .. })`. The actor cannot
+    /// start a new turn in this state because the paused turn must drain
+    /// first via `JobCompleted`.
+    pub(super) fn is_paused(&self) -> bool {
+        matches!(self.in_flight, Some(InFlight::PausedOnJob { .. }))
     }
 }
 
@@ -209,7 +224,7 @@ pub(super) async fn run_session(
 
             // Arm 1: turn completion (highest priority).
             Some((turn_id, outcome)) = state.turn_result_rx.recv() => {
-                on_turn_complete(&mut state, turn_id, outcome).await;
+                on_turn_complete(&mut state, turn_id, outcome, &deps).await;
             }
 
             // Arm 2: caller commands.
@@ -389,7 +404,23 @@ async fn handle_command(
     let _ = mailbox_tx; // reserved for future enqueue-follow-up commands
     match cmd {
         SessionCommand::Trigger(trigger) => {
-            try_start_turn(state, trigger, deps).await;
+            // Single-slot mid-pause queue (spec §8.4): if a turn is either
+            // running or paused on a job, hold the new trigger in the slot
+            // rather than starting a turn. A second arrival overwrites the
+            // first (latest-wins) and logs a warn so operators can detect
+            // dropped input. Drained in `on_turn_complete` when the turn
+            // outcome is terminal.
+            if state.has_active_turn() || state.is_paused() {
+                if state.pending_user_input.is_some() {
+                    tracing::warn!(
+                        session_id = %state.session_id,
+                        "overwriting queued user input (single-slot semantics)"
+                    );
+                }
+                state.pending_user_input = Some(trigger);
+            } else {
+                try_start_turn(state, trigger, deps).await;
+            }
             None
         }
         SessionCommand::JobCompleted { event } => {
@@ -467,7 +498,7 @@ async fn handle_command(
             None
         }
         SessionCommand::Shutdown { deadline, ack } => {
-            let outcome = drain_shutdown(state, deadline).await;
+            let outcome = drain_shutdown(state, deadline, deps).await;
             let _ = ack.send(outcome);
             // Caller-requested shutdown is always a "clean" actor exit from
             // the spawn site's perspective; the detailed `ShutdownOutcome`
@@ -581,7 +612,19 @@ async fn try_start_turn(state: &mut SessionState, trigger: TurnTrigger, deps: &S
 }
 
 /// Record the terminal event after a turn finishes.
-async fn on_turn_complete(state: &mut SessionState, turn_id: TurnId, outcome: TurnOutcome) {
+///
+/// `deps` is threaded in so the pending-user-input single-slot queue can
+/// be drained via `try_start_turn` once the turn is fully terminal. Drain
+/// only fires when `state.in_flight == None` after outcome processing: the
+/// `Paused` arm sets `in_flight = Some(PausedOnJob)` and therefore correctly
+/// keeps the queued input parked until `JobCompleted` resumes (and later
+/// terminates) the turn.
+async fn on_turn_complete(
+    state: &mut SessionState,
+    turn_id: TurnId,
+    outcome: TurnOutcome,
+    deps: &SessionDeps,
+) {
     // For the Paused outcome, resolve the `call_id` from the recorder cache
     // BEFORE acquiring the recorder lock below — `lookup_call_id_in_recorder`
     // takes the same `tokio::sync::Mutex` and we must not double-lock.
@@ -676,6 +719,24 @@ async fn on_turn_complete(state: &mut SessionState, turn_id: TurnId, outcome: Tu
             "failed to record terminal turn event"
         );
     }
+
+    // Release the recorder lock before re-entering `try_start_turn`, which
+    // re-acquires it to record `TurnStarted`. Without this scope guard the
+    // drain would deadlock on the same `tokio::sync::Mutex`.
+    drop(rec);
+
+    // Drain the single-slot queue if a user message arrived mid-turn — but
+    // ONLY when the outcome was fully terminal. A `Paused` outcome leaves
+    // `in_flight = Some(PausedOnJob)` and `is_paused()` will be true; the
+    // queued trigger stays parked until `JobCompleted` resumes the turn and
+    // the next `on_turn_complete` runs with a terminal outcome. Likewise,
+    // the `JobSubmitted`-missing failure path clears `in_flight = None`
+    // above, so the drain correctly fires and the user is not stranded.
+    if state.in_flight.is_none()
+        && let Some(pending) = state.pending_user_input.take()
+    {
+        try_start_turn(state, pending, deps).await;
+    }
 }
 
 /// Live-path counterpart to [`crate::harness::resume::lookup_call_id_in_events`].
@@ -704,7 +765,11 @@ async fn lookup_call_id_in_recorder(
 }
 
 /// Cancel the running turn and wait (up to `deadline`) for it to finish.
-async fn drain_shutdown(state: &mut SessionState, deadline: Duration) -> ShutdownOutcome {
+async fn drain_shutdown(
+    state: &mut SessionState,
+    deadline: Duration,
+    deps: &SessionDeps,
+) -> ShutdownOutcome {
     let started = Instant::now();
     // Signal the TurnDriver to stop cooperatively.
     state.current_cancel_token.lock().cancel();
@@ -715,7 +780,7 @@ async fn drain_shutdown(state: &mut SessionState, deadline: Duration) -> Shutdow
         let remaining = deadline.saturating_sub(started.elapsed());
         match tokio::time::timeout(remaining, state.turn_result_rx.recv()).await {
             Ok(Some((turn_id, outcome))) => {
-                on_turn_complete(state, turn_id, outcome).await;
+                on_turn_complete(state, turn_id, outcome, deps).await;
             }
             Ok(None) | Err(_) => {
                 // Channel closed or timeout — stop waiting.

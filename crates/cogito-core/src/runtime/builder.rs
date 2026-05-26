@@ -189,6 +189,7 @@ impl Runtime {
             metrics,
             context_pipeline,
             skills: self.skills.clone(),
+            pending_user_input: None,
         };
 
         let deps = SessionDeps {
