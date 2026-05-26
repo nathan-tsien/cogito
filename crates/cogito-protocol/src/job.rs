@@ -11,6 +11,10 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use ulid::Ulid;
 
+use std::sync::Arc;
+
+use futures::future::BoxFuture;
+
 use crate::tool::ToolResult;
 
 /// Opaque job identifier. Currently a Ulid so order corresponds to
@@ -148,4 +152,37 @@ pub trait JobManager: Send + Sync {
         job_id: JobId,
         sink: mpsc::Sender<JobCompletionEvent>,
     ) -> Result<(), JobError>;
+}
+
+/// Local-only submission contract. Extends [`JobManager`] with a
+/// dyn-compatible submission API so async-tool implementations can take
+/// `Arc<dyn LocalJobSubmitter>` rather than a concrete manager type.
+///
+/// Why a separate trait: `JobManager` deliberately exposes only the
+/// observation methods Brain cares about (status / result / cancel /
+/// `on_complete`). Submission is a Hands-side concern, and v0.4
+/// distributed backends will use a different submission shape
+/// (`RemoteJobSubmitter { submit(JobSpec) }`) whose payload is
+/// serializable. Splitting submission out of `JobManager` lets
+/// `LocalJobSubmitter` accept `BoxFuture<'static, JobOutcome>` without
+/// committing every future backend to it.
+///
+/// The `BoxFuture` is `'static + Send` — same bounds as
+/// `tokio::spawn`. The single `Box::pin` per submission is negligible
+/// against tool execution cost.
+///
+/// The receiver is `self: Arc<Self>` (an object-safe receiver kind per
+/// the Rust reference) so the implementation can hand a strong
+/// reference to the spawned task without needing a `Weak<Self>`
+/// back-ref or `unsafe`. Callers invoke as
+/// `self.job_mgr.clone().submit_boxed(fut).await`.
+///
+/// See ADR-0025 §"Decision" item 2.
+#[async_trait]
+pub trait LocalJobSubmitter: JobManager {
+    /// Submit a boxed future as an async job. Returns the new `JobId`;
+    /// the future is driven on the ambient Tokio runtime. When it
+    /// resolves, the manager records the outcome and fires any
+    /// registered `on_complete` sink.
+    async fn submit_boxed(self: Arc<Self>, fut: BoxFuture<'static, JobOutcome>) -> JobId;
 }
