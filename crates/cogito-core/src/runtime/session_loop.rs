@@ -92,6 +92,12 @@ pub(super) struct SessionState {
     pub(super) current_cancel_token: Arc<parking_lot::Mutex<CancellationToken>>,
     /// Receives job-completion notifications from a `JobManager` (Sprint 4).
     pub(super) job_completion_rx: mpsc::Receiver<JobCompletionEvent>,
+    /// Sender half of the job-completion channel, cloned into every
+    /// per-turn `TurnDeps` so H08's async dispatcher (Task 12) can register
+    /// it as the `on_complete` sink against `JobManager`. Retained on the
+    /// session so the channel stays open across turns even when no
+    /// `TurnDeps` is alive.
+    pub(super) job_completion_tx: mpsc::Sender<JobCompletionEvent>,
     /// Receives `(TurnId, TurnOutcome)` from the spawned `TurnDriver` task.
     pub(super) turn_result_rx: mpsc::Receiver<(TurnId, TurnOutcome)>,
     /// Sender half kept alive so the channel stays open even between turns.
@@ -376,6 +382,8 @@ fn spawn_turn_driver(
         metrics: Arc::clone(&state.metrics),
         context_pipeline,
         skills: state.skills.clone(),
+        job_mgr: Arc::clone(&deps.job_mgr),
+        job_completion_tx: state.job_completion_tx.clone(),
     };
     let result_tx = state.turn_result_tx.clone();
     tokio::spawn(async move {

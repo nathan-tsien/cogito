@@ -187,6 +187,12 @@ impl Runtime {
             in_flight: None,
             current_cancel_token: Arc::clone(&cancel),
             job_completion_rx: job_rx,
+            // Keep a clone of the sender on the actor state so every
+            // per-turn `TurnDeps` (built in `spawn_turn_driver`) can hand
+            // it to `JobManager::on_complete`. The `SessionShared` clone
+            // (below) is the path used by `SessionHandle::submit` / the
+            // legacy external path; both halves point at the same channel.
+            job_completion_tx: job_tx.clone(),
             turn_result_rx,
             turn_result_tx,
             broadcast_tx: broadcast_tx.clone(),
