@@ -24,13 +24,10 @@
 //!   the broadcast stream within ~2 s of the cancel (Task 17 budget is
 //!   ~1 s; we keep a 2 s ceiling for scheduler jitter on CI).
 //! - The persisted log contains `JobCompletedRecorded { outcome:
-//!   Cancelled }`. The `session_loop`'s `JobCompleted` handler translates
-//!   this into a `ToolResult::Error { kind: Cancelled }` for the
-//!   resumed turn via `outcome_to_tool_result` — we verify the
-//!   `JobCompletedRecorded.outcome` here since the current production
-//!   code does NOT write a separate `ToolResultRecorded` event on the
-//!   async-resume path (see `sleep_then_complete` module docs for the
-//!   Task 17 concern).
+//!   Cancelled }` followed by `ToolResultRecorded { result: Error{kind:
+//!   Cancelled} }` (the §5.1 ordering invariant; the
+//!   `outcome_to_tool_result` translation runs in
+//!   `session_loop::handle_command(JobCompleted)`).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -52,6 +49,7 @@ use cogito_store_jsonl::JsonlStore;
 use futures::StreamExt as _;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(clippy::too_many_lines)]
 async fn cancel_while_paused_unwinds_to_tool_error_cancelled()
 -> Result<(), Box<dyn std::error::Error>> {
     let tmp = tempfile::tempdir()?;
@@ -147,16 +145,35 @@ async fn cancel_while_paused_unwinds_to_tool_error_cancelled()
         out
     };
 
-    let outcome = log
+    let jcr_idx = log
         .iter()
-        .find_map(|e| match &e.payload {
-            EventPayload::JobCompletedRecorded { outcome, .. } => Some(outcome.clone()),
-            _ => None,
+        .position(|e| match &e.payload {
+            EventPayload::JobCompletedRecorded { outcome, .. } => {
+                matches!(outcome, JobOutcome::Cancelled)
+            }
+            _ => false,
         })
-        .expect("JobCompletedRecorded missing from persisted log");
+        .expect("JobCompletedRecorded { outcome: Cancelled } missing from persisted log");
+
+    let trr_idx = log
+        .iter()
+        .position(|e| {
+            matches!(
+                &e.payload,
+                EventPayload::ToolResultRecorded {
+                    result: cogito_protocol::tool::ToolResult::Error {
+                        kind: cogito_protocol::tool::ToolErrorKind::Cancelled,
+                        ..
+                    },
+                    ..
+                }
+            )
+        })
+        .expect("ToolResultRecorded { Error{kind: Cancelled} } missing from persisted log");
+
     assert!(
-        matches!(outcome, JobOutcome::Cancelled),
-        "expected JobOutcome::Cancelled, got {outcome:?}"
+        jcr_idx < trr_idx,
+        "spec §5.1 violation: JobCompletedRecorded ({jcr_idx}) must precede ToolResultRecorded ({trr_idx})"
     );
 
     // Both scripted model replies must have been consumed. Turn 1
