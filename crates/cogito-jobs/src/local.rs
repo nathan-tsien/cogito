@@ -10,8 +10,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cogito_protocol::job::{
-    JobCompletionEvent, JobError, JobId, JobManager, JobOutcome, JobStatus,
+    JobCompletionEvent, JobError, JobId, JobManager, JobOutcome, JobStatus, LocalJobSubmitter,
 };
+use futures::future::BoxFuture;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
@@ -54,16 +55,39 @@ impl LocalJobManager {
     ///
     /// Not part of the `JobManager` trait: only async tool implementations
     /// submit jobs, and they hold an `Arc<LocalJobManager>` directly.
+    /// Typed wrapper over [`Self::submit_internal`] — the boxed-future form
+    /// is what the `LocalJobSubmitter` trait dispatches through, but
+    /// in-crate callers (and the contract test) prefer the generic form
+    /// to avoid the explicit `Box::pin` at every call site.
     pub fn submit<F>(self: &Arc<Self>, fut: F) -> JobId
     where
         F: Future<Output = JobOutcome> + Send + 'static,
     {
+        self.submit_internal(Box::pin(fut))
+    }
+
+    /// Shared submission body backing both [`Self::submit`] and the
+    /// [`LocalJobSubmitter::submit_boxed`] trait impl.
+    ///
+    /// Insert the lifecycle entry before spawning so that any caller
+    /// observing `status` immediately after `submit` sees `Running`
+    /// even if the spawned task has not been polled yet. The abort
+    /// handle is patched in once we have it.
+    ///
+    /// Race note: between the insert below and the abort-handle patch
+    /// at the end, a racing `cancel(job_id)` could observe
+    /// `abort_handle: None` and skip the `abort()` call. In that case
+    /// the spawned task runs to its first `await` and then attempts
+    /// `complete_internal`, which observes the already-`Cancelled`
+    /// status and bails (see `complete_internal`'s idempotency check).
+    /// The user-visible behavior is identical: cancel flips status to
+    /// `Cancelled` and fires the sink with `Cancelled`, and the spawned
+    /// future's eventual outcome is discarded. The only cost is a few
+    /// extra microseconds of wall-clock work on the about-to-be-orphaned
+    /// task, which is acceptable.
+    fn submit_internal(self: &Arc<Self>, fut: BoxFuture<'static, JobOutcome>) -> JobId {
         let job_id = JobId::default();
         let this = Arc::clone(self);
-        // Insert the lifecycle entry before spawning so that any caller
-        // observing `status` immediately after `submit` sees `Running`
-        // even if the spawned task has not been polled yet. The abort
-        // handle is patched in once we have it.
         self.jobs.lock().insert(
             job_id,
             JobLifecycle {
@@ -77,16 +101,6 @@ impl LocalJobManager {
             let outcome = fut.await;
             this.complete_internal(job_id, outcome).await;
         });
-        // Race note: between the insert above and this patch, a racing
-        // cancel(job_id) could observe `abort_handle: None` and skip the
-        // `abort()` call. In that case the spawned task runs to its first
-        // `await` and then attempts `complete_internal`, which observes the
-        // already-`Cancelled` status and bails (see `complete_internal`'s
-        // idempotency check). The user-visible behavior is identical: cancel
-        // flips status to `Cancelled` and fires the sink with `Cancelled`,
-        // and the spawned future's eventual outcome is discarded. The only
-        // cost is a few extra microseconds of wall-clock work on the
-        // about-to-be-orphaned task, which is acceptable.
         if let Some(entry) = self.jobs.lock().get_mut(&job_id) {
             entry.abort_handle = Some(handle.abort_handle());
         }
@@ -235,5 +249,18 @@ impl JobManager for LocalJobManager {
             let _ = sink.send(JobCompletionEvent { job_id, outcome }).await;
         }
         Ok(())
+    }
+}
+
+#[async_trait]
+impl LocalJobSubmitter for LocalJobManager {
+    async fn submit_boxed(self: Arc<Self>, fut: BoxFuture<'static, JobOutcome>) -> JobId {
+        // `self: Arc<Self>` gives us the strong reference directly — no
+        // Weak<Self> back-ref, no unsafe. We just delegate to the shared
+        // internal helper that also backs the typed `submit<F>` method.
+        // The typed `submit<F>` callers pass `&Arc<Self>` and the helper
+        // internally `Arc::clone`s; here we already own the Arc, so we
+        // can pass `&self` directly.
+        Self::submit_internal(&self, fut)
     }
 }

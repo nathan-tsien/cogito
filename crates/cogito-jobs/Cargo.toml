@@ -15,6 +15,7 @@ test-tools = []
 cogito-protocol.workspace = true
 
 async-trait.workspace = true
+futures.workspace = true
 parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -30,7 +31,6 @@ cogito-protocol = { workspace = true, features = ["test-support"] }
 cogito-store-jsonl.workspace = true
 cogito-test-fixtures.workspace = true
 cogito-tools.workspace = true
-futures = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util", "process"] }
