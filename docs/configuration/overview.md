@@ -380,9 +380,18 @@ adding them later is an additive serde change, not a breaking one.
               ▼                ▼                ▼
        ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
        │  cogito-cli  │ │ cogito-tui   │ │ consumer's Server│
-       │  (v0.1)      │ │ (v0.2)       │ │ (v0.4+, external)│
+       │  (v0.1)      │ │ (v0.1)       │ │ (v0.4+, external)│
        └──────────────┘ └──────────────┘ └──────────────────┘
 ```
+
+Surface consumers of `RuntimeConfig` + `FsStrategyRegistry`:
+
+- `cogito-cli` — primary CLI surface; owns `build_runtime_config_and_registry`
+  and the legacy ENV bridge.
+- `cogito-tui` — second Surface consumer of `RuntimeConfig` +
+  `FsStrategyRegistry`. Uses the same `build_runtime_config_and_registry`
+  helper as the CLI; `--strategy` / `--list-strategies` flags identical.
+  See `docs/components/cogito-tui.md`.
 
 Key constraints (per ADR-0004 / ADR-0017 §5):
 
