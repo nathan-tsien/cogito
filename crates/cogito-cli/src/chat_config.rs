@@ -62,6 +62,7 @@ fn cli_inputs_to_partial(inputs: &ChatConfigInputs) -> RuntimeConfigPartial {
             session_root: inputs.session_root.clone(),
             default_provider: inputs.provider.clone(),
             default_model: inputs.model.clone(),
+            default_strategy: None,
             strategies_dir: None,
         }),
         providers: None,

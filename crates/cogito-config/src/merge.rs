@@ -47,6 +47,9 @@ fn merge_runtime(
     if next.default_model.is_some() {
         acc.default_model = next.default_model;
     }
+    if next.default_strategy.is_some() {
+        acc.default_strategy = next.default_strategy;
+    }
     if next.strategies_dir.is_some() {
         acc.strategies_dir = next.strategies_dir;
     }
@@ -93,6 +96,7 @@ impl RuntimeConfigPartial {
                     .unwrap_or_else(|| PathBuf::from("./sessions")),
                 default_provider,
                 default_model: rt.default_model,
+                default_strategy: rt.default_strategy,
                 strategies_dir: rt
                     .strategies_dir
                     .unwrap_or_else(|| PathBuf::from("./strategies")),
