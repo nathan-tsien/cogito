@@ -144,6 +144,57 @@ pub async fn load_initial_state(
     Ok(InitialState::Replayed { stream_events })
 }
 
+// -- Lazy tool-result lookup (spec §5.3 α.1) ----------------------------
+
+/// Walk a `ConversationEvent` log and find the result text for one
+/// `call_id`. Returns the first `EventPayload::ToolResultRecorded`
+/// whose `call_id` matches, rendered as a single string.
+///
+/// For `ToolResult::Output(values)` the JSON string values are joined
+/// with `\n`; non-string values are JSON-encoded so the user sees
+/// something. `ToolResult::Error { message, .. }` returns the message.
+/// Returns `Some("<no text content>")` for empty content, and `None`
+/// when no matching event is found.
+#[must_use]
+pub fn extract_tool_result(events: &[ConversationEvent], call_id: &str) -> Option<String> {
+    for ev in events {
+        if let EventPayload::ToolResultRecorded {
+            call_id: cid,
+            result,
+        } = &ev.payload
+            && cid == call_id
+        {
+            let text = render_tool_result(result);
+            if text.is_empty() {
+                return Some("<no text content>".into());
+            }
+            return Some(text);
+        }
+    }
+    None
+}
+
+/// Render a `ToolResult` as a single human-readable string for the
+/// tool-tree preview pane. v0.1 `Output` carries `Vec<serde_json::Value>`;
+/// string values are emitted as-is, non-string values are JSON-encoded.
+///
+/// `ToolResult` is `#[non_exhaustive]`, so a wildcard arm guards against
+/// future variants (e.g. a v0.2 `Streaming` classification).
+fn render_tool_result(result: &cogito_protocol::ToolResult) -> String {
+    match result {
+        cogito_protocol::ToolResult::Output(values) => values
+            .iter()
+            .map(|v| match v {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        cogito_protocol::ToolResult::Error { message, .. } => message.clone(),
+        _ => String::new(),
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
@@ -247,6 +298,60 @@ mod tests {
         assert!(
             s.last()
                 .is_some_and(|e| matches!(e, StreamEvent::TurnCompleted))
+        );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
+mod extract_tests {
+    use super::*;
+    use cogito_protocol::{
+        SCHEMA_VERSION,
+        ids::{EventId, SessionId},
+        tool::ToolResult,
+    };
+
+    fn ev(payload: EventPayload) -> ConversationEvent {
+        ConversationEvent {
+            schema_version: SCHEMA_VERSION,
+            event_id: EventId::new(),
+            session_id: SessionId::new(),
+            turn_id: None,
+            seq: 0,
+            ts: chrono::Utc::now(),
+            payload,
+        }
+    }
+
+    #[test]
+    fn extract_returns_text_content() {
+        let log = vec![ev(EventPayload::ToolResultRecorded {
+            call_id: "c1".into(),
+            result: ToolResult::text("file contents"),
+        })];
+        let r = extract_tool_result(&log, "c1");
+        assert_eq!(r, Some("file contents".into()));
+    }
+
+    #[test]
+    fn extract_returns_none_when_call_id_not_found() {
+        let log = vec![ev(EventPayload::ToolResultRecorded {
+            call_id: "c1".into(),
+            result: ToolResult::text("anything"),
+        })];
+        assert_eq!(extract_tool_result(&log, "c-other"), None);
+    }
+
+    #[test]
+    fn extract_empty_content_returns_placeholder() {
+        let log = vec![ev(EventPayload::ToolResultRecorded {
+            call_id: "c1".into(),
+            result: ToolResult::Output(vec![]),
+        })];
+        assert_eq!(
+            extract_tool_result(&log, "c1"),
+            Some("<no text content>".into())
         );
     }
 }

@@ -7,11 +7,14 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cogito_protocol::ConversationStore;
+use cogito_protocol::ids::SessionId;
 use cogito_protocol::stream::StreamEvent;
+use futures::StreamExt as _;
 
 use crate::render_model::{ChatModel, ToolTreeModel, TreePath};
 use crate::ui::input::InputWidget;
@@ -128,6 +131,71 @@ impl App {
             _ => None,
         };
     }
+
+    /// Populate the result preview for one tool node by re-reading the
+    /// session store. Idempotent — does nothing if the node is still
+    /// running or already has a preview. Called by the event loop in
+    /// response to `Action::ExpandNode { now_expanded: true }`.
+    ///
+    /// JSONL backend reads from a local file (sub-ms for typical
+    /// sessions), so blocking the UI for the duration of the call is
+    /// acceptable. On store error a `[warning]` notice is pushed and
+    /// the preview stays empty (the expanded panel renders the
+    /// "(loading result...)" placeholder).
+    pub async fn populate_result_preview(&mut self, path: crate::render_model::TreePath) {
+        let needs_lookup = self
+            .tools
+            .turns
+            .get(path.0)
+            .and_then(|g| g.nodes.get(path.1))
+            .is_some_and(|n| n.status.is_finished() && n.result_preview.is_none());
+        if !needs_lookup {
+            return;
+        }
+        let call_id = match self
+            .tools
+            .turns
+            .get(path.0)
+            .and_then(|g| g.nodes.get(path.1))
+        {
+            Some(n) => n.call_id.clone(),
+            None => return,
+        };
+        // SessionHandle does not expose its `session_id` publicly; parse
+        // the canonical ULID string we already keep on the App for the
+        // status bar. This is the same value the runtime built from on
+        // session open, so a parse failure here means programmer error.
+        let session_id = match SessionId::from_str(&self.session_id_str) {
+            Ok(id) => id,
+            Err(err) => {
+                self.chat
+                    .push_notice(format!("[warning] invalid session id: {err}"));
+                return;
+            }
+        };
+        // Collect the replay stream into a Vec. JSONL replay is local
+        // file IO; bounded by the on-disk log size.
+        let events: Vec<cogito_protocol::ConversationEvent> = match self
+            .store
+            .replay(session_id, 0)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<std::result::Result<Vec<_>, _>>()
+        {
+            Ok(e) => e,
+            Err(err) => {
+                self.chat
+                    .push_notice(format!("[warning] could not read session: {err}"));
+                return;
+            }
+        };
+        if let Some(preview) = crate::resume::extract_tool_result(&events, &call_id)
+            && let Some(node) = self.tools.find_node_mut(&call_id)
+        {
+            node.result_preview = Some(preview);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -225,5 +293,22 @@ pub(crate) mod tests {
         assert_eq!(s.strategy, "default");
         assert_eq!(s.model, "model-x");
         assert!(s.tools_visible);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn populate_result_preview_is_noop_for_running_node() {
+        let (mut app, _td) = app_for_pure_test();
+        app.tools
+            .on_event(&cogito_protocol::stream::StreamEvent::TurnStarted);
+        app.tools
+            .on_event(&cogito_protocol::stream::StreamEvent::ToolDispatchStarted {
+                call_id: "c1".into(),
+                tool_name: "t".into(),
+                args: serde_json::json!({}),
+            });
+        // Running; populate must not touch the store.
+        app.populate_result_preview((0, 0)).await;
+        // The node is still without a preview.
+        assert!(app.tools.turns[0].nodes[0].result_preview.is_none());
     }
 }
