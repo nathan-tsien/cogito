@@ -23,6 +23,16 @@ responsibility (or a future SaaS layer wrapping cogito).
 See `ARCHITECTURE.md` for the full design, `ROADMAP.md` for the current
 version and sprint, and `ADR-0005` for production scope + quality gates.
 
+## Authoritative docs — read these first
+
+- `ARCHITECTURE.md` — the 11-component Harness design, dependency constraints, workspace layout.
+- `ROADMAP.md` — the current sprint and version evolution path.
+- `docs/components/H0X-*.md` — per-component design notes.
+- `docs/adr/` — architecture decision records.
+- `docs/configuration/overview.md` — holistic map of the configuration story (sections, sources, merge, secret handling, crate layout).
+- `docs/adr/0026-strategy-registry.md` — what strategies are, why
+  cogito-strategy is a separate crate from cogito-config.
+
 ## Inviolable design principles
 
 These cannot be violated. If you find yourself wanting to violate one, **stop and ask**.

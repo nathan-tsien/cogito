@@ -8,6 +8,12 @@ overridable but no longer the only path)
 
 ## Context
 
+A strategy is a named, declarative "agent mode" — *which model,
+which persona, which tools, which context policy* bundled into one
+artifact selectable by `--strategy <name>`. Strategies are not
+`cogito.toml` configuration; they are a separate Hands sub-layer
+artifact owned by the agent designer.
+
 `HarnessStrategy` (the per-turn behavior bundle: system prompt, tool
 filter, model params, context policy) has shipped as a Rust value type
 since Sprint 2. Until now the only way to construct one was the

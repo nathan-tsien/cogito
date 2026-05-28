@@ -42,6 +42,21 @@ Secrets stay out of files via `${ENV_VAR}` interpolation.
 
 ---
 
+## Strategies are not in `cogito.toml`
+
+A strategy bundles "what to tell the model to do" (system prompt,
+allowed tools, model knobs). Strategies live in
+`.cogito/strategies/*.md` (Repo scope) or
+`~/.config/cogito/strategies/*.md` (User scope), not in
+`cogito.toml`. The two layers are deliberate: cogito.toml is the
+deployment operator's territory (endpoints, credentials); strategies
+are the agent designer's territory (behavior).
+
+See [`ADR-0026`](../adr/0026-strategy-registry.md) for the full
+rationale.
+
+---
+
 ## 2. Quick start
 
 The minimum useful `cogito.toml` for `cogito chat` against Anthropic:

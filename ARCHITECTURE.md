@@ -657,6 +657,7 @@ for a strategy by name.
 | `cogito-storage-local` | Hands (Storage) | v0.5 | First `StorageSystem` backend: local FS + HTTP fetch with cache + `blob://` mapped to local cache dir. **Moved from v0.2 to v0.5** by 2026-05-22 rebalance. |
 | `cogito-storage-s3` | Hands (Storage) | v0.4 | S3-compatible object storage backend. |
 | `cogito-storage-http` | Hands (Storage) | v0.6 | Generic HTTP-backed storage adapter. |
+| `cogito-strategy` | Hands sub-layer | v0.1 (Sprint 9a) | FS-backed `StrategyRegistry` impl. Markdown+frontmatter strategy files under `.cogito/strategies/`. See ADR-0026. |
 | `cogito-cli` | Surface | v0.1 | CLI binary; wires runtime + store + gateway. |
 | `cogito-tui` | Surface | v0.1 (Sprint 9) | TUI. **Pulled forward from v0.2 to v0.1** (merged into Sprint 9 with multi-model strategy). |
 | `cogito-observability-otel` | Surface (optional) | v0.4 | OpenTelemetry adapter that ships `MetricsRecorder` impl + trace exporter. |
