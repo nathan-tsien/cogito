@@ -119,6 +119,10 @@ clap = { version = "4.5", features = ["derive"] }
 # TUI (Sprint 6+)
 ratatui = "0.28"
 crossterm = "0.28"
+# TUI input widget — multi-line buffer used by cogito-tui
+tui-textarea = "0.7"
+# File-rotating log writer for TUI debug mode
+tracing-appender = "0.2"
 
 # Testing
 tokio-test = "0.4"
@@ -129,6 +133,8 @@ criterion = { version = "0.5", features = ["html_reports"] }
 rstest = "0.22"
 tempfile = "3.10"
 temp-env = "0.3"
+# CLI integration testing (already used in cogito-cli tests, promote to workspace)
+assert_cmd = "2.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
