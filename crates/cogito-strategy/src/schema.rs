@@ -10,11 +10,6 @@ use serde::Deserialize;
 
 /// Direct deserialize target of the YAML frontmatter block.
 /// All fields except `name` are optional.
-//
-// `dead_code` is allowed because Task 05 (`parser.rs`) is the first
-// consumer of `tool_order` and `context`; without the allow, the
-// workspace `-Dwarnings` flag fails the build between tasks.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct StrategyFrontmatter {
