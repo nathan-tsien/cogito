@@ -1,0 +1,24 @@
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"r_1","type":"reasoning"}}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","delta":"Considering"}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","delta":" the request..."}
+
+event: response.reasoning_summary_text.done
+data: {"type":"response.reasoning_summary_text.done","text":"Considering the request..."}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"msg_1","type":"message"}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"Here is the answer."}
+
+event: response.output_text.done
+data: {"type":"response.output_text.done","text":"Here is the answer."}
+
+event: response.completed
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":100,"output_tokens":20,"total_tokens":120}}}
+

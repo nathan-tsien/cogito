@@ -1,0 +1,24 @@
+[package]
+name = "cogito-strategy"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Filesystem-backed StrategyRegistry implementation for cogito"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+cogito-protocol = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+cogito-test-fixtures = { workspace = true }
+temp-env = { workspace = true }
+tempfile = { workspace = true }

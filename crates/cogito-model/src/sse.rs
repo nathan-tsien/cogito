@@ -110,3 +110,48 @@ pub fn replay_anthropic_into_model_events(
     })?;
     Ok(out)
 }
+
+/// Test helper: feed raw SSE bytes through the `OpenAI` Responses decoder
+/// synchronously and collect the resulting `ModelEvent`s. Used by
+/// integration replay tests; not part of the public API surface.
+///
+/// Mirrors the live `stream_response` path in `openai_responses::decode`
+/// but without the network / cancellation plumbing — unparseable events
+/// are skipped (matching live behavior) and translation stops once a
+/// `Completed` / `Failed` terminal event has been processed.
+#[doc(hidden)]
+pub fn replay_openai_responses_into_model_events(
+    bytes: &[u8],
+) -> Result<Vec<cogito_protocol::gateway::ModelEvent>, ModelError> {
+    use eventsource_stream::EventStream;
+    use futures::StreamExt;
+
+    let body = futures::stream::iter(vec![Ok::<_, std::io::Error>(
+        ::bytes::Bytes::copy_from_slice(bytes),
+    )]);
+    let mut parsed = EventStream::new(body);
+    let mut decoder = crate::openai_responses::decode::Decoder::new();
+    let mut out = Vec::new();
+    futures::executor::block_on(async {
+        while let Some(res) = parsed.next().await {
+            let evt = res.map_err(|e| ModelError::Decode(format!("sse parse: {e}")))?;
+            if evt.data.is_empty() {
+                continue;
+            }
+            let event: crate::openai_responses::wire::StreamEvent =
+                match serde_json::from_str(&evt.data) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+            let (events, terminal) = decoder.translate(event)?;
+            for m in events {
+                out.push(m);
+            }
+            if terminal {
+                break;
+            }
+        }
+        Ok::<_, ModelError>(())
+    })?;
+    Ok(out)
+}

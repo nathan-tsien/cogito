@@ -46,6 +46,10 @@ pub struct RuntimeSection {
     pub default_provider: Option<String>,
     /// Default model identifier; provider-specific.
     pub default_model: Option<String>,
+    /// Optional default strategy name. If `None` and `--strategy`
+    /// is not given, `resolve_strategy` synthesizes a strategy from
+    /// `default_model` + CLI flags. See ADR-0026.
+    pub default_strategy: Option<String>,
     /// Directory scanned for strategy files (Sprint 5+).
     pub strategies_dir: PathBuf,
 }
@@ -115,6 +119,8 @@ pub struct RuntimeSectionPartial {
     pub default_provider: Option<String>,
     /// Override for `RuntimeSection::default_model`.
     pub default_model: Option<String>,
+    /// Override for `RuntimeSection::default_strategy`.
+    pub default_strategy: Option<String>,
     /// Override for `RuntimeSection::strategies_dir`.
     pub strategies_dir: Option<PathBuf>,
 }
@@ -154,7 +160,8 @@ mod tests {
                 session_root: Some(PathBuf::from("/tmp/sessions")),
                 default_provider: Some("anthropic-prod".into()),
                 default_model: Some("claude-opus-4-7".into()),
-                strategies_dir: Some(PathBuf::from("./strategies")),
+                default_strategy: Some("coder".into()),
+                strategies_dir: Some(PathBuf::from(".cogito/strategies")),
             }),
             providers: Some(vec![]),
             mcp_servers: None,
@@ -165,6 +172,10 @@ mod tests {
         assert_eq!(
             back.runtime.as_ref().unwrap().default_provider,
             p.runtime.as_ref().unwrap().default_provider
+        );
+        assert_eq!(
+            back.runtime.as_ref().unwrap().default_strategy,
+            p.runtime.as_ref().unwrap().default_strategy
         );
     }
 

@@ -18,9 +18,11 @@ use cogito_protocol::ids::SessionId;
 use cogito_protocol::job::JobManager;
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
+use cogito_protocol::strategy_registry::{StrategyError, StrategyRegistry};
 use cogito_protocol::stream::StreamEvent;
 use cogito_protocol::tool::ToolResult;
 use cogito_store_jsonl::JsonlStore;
+use cogito_strategy::FsStrategyRegistry;
 use cogito_tools::{BuiltinToolProvider, CompositeToolProvider, NamingPolicy, ReadFile};
 use futures::StreamExt;
 use std::io::Write as _;
@@ -181,7 +183,7 @@ impl From<ChatMode> for OpenMode {
 const CTRL_C_EXIT_WINDOW: Duration = Duration::from_secs(2);
 
 /// Arguments for the `chat` subcommand.
-#[derive(Debug, Args)]
+#[derive(Debug, Default, Args)]
 pub struct ChatArgs {
     /// Path to a `cogito.toml`. Highest precedence in the search path.
     #[arg(long)]
@@ -219,6 +221,180 @@ pub struct ChatArgs {
     /// Override the default system prompt.
     #[arg(long)]
     pub system: Option<String>,
+
+    /// Strategy name to load from `.cogito/strategies/`. Overrides
+    /// `cogito.toml` `runtime.default_strategy`. Mutually independent of
+    /// `--model`: `--model` can still override the strategy's model.
+    #[arg(long, value_name = "NAME")]
+    pub strategy: Option<String>,
+
+    /// Print available strategies (name + description) and exit.
+    #[arg(long)]
+    pub list_strategies: bool,
+}
+
+/// Resolve a `HarnessStrategy` + `ProviderConfig` pair from CLI args,
+/// the loaded `RuntimeConfig`, and the FS-backed registry. This is the
+/// single seam where strategy + provider + CLI overrides collide;
+/// downstream code (`RuntimeBuilder`, gateway construction) consumes
+/// only the resolved values.
+///
+/// Resolution order (per Sprint 9a spec §12.1):
+///   strategy        = `--strategy` -> `cogito.toml` `default_strategy` -> synthesized
+///   provider        = `--provider` -> `strategy.provider` -> `cogito.toml` `default_provider` -> error
+///   model           = `--model` -> `strategy.model` -> `cogito.toml` `runtime.default_model` -> error
+///   `system_prompt` = `--system` -> `strategy.system_prompt` -> empty
+///
+/// # Errors
+///
+/// Returns one of:
+/// - `ResolveError::UnknownStrategy { name, available }` — CLI named a missing strategy.
+/// - `ResolveError::UnknownProvider { strategy, provider }` — strategy.provider points to nothing.
+/// - `ResolveError::MissingProvider` — no `--provider`, no strategy provider, no `default_provider`.
+/// - `ResolveError::MissingModel` — no `--model`, no strategy model, no `runtime.default_model`.
+pub fn resolve_strategy(
+    args: &ChatArgs,
+    cfg: &cogito_config::RuntimeConfig,
+    registry: &dyn StrategyRegistry,
+) -> Result<(HarnessStrategy, cogito_model::ProviderConfig), ResolveError> {
+    // Pick the strategy name (or None for synthesis).
+    let strategy_name = args
+        .strategy
+        .clone()
+        .or_else(|| cfg.runtime.default_strategy.clone());
+
+    let mut strategy = if let Some(name) = strategy_name.as_deref() {
+        match registry.get(name) {
+            Ok(s) => s,
+            Err(StrategyError::Unknown(n, available)) => {
+                return Err(ResolveError::UnknownStrategy { name: n, available });
+            }
+            Err(e) => return Err(ResolveError::Strategy(e)),
+        }
+    } else {
+        // Synthesized default. Model resolved further below; seed with
+        // the best guess we have so the strategy is well-formed.
+        let initial_model = args
+            .model
+            .clone()
+            .or_else(|| cfg.runtime.default_model.clone())
+            .unwrap_or_default();
+        HarnessStrategy::default_with_model(initial_model)
+    };
+
+    // Apply CLI overrides on top of the strategy.
+    if let Some(model) = args.model.as_ref() {
+        strategy.model_params.model.clone_from(model);
+    }
+    if let Some(sys) = args.system.as_ref() {
+        strategy.system_prompt.clone_from(sys);
+    }
+
+    // Ensure model is non-empty after overrides + strategy + cogito.toml fallback.
+    if strategy.model_params.model.is_empty()
+        && let Some(m) = cfg.runtime.default_model.as_ref()
+    {
+        strategy.model_params.model.clone_from(m);
+    }
+    if strategy.model_params.model.is_empty() {
+        return Err(ResolveError::MissingModel);
+    }
+
+    // Resolve provider:
+    //   --provider > strategy.provider (via FsStrategyRegistry downcast)
+    //              > cogito.toml default_provider
+    //              > Sprint 2 legacy ENV bridge (empty cfg.providers only)
+    let strategy_provider_ref = strategy_name
+        .as_deref()
+        .and_then(|n| registry_provider_ref(registry, n));
+
+    let provider_name = args
+        .provider
+        .clone()
+        .or(strategy_provider_ref)
+        .or_else(|| cfg.runtime.default_provider.clone());
+
+    let Some(provider_name) = provider_name else {
+        // Sprint 2 legacy bridge: no providers declared and no name
+        // selected anywhere -> synthesize one from
+        // `ANTHROPIC_API_KEY` / `OPENAI_BASE_URL`. Anything else
+        // (e.g. user set `default_provider` but the named entry is
+        // missing) still surfaces as `MissingProvider` /
+        // `UnknownProvider` below.
+        if cfg.providers.is_empty() {
+            let synth = crate::chat_config::synthesize_legacy_provider(
+                &strategy.model_params.model,
+                args.base_url.as_deref(),
+            )
+            .map_err(|e| ResolveError::LegacyBridge(e.to_string()))?;
+            return Ok((strategy, synth));
+        }
+        return Err(ResolveError::MissingProvider);
+    };
+
+    let provider_cfg = cfg
+        .providers
+        .iter()
+        .find(|p| p.name() == provider_name)
+        .cloned()
+        .ok_or_else(|| ResolveError::UnknownProvider {
+            strategy: strategy_name
+                .clone()
+                .unwrap_or_else(|| "<synthesized>".into()),
+            provider: provider_name,
+        })?;
+
+    Ok((strategy, provider_cfg))
+}
+
+/// Extract a strategy's `provider:` reference. Concrete-impl downcast
+/// (`FsStrategyRegistry` only). Returns `None` for other impls — those
+/// must declare provider via `cogito.toml` `default_provider` in v0.1.
+fn registry_provider_ref(registry: &dyn StrategyRegistry, name: &str) -> Option<String> {
+    let any_self: &dyn std::any::Any = registry.as_any();
+    any_self
+        .downcast_ref::<FsStrategyRegistry>()
+        .and_then(|fs| fs.provider_ref(name).map(str::to_string))
+}
+
+/// Errors returned by [`resolve_strategy`]. Surface code maps these to
+/// user-facing diagnostics.
+#[derive(Debug, Error)]
+pub enum ResolveError {
+    /// CLI named a strategy that the registry does not have.
+    #[error("strategy `{name}` not found; available: {available:?}")]
+    UnknownStrategy {
+        /// Strategy id the user asked for.
+        name: String,
+        /// Snapshot of `registry.list()` at the time of the failed lookup.
+        available: Vec<String>,
+    },
+    /// Strategy resolved to a `provider:` name that is not declared in
+    /// `cogito.toml`.
+    #[error("strategy `{strategy}` references provider `{provider}` which is not in cogito.toml")]
+    UnknownProvider {
+        /// Owning strategy name (or `<synthesized>` for the default).
+        strategy: String,
+        /// Provider id the strategy referenced.
+        provider: String,
+    },
+    /// No `--provider`, no strategy provider, no `runtime.default_provider`.
+    #[error(
+        "no provider available: pass --provider, set strategy.provider, or set runtime.default_provider"
+    )]
+    MissingProvider,
+    /// No `--model`, no strategy model, no `runtime.default_model`.
+    #[error("no model available: pass --model, set strategy.model, or set runtime.default_model")]
+    MissingModel,
+    /// Sprint 2 legacy ENV bridge attempted (no providers declared) but
+    /// failed -- e.g. neither `ANTHROPIC_API_KEY` nor `OPENAI_BASE_URL`
+    /// is set. The wrapped string is the underlying anyhow chain.
+    #[error("legacy ENV bridge failed: {0}")]
+    LegacyBridge(String),
+    /// Pass-through for non-`Unknown` `StrategyError` variants surfaced
+    /// from the registry.
+    #[error(transparent)]
+    Strategy(StrategyError),
 }
 
 /// Resolve the open mode from CLI flags. Rejects incoherent
@@ -344,16 +520,43 @@ pub async fn run(args: ChatArgs) -> Result<()> {
         base_url: args.base_url.clone(),
         session_root: args.session_root.clone(),
     };
-    let cfg = crate::chat_config::load_layered_config(&inputs).await?;
-    let provider_cfg = crate::chat_config::select_provider(&cfg, &inputs)?;
+    let (cfg, registry) = crate::chat_config::build_runtime_config_and_registry(&inputs).await?;
+
+    // `--list-strategies`: print available strategies and exit before
+    // we open a runtime / gateway / store. The CLI is the surface
+    // layer; primary command output goes to stdout (not tracing), so
+    // we silence `print_stdout` for this single block.
+    if args.list_strategies {
+        for name in registry.list() {
+            let desc = registry.description(&name).unwrap_or("(no description)");
+            #[allow(clippy::print_stdout)]
+            {
+                println!("{name:<24} {desc}");
+            }
+        }
+        return Ok(());
+    }
+
+    let (strategy, provider_cfg) =
+        resolve_strategy(&args, &cfg, registry.as_ref()).map_err(|e| match e {
+            ResolveError::UnknownStrategy { name, available } => anyhow!(
+                "unknown strategy `{name}`; available: {avail}",
+                avail = available.join(", ")
+            ),
+            other => anyhow!(other),
+        })?;
+
+    // CLI `--base-url` is a post-merge field patch; apply it on the
+    // provider chosen by `resolve_strategy` so the Sprint 2 flag
+    // continues to override base_url for any provider kind.
+    let provider_cfg = if let Some(b) = args.base_url.as_ref() {
+        crate::chat_config::patch_base_url(provider_cfg, b.clone())
+    } else {
+        provider_cfg
+    };
+
     let gateway: Arc<dyn ModelGateway> =
         build_gateway(provider_cfg).map_err(|e| anyhow!("building gateway: {e}"))?;
-
-    let model_id = args
-        .model
-        .clone()
-        .or_else(|| cfg.runtime.default_model.clone())
-        .ok_or_else(|| anyhow!("--model required (or set runtime.default_model in cogito.toml)"))?;
 
     let store = Arc::new(JsonlStore::new(cfg.runtime.session_root.clone()));
     // Keep a typed handle for the post-`open_session` replay; the
@@ -371,11 +574,6 @@ pub async fn run(args: ChatArgs) -> Result<()> {
 
     let tools = build_tool_provider(&cfg, Arc::clone(&job_mgr)).await?;
     let skills = crate::chat_config::build_skill_provider(&cfg)?;
-
-    let mut strategy = HarnessStrategy::default_with_model(&model_id);
-    if let Some(sys) = args.system.clone() {
-        strategy.system_prompt = sys;
-    }
 
     // `Arc<LocalJobManager>` -> `Arc<dyn JobManager>` via the unsized
     // coercion impl on `Arc<T>`. The typed `Arc<LocalJobManager>` was
@@ -738,6 +936,8 @@ mod tests {
             session_id: session_id.map(str::to_owned),
             mode,
             system: None,
+            strategy: None,
+            list_strategies: false,
         }
     }
 

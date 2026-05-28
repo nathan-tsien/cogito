@@ -78,7 +78,10 @@ fn finalize_fills_defaults() {
     };
     let cfg = partial.finalize().expect("ok");
     assert_eq!(cfg.runtime.session_root, PathBuf::from("./sessions"));
-    assert_eq!(cfg.runtime.strategies_dir, PathBuf::from("./strategies"));
+    assert_eq!(
+        cfg.runtime.strategies_dir,
+        PathBuf::from(".cogito/strategies")
+    );
     // Auto-select rule: one provider, no explicit default_provider.
     assert_eq!(cfg.runtime.default_provider.as_deref(), Some("only"));
     assert!(cfg.runtime.default_model.is_none());

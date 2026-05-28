@@ -354,6 +354,8 @@ dependencies = [
  "cogito-protocol",
  "cogito-skills",
  "cogito-store-jsonl",
+ "cogito-strategy",
+ "cogito-test-fixtures",
  "cogito-tools",
  "futures",
  "serde_json",
@@ -594,6 +596,21 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
+]
+
+[[package]]
+name = "cogito-strategy"
+version = "0.1.0"
+dependencies = [
+ "cogito-protocol",
+ "cogito-test-fixtures",
+ "serde",
+ "serde_yaml",
+ "temp-env",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "walkdir",
 ]
 
 [[package]]

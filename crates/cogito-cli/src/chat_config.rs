@@ -12,6 +12,7 @@ use cogito_config::{
 };
 use cogito_model::ProviderConfig;
 use cogito_protocol::skill::SkillProvider;
+use cogito_strategy::FsStrategyRegistry;
 
 /// Subset of `ChatArgs` needed by the config helpers. The CLI build
 /// passes a real `ChatArgs`; tests pass a `ChatConfigInputs` directly.
@@ -50,6 +51,27 @@ pub async fn load_layered_config(inputs: &ChatConfigInputs) -> Result<RuntimeCon
         .map_err(|e| anyhow!("finalizing config: {e}"))
 }
 
+/// Load + finalize the layered config and build the matching FS-backed
+/// strategy registry. Scopes are resolved with
+/// [`FsStrategyRegistry::from_conventional_scopes_with_repo_override`]
+/// so `runtime.strategies_dir` (from `cogito.toml` or CLI override)
+/// takes the Repo slot and `~/.config/cogito/strategies/` takes User.
+///
+/// Returned together because the chat command threads the registry into
+/// `resolve_strategy` immediately after constructing the config; pairing
+/// the two prevents callers from forgetting to refresh one when the
+/// other changes.
+pub async fn build_runtime_config_and_registry(
+    inputs: &ChatConfigInputs,
+) -> Result<(RuntimeConfig, Arc<FsStrategyRegistry>)> {
+    let cfg = load_layered_config(inputs).await?;
+    let registry = FsStrategyRegistry::from_conventional_scopes_with_repo_override(
+        cfg.runtime.strategies_dir.clone(),
+    )
+    .map_err(|e| anyhow!("scanning strategies dir: {e}"))?;
+    Ok((cfg, Arc::new(registry)))
+}
+
 /// Convert CLI-style inputs into a `RuntimeConfigPartial` for use as
 /// the highest-precedence merge layer. Only the inputs that
 /// correspond to `[runtime]` table fields are forwarded; `config_path`
@@ -62,6 +84,7 @@ fn cli_inputs_to_partial(inputs: &ChatConfigInputs) -> RuntimeConfigPartial {
             session_root: inputs.session_root.clone(),
             default_provider: inputs.provider.clone(),
             default_model: inputs.model.clone(),
+            default_strategy: None,
             strategies_dir: None,
         }),
         providers: None,
@@ -234,6 +257,21 @@ pub fn patch_base_url(cfg: ProviderConfig, new_base_url: String) -> ProviderConf
             auth_scheme,
             timeout_secs,
             include_prior_thinking,
+            context_window_tokens,
+        },
+        ProviderConfig::OpenAiResponses {
+            name,
+            api_key,
+            timeout_secs,
+            reasoning_effort,
+            context_window_tokens,
+            ..
+        } => ProviderConfig::OpenAiResponses {
+            name,
+            api_key,
+            base_url: new_base_url,
+            timeout_secs,
+            reasoning_effort,
             context_window_tokens,
         },
     }

@@ -8,6 +8,7 @@ members = [
     "crates/cogito-tools",
     "crates/cogito-sandbox",
     "crates/cogito-skills",
+    "crates/cogito-strategy",
     "crates/cogito-jobs",
     "crates/cogito-mcp",
     "crates/cogito-config",
@@ -48,6 +49,7 @@ cogito-model = { path = "crates/cogito-model" }
 cogito-tools = { path = "crates/cogito-tools" }
 cogito-sandbox = { path = "crates/cogito-sandbox" }
 cogito-skills = { path = "crates/cogito-skills", version = "0.1.0" }
+cogito-strategy = { path = "crates/cogito-strategy" }
 cogito-jobs = { path = "crates/cogito-jobs" }
 cogito-mcp = { path = "crates/cogito-mcp" }
 cogito-test-fixtures = { path = "crates/testing/cogito-test-fixtures" }

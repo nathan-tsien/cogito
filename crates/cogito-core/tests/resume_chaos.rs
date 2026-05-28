@@ -730,6 +730,342 @@ async fn chaos_y_path_every_event_boundary() {
     }
 }
 
+// === Sprint 9a: strategy_with_tool_filter chaos scenario ====================
+//
+// Spec: docs/superpowers/specs/2026-05-27-sprint-9a-multi-model-strategy-design.md
+//
+// Goal: verify that a `HarnessStrategy` carrying `ToolFilter::Allow(...)` + a
+// non-default `model_params.temperature` + a non-default `system_prompt`
+// produces the same observable strategy effects on the post-resume side
+// as on the golden side. Concretely:
+//
+//   - `PromptComposed.surface_size` equals the filtered count on BOTH the
+//     golden and resumed runs (proves H05 honored the strategy after resume,
+//     even though the strategy is re-derived from the registry, not from
+//     the event log).
+//   - The single `ToolUseRecorded` carries `tool_name = "read_file"`
+//     (the only Allow-listed name) — proves the wider catalog never
+//     reached the model.
+//   - `ModelCallStarted.model` equals the strategy's `model_params.model`
+//     across both runs — proves the model identifier survived the
+//     re-derivation.
+//
+// Strategy choice rationale: `EventPayload::TurnStarted` does NOT carry
+// strategy fields (it never has — strategies are re-derived from the
+// registry deterministically, not persisted with the turn). The above
+// three observable invariants are the chaos-visible footprint of the
+// strategy. If `HarnessStrategy` is re-derived correctly on resume, they
+// all match the golden run; if a resume code path accidentally lost or
+// mutated the filter, the surface_size or tool_name diverges.
+//
+// The scenario shares `single_tool_happy_path`'s two-call model script,
+// but uses a fresh `TwoToolMockProvider` (advertises both `read_file` and
+// `write_file`) and a filtered strategy with `Allow(["read_file"])`. With
+// `ToolFilter::All`, surface_size would be 2; the filter narrows it to 1.
+
+/// In-test `ToolProvider` that exposes BOTH `read_file` and `write_file`.
+/// Used by the `strategy_with_tool_filter` scenario so the strategy's
+/// `Allow(["read_file"])` actually shrinks the surface (2 -> 1). The
+/// model script only ever calls `read_file`; the second tool exists
+/// solely to make the filter observable in `PromptComposed.surface_size`.
+struct TwoToolMockProvider;
+
+#[async_trait]
+impl ToolProvider for TwoToolMockProvider {
+    fn list(&self) -> Vec<ToolDescriptor> {
+        vec![
+            ToolDescriptor {
+                name: "read_file".into(),
+                description: "test stub for chaos test (read).".into(),
+                schema: serde_json::json!({
+                    "type": "object",
+                    "properties": { "path": { "type": "string" } },
+                    "required": ["path"]
+                }),
+                execution_class: ExecutionClass::AlwaysSync,
+                outputs_model_visible_multimodal: false,
+            },
+            ToolDescriptor {
+                name: "write_file".into(),
+                description: "test stub for chaos test (write).".into(),
+                schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" },
+                        "content": { "type": "string" }
+                    },
+                    "required": ["path", "content"]
+                }),
+                execution_class: ExecutionClass::AlwaysSync,
+                outputs_model_visible_multimodal: false,
+            },
+        ]
+    }
+
+    async fn invoke(&self, _name: &str, _args: serde_json::Value, _ctx: ExecCtx) -> InvokeOutcome {
+        InvokeOutcome::Sync(ToolResult::text("MOCK_TOOL_RESULT"))
+    }
+}
+
+/// Build the filtered-strategy chaos `HarnessStrategy`. Same shape as the
+/// generic `default_with_model("mock-filtered")` factory output, but with
+/// the four fields the chaos oracle asserts on flipped to non-defaults:
+/// `name`, `system_prompt`, `allowed_tools` (Allow whitelist), and
+/// `model_params.temperature`.
+fn filtered_strategy() -> HarnessStrategy {
+    let mut strategy = HarnessStrategy::default_with_model("mock-filtered");
+    strategy.name = "filtered_coder".into();
+    strategy.system_prompt = "Strict read-only coder.".into();
+    strategy.allowed_tools = cogito_protocol::strategy::ToolFilter::Allow(vec!["read_file".into()]);
+    strategy.model_params.temperature = Some(0.3);
+    strategy
+}
+
+/// Wire a `Runtime` for the filtered-strategy chaos scenario. Same shape as
+/// `build_runtime`, but uses `TwoToolMockProvider` so the filter is
+/// observable in the recorded `PromptComposed.surface_size`, and the
+/// filtered strategy.
+fn build_filtered_runtime(
+    store: Arc<dyn ConversationStore>,
+    scenario: &ChaosScenario,
+) -> Arc<Runtime> {
+    let mock = Arc::new(build_scripted_mock(scenario));
+    let tools = Arc::new(TwoToolMockProvider);
+    Runtime::builder()
+        .store(store)
+        .model(mock as Arc<dyn ModelGateway>)
+        .tools(tools as Arc<dyn ToolProvider>)
+        .strategy(filtered_strategy())
+        .build()
+        .expect("runtime builds")
+}
+
+/// Drive the scenario to natural completion with the filtered strategy +
+/// two-tool provider, no faults.
+async fn filtered_run_to_completion(scenario: &ChaosScenario) -> GoldenRun {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let runtime = build_filtered_runtime(Arc::clone(&store), scenario);
+
+    let session_id = SessionId::new();
+    let handle = runtime
+        .open_session(session_id, OpenMode::New)
+        .await
+        .expect("open New");
+    let _events_rx = handle.subscribe();
+
+    handle
+        .submit_user_text(extract_user_text(scenario))
+        .await
+        .expect("submit_user_text");
+    wait_for_terminal_broadcast(&handle).await;
+
+    let events = read_log(store.as_ref(), session_id).await;
+    let terminal = terminal_payload(&events).clone();
+
+    let out = handle
+        .shutdown(Duration::from_secs(5))
+        .await
+        .expect("shutdown");
+    assert!(
+        matches!(out, ShutdownOutcome::Clean { .. }),
+        "expected Clean shutdown, got {out:?}"
+    );
+    drop(tmp);
+    GoldenRun { events, terminal }
+}
+
+/// Y-path crash + resume runner for the filtered-strategy scenario. Mirrors
+/// the generic `run_with_y_fault` but swaps in `build_filtered_runtime`
+/// for both phases so phase 2 also gets the filtered strategy.
+async fn filtered_run_with_y_fault(
+    scenario: &ChaosScenario,
+    crash_after_n: u64,
+) -> Vec<ConversationEvent> {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let session_id = SessionId::new();
+
+    // ----- Phase 1: drive until PanicAt fires. -----
+    let inner1: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let wrapper1: Arc<FaultInjectingStore<JsonlStore>> =
+        Arc::new(FaultInjectingStore::new(Arc::clone(&inner1)));
+    let store1: Arc<dyn ConversationStore> = Arc::clone(&wrapper1) as Arc<dyn ConversationStore>;
+    let runtime1 = build_filtered_runtime(store1, scenario);
+    let handle1 = runtime1
+        .open_session(session_id, OpenMode::New)
+        .await
+        .expect("open New");
+    wrapper1
+        .set_trigger(FaultTrigger::PanicAt {
+            event_no: crash_after_n + 1,
+            message: "filtered-strategy chaos fault",
+        })
+        .await;
+
+    handle1
+        .submit_user_text(extract_user_text(scenario))
+        .await
+        .expect("submit_user_text");
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let events = read_log(inner1.as_ref(), session_id).await;
+        let has_terminal = events.iter().any(|e| {
+            matches!(
+                e.payload,
+                EventPayload::TurnCompleted { .. }
+                    | EventPayload::TurnFailed { .. }
+                    | EventPayload::TurnPaused { .. }
+            )
+        });
+        if has_terminal || wrapper1.written_count() > crash_after_n {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    drop(handle1);
+    drop(runtime1);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // ----- Phase 2: fresh Runtime sharing the same on-disk JSONL. -----
+    let inner2: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let store2: Arc<dyn ConversationStore> = inner2.clone();
+    let runtime2 = build_filtered_runtime(Arc::clone(&store2), scenario);
+    let handle2 = runtime2
+        .open_session(session_id, OpenMode::Resume)
+        .await
+        .expect("open Resume");
+
+    wait_for_terminal_with_store(&handle2, store2.as_ref(), session_id).await;
+
+    let events = read_log(store2.as_ref(), session_id).await;
+    let _ = handle2.shutdown(Duration::from_secs(5)).await;
+    drop(tmp);
+    events
+}
+
+/// Strategy-effect oracle for the `strategy_with_tool_filter` scenario.
+///
+/// `TurnStarted` does NOT carry strategy fields (the strategy is re-derived
+/// from the registry, not persisted with the turn). The strategy's effects
+/// instead surface in three downstream events:
+///
+/// - `PromptComposed.surface_size` reflects the post-filter tool surface.
+///   With `TwoToolMockProvider` (2 tools) + `Allow(["read_file"])` the
+///   filter narrows it to 1; with `ToolFilter::All` it would be 2. So a
+///   `surface_size` of 1 proves the Allow filter was honored.
+/// - `ToolUseRecorded.tool_name` MUST be `read_file` (the only allowed
+///   tool). The model script never tries to call anything else, so this is
+///   a passive guard: if a resume bug re-broadened the filter and the model
+///   subsequently named a tool outside the allow-list, dispatching would
+///   surface a failure, not a different `ToolUseRecorded` — but we still
+///   pin the name for fast diagnosis.
+/// - `ModelCallStarted.model` MUST equal the strategy's
+///   `model_params.model` (`"mock-filtered"`).
+fn assert_filtered_strategy_effects(events: &[ConversationEvent]) {
+    let surface_sizes: Vec<u32> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::PromptComposed { surface_size, .. } => Some(*surface_size),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !surface_sizes.is_empty(),
+        "expected at least one PromptComposed event"
+    );
+    for sz in &surface_sizes {
+        assert_eq!(
+            *sz, 1,
+            "expected PromptComposed.surface_size == 1 (Allow(read_file) filters 2 -> 1); \
+             saw {sz} (full sequence: {surface_sizes:?})"
+        );
+    }
+
+    let tool_names: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::ToolUseRecorded { tool_name, .. } => Some(tool_name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !tool_names.is_empty(),
+        "expected at least one ToolUseRecorded event"
+    );
+    for name in &tool_names {
+        assert_eq!(
+            *name, "read_file",
+            "expected ToolUseRecorded.tool_name == read_file; saw {name} \
+             (full sequence: {tool_names:?})"
+        );
+    }
+
+    let models: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::ModelCallStarted { model } => Some(model.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !models.is_empty(),
+        "expected at least one ModelCallStarted event"
+    );
+    for m in &models {
+        assert_eq!(
+            *m, "mock-filtered",
+            "expected ModelCallStarted.model == mock-filtered (strategy's model_params.model); \
+             saw {m} (full sequence: {models:?})"
+        );
+    }
+}
+
+#[tokio::test]
+async fn strategy_with_tool_filter() {
+    let scenario = chaos_scenarios::single_tool_happy_path();
+    let golden = filtered_run_to_completion(&scenario).await;
+    let total = golden.events.len() as u64;
+    let boundaries = resumable_boundaries(&golden.events);
+    eprintln!(
+        "scenario=strategy_with_tool_filter golden_events={total} \
+         resumable_boundaries={boundaries:?}"
+    );
+    assert!(
+        !boundaries.is_empty(),
+        "filtered-strategy scenario produced no resumable boundaries"
+    );
+
+    // Golden run already exercises the filter; assert before we ever crash.
+    assert_filtered_strategy_effects(&golden.events);
+
+    for &crash_after_n in &boundaries {
+        if crash_after_n >= total.saturating_sub(1) {
+            continue;
+        }
+        let resumed = filtered_run_with_y_fault(&scenario, crash_after_n).await;
+        eprintln!(
+            "  filtered chaos: crash_after_n={crash_after_n} resumed_len={} (golden_len={total})",
+            resumed.len()
+        );
+
+        assert_context_managed_pairing(&resumed);
+        assert_prefix_immutable(&golden.events, &resumed, crash_after_n);
+        assert_terminal_equivalent(&golden.terminal, terminal_payload(&resumed));
+        assert_tool_mapping_equivalent(&golden.events, &resumed);
+        assert_final_text_equivalent(&golden.events, &resumed);
+
+        // Strategy-effect oracle: the resumed log carries the SAME
+        // filter / tool / model identifiers as the golden log, i.e. the
+        // strategy was re-derived from the registry intact on resume.
+        assert_filtered_strategy_effects(&resumed);
+    }
+}
+
 // === Sprint 7: text_then_skill_then_tool chaos scenario =====================
 //
 // Spec: docs/superpowers/specs/2026-05-23-sprint-7-skill-loader-design.md §11.

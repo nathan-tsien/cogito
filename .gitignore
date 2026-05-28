@@ -22,7 +22,9 @@ Thumbs.db
 *.db
 *.db-shm
 *.db-wal
-.cogito/
+.cogito/*
+# Example strategies are committed (see ADR-0026).
+!.cogito/strategies/
 
 # Local debug / scratch artefacts (e.g. Claude Code session graphs)
 debug/
