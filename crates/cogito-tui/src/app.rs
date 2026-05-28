@@ -132,7 +132,7 @@ impl App {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use cogito_store_jsonl::JsonlStore;
     use cogito_test_fixtures::strategy::MapStrategyRegistry;
@@ -146,7 +146,7 @@ mod tests {
     ///
     /// Returns the `App` together with its owning `TempDir` so the
     /// JSONL store's directory outlives the test scope.
-    fn app_for_pure_test() -> (App, TempDir) {
+    pub(crate) fn app_for_pure_test() -> (App, TempDir) {
         let tempdir = tempfile::tempdir().unwrap();
         let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tempdir.path()));
         let registry: Arc<dyn cogito_protocol::strategy_registry::StrategyRegistry> =
