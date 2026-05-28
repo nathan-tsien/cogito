@@ -37,5 +37,6 @@
 #![warn(missing_docs)]
 
 pub mod error;
+mod schema;
 
 pub use error::LoadError;
