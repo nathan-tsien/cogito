@@ -37,7 +37,8 @@
 #![warn(missing_docs)]
 
 pub mod error;
-mod parser;
+pub mod parser;
 mod schema;
 
 pub use error::LoadError;
+pub use parser::{ParsedStrategy, parse_strategy_file};

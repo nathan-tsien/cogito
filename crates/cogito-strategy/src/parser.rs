@@ -6,11 +6,9 @@
 //!    (frontmatter override > inline body), apply `name`-vs-filename
 //!    check, hoist `model` into `ModelParams`.
 //!
-//! `dead_code` is allowed crate-wide for the items in this module until
-//! Task 06 exposes `parse_strategy_file` as `pub` for integration tests;
-//! at that point the allow drops out.
-
-#![allow(dead_code)]
+//! NOTE: `parse_strategy_file` is `pub` so that integration tests in
+//! `tests/` can drive it directly. End users should construct an
+//! `FsStrategyRegistry` instead.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,7 +28,7 @@ use crate::schema::{StrategyFrontmatter, SystemPromptSource};
 /// Returns `LoadError` if the file cannot be read, the frontmatter is
 /// missing/malformed, the declared `name` does not match the filename,
 /// or both the frontmatter `system_prompt` and the markdown body are empty.
-pub(crate) fn parse_strategy_file(path: &Path) -> Result<ParsedStrategy, LoadError> {
+pub fn parse_strategy_file(path: &Path) -> Result<ParsedStrategy, LoadError> {
     let raw = fs::read_to_string(path).map_err(|source| LoadError::Io {
         path: path.to_path_buf(),
         source,
@@ -101,7 +99,7 @@ pub(crate) fn parse_strategy_file(path: &Path) -> Result<ParsedStrategy, LoadErr
 /// Output of `parse_strategy_file`. Carries the strategy plus the
 /// out-of-band `provider:` reference the wiring layer needs to check.
 #[derive(Debug, Clone)]
-pub(crate) struct ParsedStrategy {
+pub struct ParsedStrategy {
     /// Fully-materialized strategy (system prompt already resolved).
     pub strategy: HarnessStrategy,
     /// Optional provider reference (`cogito.toml` provider id).
