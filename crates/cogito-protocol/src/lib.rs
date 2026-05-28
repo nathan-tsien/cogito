@@ -21,6 +21,7 @@
 //! - [`store`]: `ConversationStore` trait + `StoreError` (persisted event log backend contract)
 //! - [`context`]: `ContextError`, `Compactor`, `HistoryProjector`, `ProjectedMessage` — Context-Management traits and types (H11)
 //! - [`strategy`]: `HarnessStrategy`, `ToolFilter`
+//! - [`strategy_registry`]: `StrategyRegistry` trait + `StrategyError` (wiring-layer seam, ADR-0026)
 //! - [`stream`]: `StreamEvent` enum (real-time fanout to subscribers)
 //! - [`tool`]: `ToolProvider` trait, `ToolDescriptor`, `InvokeOutcome`, `ExecutionClass`
 //! - [`turn`]: `TurnOutcome`, `TurnFailureReason`
@@ -44,6 +45,7 @@ pub mod sigil;
 pub mod skill;
 pub mod store;
 pub mod strategy;
+pub mod strategy_registry;
 pub mod stream;
 #[cfg(feature = "test-support")]
 pub mod test_support;
@@ -72,6 +74,7 @@ pub use metrics::{MetricsRecorder, NoOpMetricsRecorder};
 pub use session::SessionMeta;
 pub use store::{ConversationStore, EventRecorder, StoreError};
 pub use strategy::{HarnessStrategy, ToolFilter};
+pub use strategy_registry::{StrategyError, StrategyRegistry};
 pub use tool::{
     ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
 };
