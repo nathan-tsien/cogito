@@ -36,10 +36,6 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-#[cfg(test)]
-mod smoke_tests {
-    #[test]
-    fn crate_compiles() {
-        // Placeholder; later tasks add real surface.
-    }
-}
+pub mod error;
+
+pub use error::LoadError;
