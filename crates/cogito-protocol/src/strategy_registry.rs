@@ -29,6 +29,16 @@ pub trait StrategyRegistry: Send + Sync + 'static {
     /// Returns the names of all strategies currently registered.
     /// MUST be sorted ascending and deduplicated.
     fn list(&self) -> Vec<String>;
+
+    /// Downcast hook — concrete impls override to return `self` as
+    /// `&dyn Any`. Default returns a placeholder. Used by wiring code
+    /// to read impl-specific metadata (e.g., `FsStrategyRegistry`'s
+    /// `provider_ref`). v0.4 `SaaS` impls can override with their own
+    /// metadata hooks (or leave it as the default — provider refs
+    /// live elsewhere in that world).
+    fn as_any(&self) -> &dyn std::any::Any {
+        &()
+    }
 }
 
 /// Errors surfaced by `StrategyRegistry`. `LoadError` (in `cogito-strategy`)

@@ -146,6 +146,10 @@ impl StrategyRegistry for FsStrategyRegistry {
     fn list(&self) -> Vec<String> {
         self.by_name.keys().cloned().collect()
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]

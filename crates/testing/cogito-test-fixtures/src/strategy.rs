@@ -49,6 +49,10 @@ impl StrategyRegistry for MapStrategyRegistry {
     fn list(&self) -> Vec<String> {
         self.inner.keys().cloned().collect()
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Run the canonical contract suite against any `StrategyRegistry` impl.
