@@ -224,6 +224,17 @@ pub enum ModelError {
     /// `ExecCtx.cancel` fired while the stream was in flight.
     #[error("cancelled")]
     Cancelled,
+    /// Provider declared a stream-payload failure (e.g. `OpenAI`
+    /// Responses `response.failed` SSE event, Anthropic `error` SSE
+    /// event). The transport succeeded and the body decoded; the model
+    /// itself signaled failure mid-stream. Distinct from
+    /// `Provider { status }` (HTTP-level) and `Decode` (JSON parse
+    /// failure).
+    #[error("provider stream error: {message}")]
+    ProviderStream {
+        /// Best-effort extracted message from the provider's failure payload.
+        message: String,
+    },
 }
 
 /// Limits of the model a `ModelGateway` serves.
