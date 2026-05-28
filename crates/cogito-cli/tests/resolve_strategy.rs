@@ -98,11 +98,68 @@ fn unknown_strategy_returns_error_with_available() {
 
 #[test]
 fn missing_provider_returns_error() {
+    // Providers ARE declared but no name was selected anywhere
+    // (no `--provider`, no `strategy.provider`, no
+    // `runtime.default_provider`). The legacy ENV bridge only fires
+    // when `cfg.providers` is empty, so keeping the original entry
+    // ensures we reach the `MissingProvider` arm rather than the
+    // bridge.
     let mut cfg = cfg_with_provider();
     cfg.runtime.default_provider = None;
-    cfg.providers.clear();
     let reg = MapStrategyRegistry::new();
     let args = args_with(None, Some("any"));
     let err = resolve_strategy(&args, &cfg, &reg).unwrap_err();
     assert!(matches!(err, ResolveError::MissingProvider));
+}
+
+/// Sprint 2 legacy ENV bridge: when `cfg.providers` is empty and no
+/// provider name is selected anywhere, `resolve_strategy` falls back
+/// to synthesizing a `default` provider from `ANTHROPIC_API_KEY` /
+/// `OPENAI_BASE_URL`. Regression guard for the Phase 9 / Task 17 gap
+/// where `run()` switched from `select_provider` to `resolve_strategy`
+/// without porting the bridge.
+#[test]
+fn legacy_env_bridge_synthesizes_anthropic_when_providers_empty() {
+    let mut cfg = cfg_with_provider();
+    cfg.runtime.default_provider = None;
+    cfg.runtime.default_model = None;
+    cfg.providers.clear();
+    let reg = MapStrategyRegistry::new();
+
+    // Set --model and --base-url (Sprint 2 invocation shape).
+    let mut args = args_with(None, Some("claude-opus-4-7"));
+    args.base_url = Some("https://api.anthropic.example".into());
+
+    // Scrub interfering ENV, set only ANTHROPIC_API_KEY so the
+    // synthesizer picks the Anthropic branch deterministically.
+    temp_env::with_vars(
+        [
+            ("ANTHROPIC_API_KEY", Some("sk-test-resolve")),
+            ("OPENAI_API_KEY", None::<&str>),
+            ("OPENAI_BASE_URL", None::<&str>),
+        ],
+        || {
+            let (strategy, provider) = resolve_strategy(&args, &cfg, &reg).unwrap();
+            assert_eq!(strategy.model_params.model, "claude-opus-4-7");
+            match provider {
+                ProviderConfig::Anthropic {
+                    name,
+                    api_key,
+                    base_url,
+                    ..
+                } => {
+                    assert_eq!(name, "default");
+                    assert_eq!(api_key, "sk-test-resolve");
+                    // `resolve_strategy` does not apply `--base-url`;
+                    // that's a post-merge field patch applied above in
+                    // `chat::run`. The synthesized provider uses the
+                    // canonical Anthropic endpoint.
+                    assert_eq!(base_url, "https://api.anthropic.com");
+                }
+                ProviderConfig::OpenAiCompat { .. } | ProviderConfig::OpenAiResponses { .. } => {
+                    panic!("expected Anthropic synthesis");
+                }
+            }
+        },
+    );
 }

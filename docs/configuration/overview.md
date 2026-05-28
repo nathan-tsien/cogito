@@ -185,7 +185,7 @@ Process-wide startup options.
 | `session_root`    | `PathBuf`       | `"./sessions"`     | JSONL store directory |
 | `default_provider`| `Option<String>`| auto if 1 provider | Provider name to use when `--provider` is absent |
 | `default_model`   | `Option<String>`| —                  | Wire-level model id; required if CLI doesn't pass `--model` |
-| `strategies_dir`  | `PathBuf`       | `"./strategies"`   | YAML directory; consumed by Sprint 6 loader |
+| `strategies_dir`  | `PathBuf`       | `".cogito/strategies"` | Markdown strategies directory (Sprint 9a) |
 
 ### `[[providers]]`
 

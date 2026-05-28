@@ -161,7 +161,7 @@ mod tests {
                 default_provider: Some("anthropic-prod".into()),
                 default_model: Some("claude-opus-4-7".into()),
                 default_strategy: Some("coder".into()),
-                strategies_dir: Some(PathBuf::from("./strategies")),
+                strategies_dir: Some(PathBuf::from(".cogito/strategies")),
             }),
             providers: Some(vec![]),
             mcp_servers: None,

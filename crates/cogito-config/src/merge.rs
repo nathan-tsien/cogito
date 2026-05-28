@@ -60,7 +60,7 @@ impl RuntimeConfigPartial {
     /// Fill defaults and apply minimal validation:
     ///
     /// - `runtime.session_root`   -> `"./sessions"`
-    /// - `runtime.strategies_dir` -> `"./strategies"`
+    /// - `runtime.strategies_dir` -> `".cogito/strategies"`
     /// - `runtime.default_provider`: if absent AND exactly one provider
     ///   declared, auto-select its name; if absent AND multiple
     ///   providers declared, return `ConfigError::Validation`.
@@ -99,7 +99,7 @@ impl RuntimeConfigPartial {
                 default_strategy: rt.default_strategy,
                 strategies_dir: rt
                     .strategies_dir
-                    .unwrap_or_else(|| PathBuf::from("./strategies")),
+                    .unwrap_or_else(|| PathBuf::from(".cogito/strategies")),
             },
             providers,
             strategies: std::collections::HashMap::new(),

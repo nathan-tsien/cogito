@@ -303,6 +303,7 @@ pub fn resolve_strategy(
     // Resolve provider:
     //   --provider > strategy.provider (via FsStrategyRegistry downcast)
     //              > cogito.toml default_provider
+    //              > Sprint 2 legacy ENV bridge (empty cfg.providers only)
     let strategy_provider_ref = strategy_name
         .as_deref()
         .and_then(|n| registry_provider_ref(registry, n));
@@ -311,8 +312,25 @@ pub fn resolve_strategy(
         .provider
         .clone()
         .or(strategy_provider_ref)
-        .or_else(|| cfg.runtime.default_provider.clone())
-        .ok_or(ResolveError::MissingProvider)?;
+        .or_else(|| cfg.runtime.default_provider.clone());
+
+    let Some(provider_name) = provider_name else {
+        // Sprint 2 legacy bridge: no providers declared and no name
+        // selected anywhere -> synthesize one from
+        // `ANTHROPIC_API_KEY` / `OPENAI_BASE_URL`. Anything else
+        // (e.g. user set `default_provider` but the named entry is
+        // missing) still surfaces as `MissingProvider` /
+        // `UnknownProvider` below.
+        if cfg.providers.is_empty() {
+            let synth = crate::chat_config::synthesize_legacy_provider(
+                &strategy.model_params.model,
+                args.base_url.as_deref(),
+            )
+            .map_err(|e| ResolveError::LegacyBridge(e.to_string()))?;
+            return Ok((strategy, synth));
+        }
+        return Err(ResolveError::MissingProvider);
+    };
 
     let provider_cfg = cfg
         .providers
@@ -368,6 +386,11 @@ pub enum ResolveError {
     /// No `--model`, no strategy model, no `runtime.default_model`.
     #[error("no model available: pass --model, set strategy.model, or set runtime.default_model")]
     MissingModel,
+    /// Sprint 2 legacy ENV bridge attempted (no providers declared) but
+    /// failed -- e.g. neither `ANTHROPIC_API_KEY` nor `OPENAI_BASE_URL`
+    /// is set. The wrapped string is the underlying anyhow chain.
+    #[error("legacy ENV bridge failed: {0}")]
+    LegacyBridge(String),
     /// Pass-through for non-`Unknown` `StrategyError` variants surfaced
     /// from the registry.
     #[error(transparent)]
