@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint 9a · Multi-model Strategy (2026-05-27)
+
+**Added**
+- `cogito-protocol::StrategyRegistry` trait (read-only, object-safe).
+- `cogito-strategy` crate — FS-backed `StrategyRegistry` impl.
+  Markdown+frontmatter strategy files under `.cogito/strategies/`
+  (Repo scope) and `~/.config/cogito/strategies/` (User scope).
+- `cogito-model::openai_responses` adapter — OpenAI Responses API
+  with native reasoning-item decoding (ADR-0019).
+- `ProviderConfig::OpenAiResponses` variant.
+- `cogito.toml` `runtime.default_strategy` key.
+- `cogito chat --strategy <name>` and `--list-strategies` flags.
+- `cogito_cli::chat::resolve_strategy` helper — single seam for
+  combining strategy + CLI flags + `cogito.toml`.
+- Example strategies: `.cogito/strategies/{coder,planner,reviewer}.md`.
+- Resume-chaos `strategy_with_tool_filter` scenario.
+- ADR-0026 (Strategy registry).
+
+**Changed**
+- `runtime.strategies_dir` in `cogito.toml` is now an optional Repo-
+  scope override rather than a single canonical directory.
+
+**Removed**
+- `strategies/claude-opus.yaml` and `strategies/gpt-4.yaml` (stale
+  schema; replaced by `.cogito/strategies/*.md`).
+
 ### Sprint 8 — Async Jobs
 
 - **Added** `cogito-jobs::LocalJobManager` — in-memory async job manager; jobs run as `tokio::task`s with `on_complete` sink registration.
