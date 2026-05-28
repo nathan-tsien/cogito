@@ -659,7 +659,7 @@ for a strategy by name.
 | `cogito-storage-http` | Hands (Storage) | v0.6 | Generic HTTP-backed storage adapter. |
 | `cogito-strategy` | Hands sub-layer | v0.1 (Sprint 9a) | FS-backed `StrategyRegistry` impl. Markdown+frontmatter strategy files under `.cogito/strategies/`. See ADR-0026. |
 | `cogito-cli` | Surface | v0.1 | CLI binary; wires runtime + store + gateway. |
-| `cogito-tui` | Surface | v0.1 (Sprint 9) | TUI. **Pulled forward from v0.2 to v0.1** (merged into Sprint 9 with multi-model strategy). |
+| `cogito-tui` | Surface | v0.1 | TUI. Multi-pane ratatui surface replicating `cogito chat`; see `docs/components/cogito-tui.md`. |
 | `cogito-observability-otel` | Surface (optional) | v0.4 | OpenTelemetry adapter that ships `MetricsRecorder` impl + trace exporter. |
 | `crates/testing/cogito-test-fixtures` | Testing | v0.1 | Shared fixtures, tmp JSONL store helper. |
 | `crates/testing/cogito-mock-model` | Testing | v0.1 | `ModelGateway` mock with scripted responses. |

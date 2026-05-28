@@ -75,7 +75,7 @@ Each crate maps to exactly one layer in the Brain / Hands / Session design (ADR-
 | `cogito-tools-multimedia` | Hands | v0.2+ | Audio / video / image tools. |
 | `cogito-subagent` | Hands | v0.3 | `SubagentToolProvider` with 4 tools. |
 | `cogito-cli` | Surface | v0.1 | CLI entry point. |
-| `cogito-tui` | Surface | v0.2 | TUI. |
+| `cogito-tui` | Surface | v0.1 | TUI. Multi-pane ratatui surface replicating `cogito chat`; see `docs/components/cogito-tui.md`. |
 | `crates/testing/cogito-test-fixtures` | Testing | v0.1 | Test fixtures. |
 | `crates/testing/cogito-mock-model` | Testing | v0.1 | Mock `ModelGateway`. |
 
