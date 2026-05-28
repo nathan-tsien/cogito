@@ -350,6 +350,13 @@ pub fn resolve_strategy(
 /// Extract a strategy's `provider:` reference. Concrete-impl downcast
 /// (`FsStrategyRegistry` only). Returns `None` for other impls — those
 /// must declare provider via `cogito.toml` `default_provider` in v0.1.
+//
+// TODO(v0.4): replace the `as_any` downcast with a first-class
+// `fn provider_ref(&self, name: &str) -> Option<&str>` method on the
+// `StrategyRegistry` trait itself (default `None`). DB- and S3-backed
+// SaaS impls return `None` cleanly; FsStrategyRegistry overrides to
+// the same body as today. Removes the `Any` dance and tightens the
+// trait contract. See ADR-0026 §"as_any downcast trade-off".
 fn registry_provider_ref(registry: &dyn StrategyRegistry, name: &str) -> Option<String> {
     let any_self: &dyn std::any::Any = registry.as_any();
     any_self

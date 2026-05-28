@@ -1,6 +1,6 @@
 # ADR-0026: Strategy registry (`cogito-strategy`) — declarative agent modes
 
-**Status**: Proposed (ratified at Sprint 9a close)
+**Status**: Accepted (ratified at Sprint 9a close, 2026-05-28)
 **Date**: 2026-05-27
 **Spec**: `docs/superpowers/specs/2026-05-27-sprint-9a-multi-model-strategy-design.md`
 **Supersedes (partially)**: ADR-0017 §13 (single `strategies_dir` model is now

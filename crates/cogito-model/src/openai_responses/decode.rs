@@ -15,17 +15,20 @@
 //! - `response.completed` / `response.failed` close the stream.
 //!
 //! cogito needs block-indexed events. We synthesize indices in
-//! observation order:
-//! - Thinking blocks land first per ADR-0019 §4 (assistant content
-//!   array sorts `[Thinking, Text, ToolUse...]`); we assign their
-//!   indices as they appear.
-//! - Text blocks follow.
-//! - Tool-use blocks come last.
+//! **arrival order**: whichever block (Thinking, Text, `ToolUse`) opens
+//! first gets `block_index = 0`, the next gets `1`, and so on.
+//!
+//! ADR-0019 §4 mandates `[Thinking, Text, ToolUse...]` ordering inside
+//! the persisted assistant content array, but the Responses streaming
+//! protocol does not guarantee that ordering at emission time. The
+//! ADR-0019 ordering is therefore enforced **downstream** by
+//! `cogito-context::projector::standard` when it re-projects the event
+//! log into the next prompt — it prepends Thinking blocks regardless of
+//! arrival order.
 //!
 //! For a single-message stream this collapses to `block_index = 0` for
 //! whichever block opens first. For mixed streams the relative ordering
-//! follows event arrival, which matches the Responses ordering
-//! guarantees.
+//! is informational only; the projector restores the canonical order.
 
 use std::collections::HashMap;
 
@@ -158,13 +161,10 @@ impl Decoder {
                 return Ok((out, true));
             }
             StreamEvent::Failed { response } => {
-                let msg = response
+                let message = response
                     .error
                     .map_or_else(|| "Responses stream failed".to_string(), |e| e.message);
-                return Err(ModelError::Provider {
-                    status: 0,
-                    message: msg,
-                });
+                return Err(ModelError::ProviderStream { message });
             }
             StreamEvent::Other => {}
         }
