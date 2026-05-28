@@ -252,7 +252,7 @@ pub struct ChatArgs {
 /// - `ResolveError::UnknownProvider { strategy, provider }` — strategy.provider points to nothing.
 /// - `ResolveError::MissingProvider` — no `--provider`, no strategy provider, no `default_provider`.
 /// - `ResolveError::MissingModel` — no `--model`, no strategy model, no `runtime.default_model`.
-pub(crate) fn resolve_strategy(
+pub fn resolve_strategy(
     args: &ChatArgs,
     cfg: &cogito_config::RuntimeConfig,
     registry: &dyn StrategyRegistry,
@@ -342,7 +342,7 @@ fn registry_provider_ref(registry: &dyn StrategyRegistry, name: &str) -> Option<
 /// Errors returned by [`resolve_strategy`]. Surface code maps these to
 /// user-facing diagnostics.
 #[derive(Debug, Error)]
-pub(crate) enum ResolveError {
+pub enum ResolveError {
     /// CLI named a strategy that the registry does not have.
     #[error("strategy `{name}` not found; available: {available:?}")]
     UnknownStrategy {

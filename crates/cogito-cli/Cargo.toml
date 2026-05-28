@@ -35,6 +35,7 @@ tracing-subscriber = { workspace = true }
 ulid = { workspace = true }
 
 [dev-dependencies]
+cogito-test-fixtures = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 temp-env = { workspace = true, features = ["async_closure"] }
