@@ -51,7 +51,9 @@ async fn legacy_anthropic_bridge() {
                 assert_eq!(api_key, "sk-test-bridge");
                 assert_eq!(base_url, "https://api.anthropic.com");
             }
-            ProviderConfig::OpenAiCompat { .. } => panic!("expected Anthropic"),
+            ProviderConfig::OpenAiCompat { .. } | ProviderConfig::OpenAiResponses { .. } => {
+                panic!("expected Anthropic")
+            }
         }
     })
     .await;
@@ -83,7 +85,9 @@ async fn legacy_openai_compat_bridge() {
                 assert_eq!(base_url, "http://vllm.internal:8000/v1");
                 assert_eq!(api_key.as_deref(), Some("sk-openai"));
             }
-            ProviderConfig::Anthropic { .. } => panic!("expected OpenAiCompat"),
+            ProviderConfig::Anthropic { .. } | ProviderConfig::OpenAiResponses { .. } => {
+                panic!("expected OpenAiCompat")
+            }
         }
     })
     .await;

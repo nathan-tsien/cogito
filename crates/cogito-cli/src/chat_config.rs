@@ -236,5 +236,20 @@ pub fn patch_base_url(cfg: ProviderConfig, new_base_url: String) -> ProviderConf
             include_prior_thinking,
             context_window_tokens,
         },
+        ProviderConfig::OpenAiResponses {
+            name,
+            api_key,
+            timeout_secs,
+            reasoning_effort,
+            context_window_tokens,
+            ..
+        } => ProviderConfig::OpenAiResponses {
+            name,
+            api_key,
+            base_url: new_base_url,
+            timeout_secs,
+            reasoning_effort,
+            context_window_tokens,
+        },
     }
 }
