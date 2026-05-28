@@ -597,6 +597,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cogito-strategy"
+version = "0.1.0"
+dependencies = [
+ "cogito-context",
+ "cogito-protocol",
+ "cogito-test-fixtures",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "cogito-test-fixtures"
 version = "0.1.0"
 dependencies = [
