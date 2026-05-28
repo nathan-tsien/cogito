@@ -8,12 +8,6 @@
 //! Types are `pub(crate)` only — callers go through `ModelGateway`,
 //! never the wire DTOs.
 
-// Scaffold (Task 11) declares all wire types ahead of the encoder
-// (Task 12) and decoder (Task 13) that consume them. The encoder lands
-// in the very next commit and the decoder right after; both populate
-// every variant/field below.
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 
 /// Top-level POST body for `/responses`.
@@ -291,7 +285,9 @@ pub(crate) struct Usage {
     #[serde(default)]
     pub output_tokens: u32,
     /// Sum of input + output (informational; cogito does not use it).
+    /// Decoded so the field validates against the wire format.
     #[serde(default)]
+    #[allow(dead_code)]
     pub total_tokens: u32,
 }
 
@@ -300,7 +296,9 @@ pub(crate) struct Usage {
 pub(crate) struct ResponseError {
     /// Human-readable error message.
     pub message: String,
-    /// Optional machine-readable error code.
+    /// Optional machine-readable error code. Decoded so the field
+    /// validates against the wire format; cogito surfaces only `message`.
     #[serde(default)]
+    #[allow(dead_code)]
     pub code: Option<String>,
 }
