@@ -32,12 +32,12 @@ cogito-cli = { path = "../cogito-cli" }
 
 # UI
 ratatui.workspace = true
-crossterm.workspace = true
+crossterm = { workspace = true, features = ["event-stream"] }
 tui-textarea.workspace = true
 
 # Async runtime
 tokio = { workspace = true, features = ["full"] }
-tokio-stream.workspace = true
+tokio-stream = { workspace = true, features = ["sync"] }
 futures.workspace = true
 
 # CLI
