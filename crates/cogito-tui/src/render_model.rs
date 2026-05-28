@@ -208,7 +208,9 @@ mod tests {
     fn text_delta_coalesces_within_block() {
         let m = run(&[
             StreamEvent::TurnStarted,
-            StreamEvent::TextDelta { chunk: "hi ".into() },
+            StreamEvent::TextDelta {
+                chunk: "hi ".into(),
+            },
             StreamEvent::TextDelta {
                 chunk: "there".into(),
             },
