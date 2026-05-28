@@ -252,9 +252,6 @@ pub struct ChatArgs {
 /// - `ResolveError::UnknownProvider { strategy, provider }` — strategy.provider points to nothing.
 /// - `ResolveError::MissingProvider` — no `--provider`, no strategy provider, no `default_provider`.
 /// - `ResolveError::MissingModel` — no `--model`, no strategy model, no `runtime.default_model`.
-// `dead_code` is temporarily silenced until Task 17 wires this helper
-// into the chat command's `run` function.
-#[allow(dead_code)]
 pub(crate) fn resolve_strategy(
     args: &ChatArgs,
     cfg: &cogito_config::RuntimeConfig,
@@ -335,7 +332,6 @@ pub(crate) fn resolve_strategy(
 /// Extract a strategy's `provider:` reference. Concrete-impl downcast
 /// (`FsStrategyRegistry` only). Returns `None` for other impls — those
 /// must declare provider via `cogito.toml` `default_provider` in v0.1.
-#[allow(dead_code)]
 fn registry_provider_ref(registry: &dyn StrategyRegistry, name: &str) -> Option<String> {
     let any_self: &dyn std::any::Any = registry.as_any();
     any_self
@@ -345,7 +341,6 @@ fn registry_provider_ref(registry: &dyn StrategyRegistry, name: &str) -> Option<
 
 /// Errors returned by [`resolve_strategy`]. Surface code maps these to
 /// user-facing diagnostics.
-#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub(crate) enum ResolveError {
     /// CLI named a strategy that the registry does not have.
@@ -503,15 +498,52 @@ pub async fn run(args: ChatArgs) -> Result<()> {
         session_root: args.session_root.clone(),
     };
     let cfg = crate::chat_config::load_layered_config(&inputs).await?;
-    let provider_cfg = crate::chat_config::select_provider(&cfg, &inputs)?;
+
+    // Build the FS-backed strategy registry. Task 18 moves this into
+    // `chat_config::build_runtime_config_and_registry`; Task 17 builds
+    // it inline so `--list-strategies` and `resolve_strategy` can flow.
+    let registry: Arc<FsStrategyRegistry> = Arc::new(
+        FsStrategyRegistry::from_conventional_scopes_with_repo_override(
+            cfg.runtime.strategies_dir.clone(),
+        )
+        .map_err(|e| anyhow!("scanning strategies dir: {e}"))?,
+    );
+
+    // `--list-strategies`: print available strategies and exit before
+    // we open a runtime / gateway / store. The CLI is the surface
+    // layer; primary command output goes to stdout (not tracing), so
+    // we silence `print_stdout` for this single block.
+    if args.list_strategies {
+        for name in registry.list() {
+            let desc = registry.description(&name).unwrap_or("(no description)");
+            #[allow(clippy::print_stdout)]
+            {
+                println!("{name:<24} {desc}");
+            }
+        }
+        return Ok(());
+    }
+
+    let (strategy, provider_cfg) =
+        resolve_strategy(&args, &cfg, registry.as_ref()).map_err(|e| match e {
+            ResolveError::UnknownStrategy { name, available } => anyhow!(
+                "unknown strategy `{name}`; available: {avail}",
+                avail = available.join(", ")
+            ),
+            other => anyhow!(other),
+        })?;
+
+    // CLI `--base-url` is a post-merge field patch; apply it on the
+    // provider chosen by `resolve_strategy` so the Sprint 2 flag
+    // continues to override base_url for any provider kind.
+    let provider_cfg = if let Some(b) = args.base_url.as_ref() {
+        crate::chat_config::patch_base_url(provider_cfg, b.clone())
+    } else {
+        provider_cfg
+    };
+
     let gateway: Arc<dyn ModelGateway> =
         build_gateway(provider_cfg).map_err(|e| anyhow!("building gateway: {e}"))?;
-
-    let model_id = args
-        .model
-        .clone()
-        .or_else(|| cfg.runtime.default_model.clone())
-        .ok_or_else(|| anyhow!("--model required (or set runtime.default_model in cogito.toml)"))?;
 
     let store = Arc::new(JsonlStore::new(cfg.runtime.session_root.clone()));
     // Keep a typed handle for the post-`open_session` replay; the
@@ -529,11 +561,6 @@ pub async fn run(args: ChatArgs) -> Result<()> {
 
     let tools = build_tool_provider(&cfg, Arc::clone(&job_mgr)).await?;
     let skills = crate::chat_config::build_skill_provider(&cfg)?;
-
-    let mut strategy = HarnessStrategy::default_with_model(&model_id);
-    if let Some(sys) = args.system.clone() {
-        strategy.system_prompt = sys;
-    }
 
     // `Arc<LocalJobManager>` -> `Arc<dyn JobManager>` via the unsized
     // coercion impl on `Arc<T>`. The typed `Arc<LocalJobManager>` was
