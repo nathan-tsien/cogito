@@ -117,7 +117,7 @@ ulid = { version = "1.1", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
 
 # TUI (Sprint 6+)
-ratatui = "0.28"
+ratatui = "0.29"
 crossterm = "0.28"
 # TUI input widget — multi-line buffer used by cogito-tui
 tui-textarea = "0.7"

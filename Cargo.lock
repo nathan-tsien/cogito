@@ -695,7 +695,7 @@ dependencies = [
  "cogito-tools",
  "crossterm",
  "futures",
- "ratatui 0.28.1",
+ "ratatui",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
@@ -2178,27 +2178,6 @@ dependencies = [
 
 [[package]]
 name = "ratatui"
-version = "0.28.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdef7f9be5c0122f890d58bdf4d964349ba6a6161f705907526d891efabba57d"
-dependencies = [
- "bitflags",
- "cassowary",
- "compact_str",
- "crossterm",
- "instability",
- "itertools 0.13.0",
- "lru",
- "paste",
- "strum",
- "strum_macros",
- "unicode-segmentation",
- "unicode-truncate",
- "unicode-width 0.1.14",
-]
-
-[[package]]
-name = "ratatui"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eabd94c2f37801c20583fc49dd5cd6b0ba68c716787c2dd6ed18571e1e63117b"
@@ -3337,7 +3316,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a5318dd619ed73c52a9417ad19046724effc1287fb75cdcc4eca1d6ac1acbae"
 dependencies = [
  "crossterm",
- "ratatui 0.29.0",
+ "ratatui",
  "unicode-width 0.2.0",
 ]
 
