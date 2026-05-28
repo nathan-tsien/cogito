@@ -64,6 +64,7 @@ tokio-test.workspace = true
 # Re-declare cogito-core with the `test-support` feature so the App
 # pure-state tests can construct a stub `SessionHandle` without a Runtime.
 cogito-core = { workspace = true, features = ["test-support"] }
+chrono.workspace = true
 
 [lints]
 workspace = true

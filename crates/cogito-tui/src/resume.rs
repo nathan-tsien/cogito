@@ -1,1 +1,252 @@
-//! Resume replay — populated in Phase 12.
+//! Resume support. On startup with `--session <id>`, the JSONL log
+//! is read in full and translated into the equivalent `StreamEvent`
+//! sequence. The App's `apply_stream_event` then drives the same
+//! `ChatModel` + `ToolTreeModel` paths used at live time — no separate
+//! "replay" code path in the models (spec §4.6 invariant).
+
+use std::sync::Arc;
+
+use anyhow::Result;
+use cogito_protocol::{
+    ConversationEvent, ConversationStore, EventPayload, ids::SessionId, stream::StreamEvent,
+};
+use futures::StreamExt as _;
+
+/// Initial state derived from a session log. `Fresh` for a brand-new
+/// session (no replay); `Replayed` for resumes (translated events to
+/// drive into App at startup).
+pub enum InitialState {
+    /// New session, nothing to replay.
+    Fresh,
+    /// Resumed session — translated stream of events to apply to the
+    /// App's models before entering the live loop.
+    Replayed {
+        /// Events in arrival order.
+        stream_events: Vec<StreamEvent>,
+    },
+}
+
+/// Translate a persisted `ConversationEvent` stream into a stream of
+/// `StreamEvent`s suitable for driving `ChatModel` + `ToolTreeModel`.
+///
+/// The mapping is coarse (one logical block = one synthetic
+/// `TextDelta` with the whole text), since the persisted log is in
+/// completed-block form, not delta form. This is intentional: replay
+/// shows the user the finished content, not a re-played token-by-token
+/// stream.
+#[must_use]
+pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
+    let mut out: Vec<StreamEvent> = Vec::new();
+    let mut in_turn = false;
+    for ev in events {
+        match &ev.payload {
+            EventPayload::TurnStarted { .. } => {
+                if in_turn {
+                    out.push(StreamEvent::TurnCompleted);
+                }
+                out.push(StreamEvent::TurnStarted);
+                in_turn = true;
+            }
+            EventPayload::TurnCompleted { .. } => {
+                out.push(StreamEvent::TurnCompleted);
+                in_turn = false;
+            }
+            EventPayload::TurnFailed { reason } => {
+                out.push(StreamEvent::TurnFailed {
+                    reason: format!("{reason:?}"),
+                });
+                in_turn = false;
+            }
+            EventPayload::AssistantMessageAppended { text } => {
+                if !text.is_empty() {
+                    out.push(StreamEvent::TextDelta {
+                        chunk: text.clone(),
+                    });
+                }
+            }
+            EventPayload::ThinkingBlockRecorded { text, .. } => {
+                if !text.is_empty() {
+                    out.push(StreamEvent::ThinkingDelta {
+                        chunk: text.clone(),
+                    });
+                }
+            }
+            EventPayload::ToolUseRecorded {
+                call_id,
+                tool_name,
+                args,
+            } => {
+                out.push(StreamEvent::ToolDispatchStarted {
+                    call_id: call_id.clone(),
+                    tool_name: tool_name.clone(),
+                    args: args.clone(),
+                });
+                // We don't know the end status without scanning forward for the
+                // matching ToolResultRecorded; emit a synthetic "ok" marker. If
+                // a ToolResultRecorded is encountered later in translate_events,
+                // the arm below corrects the status.
+                out.push(StreamEvent::ToolDispatchEnded {
+                    call_id: call_id.clone(),
+                    ok: true,
+                    error_message: None,
+                });
+            }
+            EventPayload::ToolResultRecorded { call_id, result } => {
+                // Re-emit a corrective end event whose ok bit reflects whether
+                // the result is an error. Since the prior synthetic end was
+                // ok=true, when the tool returned an error we push another end
+                // to flip the status in the ToolTreeModel. ChatModel's
+                // ToolEndLine is append-only — the cosmetic effect is one extra
+                // line, which is acceptable for replay parity.
+                if matches!(result, cogito_protocol::ToolResult::Error { .. }) {
+                    out.push(StreamEvent::ToolDispatchEnded {
+                        call_id: call_id.clone(),
+                        ok: false,
+                        error_message: None,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    if in_turn {
+        out.push(StreamEvent::TurnCompleted);
+    }
+    out
+}
+
+/// Read the session log and produce an `InitialState`. Errors propagate
+/// — caller should print them and exit non-zero before entering raw mode.
+///
+/// # Errors
+///
+/// Returns an error if the session log cannot be read from the store.
+pub async fn load_initial_state(
+    store: &Arc<dyn ConversationStore>,
+    session_id: &SessionId,
+    is_new_session: bool,
+) -> Result<InitialState> {
+    if is_new_session {
+        return Ok(InitialState::Fresh);
+    }
+    // Collect all events from the store. replay(session_id, 0) returns events
+    // with seq > 0, which skips the SessionStarted event (seq=0). That event
+    // carries no TUI-relevant content and falls into the wildcard arm of
+    // translate_events, so this is acceptable for replay purposes.
+    let events: Vec<ConversationEvent> = store
+        .replay(*session_id, 0)
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| anyhow::anyhow!("store replay error: {e}"))?;
+    let stream_events = translate_events(&events);
+    Ok(InitialState::Replayed { stream_events })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use cogito_protocol::{
+        SCHEMA_VERSION,
+        ids::{EventId, SessionId},
+        turn::TurnOutcome,
+    };
+
+    fn ev(payload: EventPayload) -> ConversationEvent {
+        ConversationEvent {
+            schema_version: SCHEMA_VERSION,
+            event_id: EventId::new(),
+            session_id: SessionId::new(),
+            turn_id: None,
+            seq: 0,
+            ts: chrono::Utc::now(),
+            payload,
+        }
+    }
+
+    #[test]
+    fn empty_log_translates_to_empty_stream() {
+        assert!(translate_events(&[]).is_empty());
+    }
+
+    #[test]
+    fn turn_started_and_completed_translate_directly() {
+        let log = vec![
+            ev(EventPayload::TurnStarted {
+                user_input: vec![],
+                activate_skills: vec![],
+            }),
+            ev(EventPayload::TurnCompleted {
+                outcome: TurnOutcome::Completed,
+            }),
+        ];
+        let s = translate_events(&log);
+        assert!(matches!(s[0], StreamEvent::TurnStarted));
+        assert!(matches!(s[1], StreamEvent::TurnCompleted));
+    }
+
+    #[test]
+    fn text_block_yields_text_delta() {
+        let log = vec![
+            ev(EventPayload::TurnStarted {
+                user_input: vec![],
+                activate_skills: vec![],
+            }),
+            ev(EventPayload::AssistantMessageAppended {
+                text: "hello".into(),
+            }),
+            ev(EventPayload::TurnCompleted {
+                outcome: TurnOutcome::Completed,
+            }),
+        ];
+        let s = translate_events(&log);
+        match &s[1] {
+            StreamEvent::TextDelta { chunk } => assert_eq!(chunk, "hello"),
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_use_yields_dispatch_started_and_ended() {
+        let log = vec![
+            ev(EventPayload::TurnStarted {
+                user_input: vec![],
+                activate_skills: vec![],
+            }),
+            ev(EventPayload::ToolUseRecorded {
+                call_id: "c1".into(),
+                tool_name: "t".into(),
+                args: serde_json::json!({}),
+            }),
+            ev(EventPayload::TurnCompleted {
+                outcome: TurnOutcome::Completed,
+            }),
+        ];
+        let s = translate_events(&log);
+        assert!(s.iter().any(|e| matches!(
+            e,
+            StreamEvent::ToolDispatchStarted { call_id, .. } if call_id == "c1"
+        )));
+        assert!(s.iter().any(|e| matches!(
+            e,
+            StreamEvent::ToolDispatchEnded { call_id, ok: true, .. } if call_id == "c1"
+        )));
+    }
+
+    #[test]
+    fn unterminated_turn_emits_synthetic_completed() {
+        // A log that ends mid-turn (e.g. crash during streaming)
+        // must still leave the chat in a coherent state.
+        let log = vec![ev(EventPayload::TurnStarted {
+            user_input: vec![],
+            activate_skills: vec![],
+        })];
+        let s = translate_events(&log);
+        assert!(
+            s.last()
+                .is_some_and(|e| matches!(e, StreamEvent::TurnCompleted))
+        );
+    }
+}
