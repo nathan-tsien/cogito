@@ -6,13 +6,10 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 + 6 + 7 + 8 complete;
-> Sprint 4 (MCP sync tools) in flight; Sprints 9–10 reshaped per
-> [2026-05-22 roadmap rebalance](docs/superpowers/specs/2026-05-22-roadmap-rebalance-design.md)
-> (Hook impl + Context C2 trait freeze + Skill loader promoted into
-> v0.1; Async Jobs / Multi-model / TUI / hardening renumbered;
-> Storage+Multimodal deferred from v0.2 to v0.5).
-> **Current sprint: Sprint 9 (Multi-model Strategy + TUI).**
+> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 + 6 + 7 + 8 + 9a complete;
+> Sprint 4 (MCP sync tools) in flight; Sprint 9 split into 9a (done)
+> and 9b (TUI; spec pending); Sprints 10 unchanged.
+> **Current sprint: Sprint 9b (TUI).**
 
 ## Version plan
 
@@ -190,16 +187,28 @@ v0.3 Subagent S1 `wait_agent` semantics and v0.4 multi-replica resume.
 - [x] Fix cancel-token-disconnect: `SessionShared` and `SessionState` share `Arc<parking_lot::Mutex<CancellationToken>>` so `cancel_turn` works on every turn (closes Sprint 3 latent narrowing)
 - [x] Resume-chaos: new `paused_async_job` scenario with three crash boundaries
 
-#### Sprint 9 · Multi-model Strategy + TUI (2 days)
+#### Sprint 9a · Multi-model Strategy (2 days)
 
-**Merged from old Sprint 6 + old Sprint 7 lower half** by 2026-05-22
-rebalance.
+**Split from old Sprint 9** by 2026-05-27 spec/plan. Carries the
+multi-model half of the original Sprint 9. TUI carries to Sprint 9b.
 
-- [ ] OpenAI adapter in `cogito-model` (Responses API; ContentBlock serialization to OpenAI's flat top-level items)
-- [ ] H10 Strategy Selector with YAML config loading from `strategies/*.yaml`
-- [ ] CLI `--model` flag selects strategy
-- [ ] Per-strategy `model_params`, `allowed_tools`, `system_prompt`
-- [ ] Basic TUI with ratatui (replicates `cogito chat`)
+- [x] OpenAI Responses adapter in `cogito-model` (Responses API; ContentBlock serialization with native reasoning items per ADR-0019)
+- [x] H10 Strategy Selector — markdown+frontmatter strategy registry via new crate `cogito-strategy` (FS-backed `StrategyRegistry` impl)
+- [x] CLI `--strategy <name>` flag selects strategy; `--model` overrides strategy.model
+- [x] Per-strategy `model_params`, `allowed_tools`, `system_prompt`, `context`
+- [x] Three example strategies under `.cogito/strategies/` (coder, planner, reviewer)
+- [x] **ADR-0026**: Strategy registry — markdown+frontmatter format, Repo > User scope precedence, supersedes ADR-0017 §13
+- [x] Resume-chaos `strategy_with_tool_filter` scenario passes all 4 oracles
+
+#### Sprint 9b · TUI (1 day)
+
+**Split from old Sprint 9** by 2026-05-27 spec/plan. Replicates
+`cogito chat` in a ratatui TUI; consumes the same `resolve_strategy`
+helper landed in 9a.
+
+- [ ] Basic TUI with ratatui replicating `cogito chat`
+- [ ] `cogito-tui` reads the same FsStrategyRegistry; `--strategy` flag honored
+- [ ] Spec to follow once 9a lands
 
 #### Sprint 10 · v0.1 硬化 + tag v0.1.0 (1 day)
 
