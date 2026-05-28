@@ -1,5 +1,21 @@
 # H10 · Strategy Selector
 
+## What is a strategy
+
+A strategy is a named, declarative "agent mode." It bundles *which
+model, which persona, which tools, which context policy* for one
+kind of work. Consumers ship N strategies — `coder`, `planner`,
+`reviewer`, `critic` — and `--strategy <name>` selects the mode.
+Same Brain, same Boundary, different *behavior contract*.
+
+Strategies are not configuration of cogito. `cogito.toml` is
+"where is the model and how do I reach it"; strategies are "what do
+I tell the model to do." Strategies reference providers from
+`cogito.toml` by name; they never embed credentials.
+
+See [`ADR-0026`](../adr/0026-strategy-registry.md) for the full
+rationale.
+
 > **Status**: 🚧 Sprint 2 lands the `HarnessStrategy::default_with_model(model_id)` factory + Mid field set
 > (name / system_prompt / allowed_tools / tool_order / model_params / max_turns).
 > YAML loader + multi-strategy registry + per-task selection remain Sprint 6.
@@ -78,29 +94,60 @@ the duration of the turn** and consumed (read-only) by H11, H04, H05, H09.
 - `task` (e.g., "code-review" vs "chat" vs "tool-heavy") is reserved in the API but ignored in 0.x (defaults to a single per-model strategy)
 - Strategy registry is in-memory; no hot reload (process restart to pick up YAML edits)
 
-> **2026-05-21 update (ADR-0017 §9):** Strategy file basename
-> (without `.yaml`) is the canonical strategy name; the YAML body
-> drops `name:` and `applicable_models:` fields. The two existing
-> draft files (`strategies/claude-opus.yaml`, `strategies/gpt-4.yaml`)
-> will be rewritten when Sprint 6 lands the loader.
+> **2026-05-27 update (ADR-0026 / Sprint 9a):** Strategy files are
+> markdown with YAML frontmatter (Skills convention). The `name`
+> frontmatter field is REQUIRED and MUST match the filename
+> basename. The 2026-05-21 note saying `name:` would be dropped is
+> superseded — we keep `name:` and validate it. Scope precedence
+> (Repo > User) replaces the single `runtime.strategies_dir` model;
+> `strategies_dir`, when set, overrides the Repo root only.
 
-## Example strategy YAML (Sprint 6+)
+## Example strategy file (Sprint 9a+)
 
-```yaml
-# strategies/claude-sonnet-default.yaml
-model_id: claude-sonnet-4-6
-system_prompt: |
-  You are a helpful assistant for software engineering tasks.
-allowed_tools: ["read_file", "grep", "shell"]
-tool_order: ["read_file", "grep", "shell"]
+Strategies live as markdown files with YAML frontmatter under
+`.cogito/strategies/<name>.md`. The filename basename must match the
+`name:` frontmatter field. The body of the markdown is the system
+prompt.
+
+```markdown
+---
+name: coder                          # required, must match filename basename
+description: >                       # optional, human-only; surfaced by `--list`
+  Coding tasks. Read first, write second. Low temperature for precision.
+
+# Optional provider/model binding. If absent, CLI --model and
+# cogito.toml [default_provider] resolve them. CLI --model wins.
+provider: anthropic-default          # references cogito.toml [providers.anthropic-default]
+model: claude-opus-4-7
+
+# Tool filter. null/omit = ToolFilter::All (every tool the provider lists).
+allowed_tools:
+  - read_file
+  - run_tests
+
+# Optional explicit ordering for prompt-cache stability.
+tool_order:
+  - read_file
+  - run_tests
+
+# Safety budget; default 16 if omitted.
+max_turns: 50
+
+# Sampling knobs. Overlay on top of provider-level model_params.
+# Strategy keys win on conflict.
 model_params:
-  temperature: 0.7
+  temperature: 0.3
   max_tokens: 4096
-max_turns: 32
-# Sprint 7+ fields (when H09 hooks land):
-# hooks:
-#   - name: "sensitive_content_filter"
-#     config: { severity: "high" }
+
+# Context-management pipeline. Deserializes directly into
+# cogito_context::ContextConfig. Default = all-no-op.
+context:
+  compactor: { kind: truncate, max_tokens: 100000 }
+---
+
+You are a precise software engineer.
+Always read before writing. Run tests after every change.
+...
 ```
 
 ## Open design questions
