@@ -301,6 +301,77 @@ mod tests {
     }
 
     #[test]
+    fn encodes_mixed_assistant_message_in_correct_order() {
+        // A single Assistant message carrying [Thinking, Text, ToolUse]
+        // must flush as three flat items in the same order: Reasoning,
+        // Message{assistant, OutputText}, FunctionCall. This guards the
+        // multi-block flush logic in encode_assistant (text-run flush on
+        // both Thinking and ToolUse boundaries) so adding new block
+        // variants cannot silently reorder a re-feed.
+        let input = ModelInput {
+            system: String::new(),
+            messages: vec![Message::Assistant {
+                content: vec![
+                    ContentBlock::Thinking {
+                        text: "reasoning prelude".into(),
+                        provider_opaque: None,
+                    },
+                    ContentBlock::Text {
+                        text: "answer body".into(),
+                    },
+                    ContentBlock::ToolUse {
+                        call_id: "call_42".into(),
+                        tool_name: "read_file".into(),
+                        args: serde_json::json!({"path": "/etc/hosts"}),
+                    },
+                ],
+            }],
+            tools: vec![],
+            params: empty_params(),
+        };
+        let cfg = OpenAiResponsesConfig::with_api_key("k");
+        let req = encode_request(&input, &cfg);
+
+        assert_eq!(req.input.len(), 3, "expected exactly 3 items, got {req:?}");
+
+        assert!(
+            matches!(&req.input[0], InputItem::Reasoning { summary } if summary.len() == 1
+                && summary[0].text == "reasoning prelude"),
+            "first item must be Reasoning with the original text, got {:?}",
+            req.input[0]
+        );
+
+        match &req.input[1] {
+            InputItem::Message { role, content } => {
+                assert_eq!(role, "assistant");
+                assert_eq!(content.len(), 1);
+                assert!(
+                    matches!(
+                        &content[0],
+                        MessageContent::OutputText { text } if text == "answer body"
+                    ),
+                    "second item must carry OutputText 'answer body', got {:?}",
+                    content[0]
+                );
+            }
+            other => panic!("expected Message{{assistant}}, got {other:?}"),
+        }
+
+        match &req.input[2] {
+            InputItem::FunctionCall {
+                call_id,
+                name,
+                arguments,
+            } => {
+                assert_eq!(call_id, "call_42");
+                assert_eq!(name, "read_file");
+                assert!(arguments.contains("/etc/hosts"));
+            }
+            other => panic!("expected FunctionCall, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn encodes_thinking_block_as_reasoning_item() {
         let input = ModelInput {
             system: String::new(),

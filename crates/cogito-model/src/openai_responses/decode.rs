@@ -83,7 +83,7 @@ struct ToolBuf {
 // shape of `openai_compat::decode::Decoder`.
 #[derive(Debug, Default)]
 #[allow(clippy::struct_excessive_bools)]
-struct Decoder {
+pub(crate) struct Decoder {
     /// Whether `text_block_index` has been allocated yet.
     text_started: bool,
     /// Synthesised `block_index` for the (single) text block.
@@ -116,7 +116,7 @@ struct Decoder {
 }
 
 impl Decoder {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -132,7 +132,10 @@ impl Decoder {
     /// Returns `(events, terminal)`. `terminal == true` means the stream
     /// has closed (`Completed` / `Failed`); the caller should not pull
     /// further events.
-    fn translate(&mut self, evt: StreamEvent) -> Result<(Vec<ModelEvent>, bool), ModelError> {
+    pub(crate) fn translate(
+        &mut self,
+        evt: StreamEvent,
+    ) -> Result<(Vec<ModelEvent>, bool), ModelError> {
         let mut out: Vec<ModelEvent> = Vec::new();
         match evt {
             StreamEvent::OutputItemAdded { item } => self.on_item_added(item, &mut out),
@@ -429,40 +432,6 @@ pub(crate) async fn stream_response(
     Ok(s.boxed())
 }
 
-// Re-exported for the integration test in `tests/openai_responses_decode.rs`.
-#[doc(hidden)]
-pub fn replay_into_model_events(bytes: &[u8]) -> Result<Vec<ModelEvent>, ModelError> {
-    use eventsource_stream::EventStream;
-
-    let body = futures::stream::iter(vec![Ok::<_, std::io::Error>(
-        ::bytes::Bytes::copy_from_slice(bytes),
-    )]);
-    let mut parsed = EventStream::new(body);
-    let mut decoder = Decoder::new();
-    let mut out = Vec::new();
-    futures::executor::block_on(async {
-        while let Some(res) = parsed.next().await {
-            let evt = res.map_err(|e| ModelError::Decode(format!("sse parse: {e}")))?;
-            if evt.data.is_empty() {
-                continue;
-            }
-            let event: StreamEvent = match serde_json::from_str(&evt.data) {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-            let (events, terminal) = decoder.translate(event)?;
-            for m in events {
-                out.push(m);
-            }
-            if terminal {
-                break;
-            }
-        }
-        Ok::<_, ModelError>(())
-    })?;
-    Ok(out)
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -470,9 +439,10 @@ mod tests {
     //!
     //! Fixture-driven integration coverage lives in
     //! `crates/cogito-model/tests/openai_responses_decode.rs` and drives
-    //! recorded SSE bytes through `replay_into_model_events`. The
-    //! full async stream integration is exercised by a manual live-API
-    //! smoke test (not in CI).
+    //! recorded SSE bytes through
+    //! `cogito_model::sse::replay_openai_responses_into_model_events`.
+    //! The full async stream integration is exercised by a manual
+    //! live-API smoke test (not in CI).
 
     use super::*;
 
