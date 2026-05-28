@@ -1,6 +1,12 @@
-//! cogito-tui — terminal UI. Added in Sprint 6.
+//! cogito-tui binary entrypoint. Phase 1 stub: parses args and exits
+//! OK so the workspace compiles. Real entrypoint lands in Task 22.
 
-#[allow(clippy::print_stdout)] // Stub binary; tracing wiring lands in Sprint 6.
-fn main() {
-    println!("cogito-tui — Sprint 0 stub. Not implemented until Sprint 6.");
+use anyhow::Result;
+use clap::Parser;
+use cogito_tui::cli::TuiArgs;
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<()> {
+    let _args = TuiArgs::parse();
+    Ok(())
 }
