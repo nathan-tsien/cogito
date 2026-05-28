@@ -12,7 +12,6 @@ workspace = true
 
 [dependencies]
 cogito-protocol = { workspace = true }
-cogito-context = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
@@ -21,4 +20,5 @@ walkdir = { workspace = true }
 
 [dev-dependencies]
 cogito-test-fixtures = { workspace = true }
+temp-env = { workspace = true }
 tempfile = { workspace = true }

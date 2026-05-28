@@ -39,6 +39,8 @@
 pub mod error;
 pub mod parser;
 mod schema;
+pub mod scope;
 
 pub use error::LoadError;
 pub use parser::{ParsedStrategy, parse_strategy_file};
+pub use scope::{Scope, ScopeRoot, conventional_scopes};
