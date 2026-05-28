@@ -12,6 +12,7 @@ use cogito_config::{
 };
 use cogito_model::ProviderConfig;
 use cogito_protocol::skill::SkillProvider;
+use cogito_strategy::FsStrategyRegistry;
 
 /// Subset of `ChatArgs` needed by the config helpers. The CLI build
 /// passes a real `ChatArgs`; tests pass a `ChatConfigInputs` directly.
@@ -48,6 +49,27 @@ pub async fn load_layered_config(inputs: &ChatConfigInputs) -> Result<RuntimeCon
     merge_layers(layers)
         .finalize()
         .map_err(|e| anyhow!("finalizing config: {e}"))
+}
+
+/// Load + finalize the layered config and build the matching FS-backed
+/// strategy registry. Scopes are resolved with
+/// [`FsStrategyRegistry::from_conventional_scopes_with_repo_override`]
+/// so `runtime.strategies_dir` (from `cogito.toml` or CLI override)
+/// takes the Repo slot and `~/.config/cogito/strategies/` takes User.
+///
+/// Returned together because the chat command threads the registry into
+/// `resolve_strategy` immediately after constructing the config; pairing
+/// the two prevents callers from forgetting to refresh one when the
+/// other changes.
+pub async fn build_runtime_config_and_registry(
+    inputs: &ChatConfigInputs,
+) -> Result<(RuntimeConfig, Arc<FsStrategyRegistry>)> {
+    let cfg = load_layered_config(inputs).await?;
+    let registry = FsStrategyRegistry::from_conventional_scopes_with_repo_override(
+        cfg.runtime.strategies_dir.clone(),
+    )
+    .map_err(|e| anyhow!("scanning strategies dir: {e}"))?;
+    Ok((cfg, Arc::new(registry)))
 }
 
 /// Convert CLI-style inputs into a `RuntimeConfigPartial` for use as

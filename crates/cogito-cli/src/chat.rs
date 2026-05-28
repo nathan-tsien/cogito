@@ -497,17 +497,7 @@ pub async fn run(args: ChatArgs) -> Result<()> {
         base_url: args.base_url.clone(),
         session_root: args.session_root.clone(),
     };
-    let cfg = crate::chat_config::load_layered_config(&inputs).await?;
-
-    // Build the FS-backed strategy registry. Task 18 moves this into
-    // `chat_config::build_runtime_config_and_registry`; Task 17 builds
-    // it inline so `--list-strategies` and `resolve_strategy` can flow.
-    let registry: Arc<FsStrategyRegistry> = Arc::new(
-        FsStrategyRegistry::from_conventional_scopes_with_repo_override(
-            cfg.runtime.strategies_dir.clone(),
-        )
-        .map_err(|e| anyhow!("scanning strategies dir: {e}"))?,
-    );
+    let (cfg, registry) = crate::chat_config::build_runtime_config_and_registry(&inputs).await?;
 
     // `--list-strategies`: print available strategies and exit before
     // we open a runtime / gateway / store. The CLI is the surface
