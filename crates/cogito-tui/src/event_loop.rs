@@ -38,6 +38,8 @@ pub async fn run(app: &mut App) -> Result<()> {
     let mut redraw_tick = tokio::time::interval(Duration::from_millis(33));
     redraw_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+    let mut spinner_tick: u64 = 0;
+
     // Initial draw so the user sees a frame immediately.
     terminal
         .draw(|f| {
@@ -49,8 +51,8 @@ pub async fn run(app: &mut App) -> Result<()> {
                     selected: app.selected,
                     expanded: &app.expanded,
                     input: &app.input,
-                    show_tools: app.show_tools,
-                    status: &app.status_data(),
+                    turn_thinking: app.current_turn_thinking,
+                    spinner_tick,
                     popup_prefix: popup_prefix(app.popup.as_ref()).as_deref(),
                 },
             );
@@ -84,6 +86,7 @@ pub async fn run(app: &mut App) -> Result<()> {
                 }
             }
             _ = redraw_tick.tick() => {
+                spinner_tick = spinner_tick.wrapping_add(1);
                 terminal
                     .draw(|f| {
                         render(
@@ -94,8 +97,8 @@ pub async fn run(app: &mut App) -> Result<()> {
                                 selected: app.selected,
                                 expanded: &app.expanded,
                                 input: &app.input,
-                                show_tools: app.show_tools,
-                                status: &app.status_data(),
+                                turn_thinking: app.current_turn_thinking,
+                                spinner_tick,
                                 popup_prefix: popup_prefix(app.popup.as_ref()).as_deref(),
                             },
                         );
@@ -119,7 +122,10 @@ async fn handle_action(app: &mut App, action: Action) -> Result<()> {
         | Action::ExpandNode {
             now_expanded: false,
             ..
-        } => Ok(()),
+        }
+        | Action::ExpandRecent { .. }
+        | Action::ExpandAllInLatestMessage
+        | Action::CollapseAllInLatestMessage => Ok(()),
         Action::Quit => {
             app.should_quit = true;
             Ok(())

@@ -18,7 +18,6 @@ use futures::StreamExt as _;
 
 use crate::render_model::{ChatModel, ToolTreeModel, TreePath};
 use crate::ui::input::InputWidget;
-use crate::ui::status::StatusData;
 
 /// Window after a Ctrl-C that already initiated a turn cancellation
 /// during which a second Ctrl-C is interpreted as "exit now". Mirrors
@@ -64,8 +63,6 @@ pub struct App {
     /// Multi-line input buffer.
     pub input: InputWidget,
 
-    /// Whether the tools pane is visible (`Ctrl-T` toggle).
-    pub show_tools: bool,
     /// Active popup, if any.
     pub popup: Option<Popup>,
 
@@ -77,6 +74,10 @@ pub struct App {
     pub turn_count: u32,
     /// `true` between `TurnStarted` and `TurnCompleted/Failed/Cancelled/Paused`.
     pub turn_in_progress: bool,
+    /// True between `TurnStarted | ToolDispatchEnded` and the next
+    /// content event for this turn. Drives the `∴ ⠋` thinking spinner
+    /// (spec §"Thinking spinner").
+    pub current_turn_thinking: bool,
 
     /// First Ctrl-C of a double-tap window. `None` = next Ctrl-C
     /// cancels the turn (or shows a hint if idle).
@@ -92,27 +93,34 @@ impl App {
         self.chat.on_event(ev);
         self.tools.on_event(ev);
         match ev {
-            StreamEvent::TurnStarted => self.turn_in_progress = true,
+            StreamEvent::TurnStarted => {
+                self.turn_in_progress = true;
+                self.current_turn_thinking = true;
+            }
             StreamEvent::TurnCompleted => {
                 self.turn_in_progress = false;
+                self.current_turn_thinking = false;
                 self.turn_count = self.turn_count.saturating_add(1);
             }
             StreamEvent::TurnFailed { .. }
             | StreamEvent::TurnCancelled
-            | StreamEvent::TurnPaused => self.turn_in_progress = false,
+            | StreamEvent::TurnPaused => {
+                self.turn_in_progress = false;
+                self.current_turn_thinking = false;
+            }
+            StreamEvent::TextDelta { .. } | StreamEvent::ThinkingDelta { .. } => {
+                self.current_turn_thinking = false;
+            }
+            StreamEvent::ToolDispatchStarted { .. } => {
+                self.current_turn_thinking = false;
+            }
+            StreamEvent::ToolDispatchEnded { .. } => {
+                // Spinner reappears between tool end and next content.
+                if self.turn_in_progress {
+                    self.current_turn_thinking = true;
+                }
+            }
             _ => {}
-        }
-    }
-
-    /// Build the status bar payload from current state.
-    #[must_use]
-    pub fn status_data(&self) -> StatusData {
-        StatusData {
-            strategy: self.strategy_name.clone(),
-            model: self.model_id.clone(),
-            session_id: self.session_id_str.clone(),
-            turn_count: self.turn_count,
-            tools_visible: self.show_tools,
         }
     }
 
@@ -231,12 +239,12 @@ pub(crate) mod tests {
             selected: None,
             expanded: HashSet::new(),
             input: InputWidget::new(),
-            show_tools: true,
             popup: None,
             strategy_name: "default".into(),
             model_id: "model-x".into(),
             turn_count: 0,
             turn_in_progress: false,
+            current_turn_thinking: false,
             cancel_seen_at: None,
             should_quit: false,
         };
@@ -284,15 +292,6 @@ pub(crate) mod tests {
             .on_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
         app.refresh_popup();
         assert!(app.popup.is_none());
-    }
-
-    #[test]
-    fn status_data_mirrors_app_state() {
-        let (app, _td) = app_for_pure_test();
-        let s = app.status_data();
-        assert_eq!(s.strategy, "default");
-        assert_eq!(s.model, "model-x");
-        assert!(s.tools_visible);
     }
 
     #[tokio::test(flavor = "current_thread")]

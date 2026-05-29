@@ -1,89 +1,82 @@
-//! UI widgets — top-level `render` lands in Phase 8; submodules below
-//! populate progressively across Phases 4–7.
+//! UI surface — top-level `render` orchestrates the single chat
+//! column + input footer (spec §"Chrome strategy"). No persistent
+//! status row; no tools pane.
 
+pub mod banner;
 pub mod chat;
 pub mod input;
 pub mod popup;
-pub mod status;
-pub mod tools;
+pub mod spinner;
 
 use std::collections::HashSet;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Style};
+use ratatui::text::Line;
+use ratatui::widgets::Paragraph;
 
 use crate::render_model::{ChatModel, ToolTreeModel, TreePath};
+use crate::ui::chat::ChatRenderInputs;
 use crate::ui::input::InputWidget;
-use crate::ui::status::StatusData;
 
-/// Top-level render — borrows every pane's state and lays out the
-/// frame. Layout (when `show_tools = true`):
-///
-/// ```text
-/// ┌───────────────────────┬──────────────┐
-/// │ chat                  │ tools        │
-/// │ ...                   │ ...          │
-/// ├───────────────────────┴──────────────┤
-/// │ message (input)                      │
-/// │ ...                                  │
-/// ├──────────────────────────────────────┤
-/// │ status bar                           │
-/// └──────────────────────────────────────┘
-/// ```
-///
-/// When `show_tools = false`: chat takes full width; tools area is
-/// suppressed. Slash popup overlays the input when `popup_prefix`
-/// is `Some`.
+/// Top-level render inputs. One chat column + an input footer. No
+/// `show_tools`, no separate status pane.
 pub struct RenderInputs<'a> {
-    /// Chat scrollback state.
+    /// Chat scrollback.
     pub chat: &'a ChatModel,
-    /// Tool-tree state.
+    /// Tool tree (for inline tool block lookup).
     pub tools: &'a ToolTreeModel,
-    /// Currently selected node in the tree (None = nothing selected).
+    /// Selected tool path.
     pub selected: Option<TreePath>,
-    /// Currently expanded set (subset of all `(turn_idx, node_idx)`).
+    /// Expanded tool paths.
     pub expanded: &'a HashSet<TreePath>,
     /// Multi-line input widget.
     pub input: &'a InputWidget,
-    /// Whether the tools pane is visible (`Ctrl-T` toggle).
-    pub show_tools: bool,
-    /// Status bar payload.
-    pub status: &'a StatusData,
-    /// When `Some`, render the slash popup with this prefix; `None`
-    /// hides the popup.
+    /// Lifecycle: `true` between TurnStarted | ToolDispatchEnded and
+    /// the next content event.
+    pub turn_thinking: bool,
+    /// Redraw counter for spinner animation.
+    pub spinner_tick: u64,
+    /// Slash popup prefix when `Some`.
     pub popup_prefix: Option<&'a str>,
 }
 
-/// Render one frame. `frame_area` is `Frame::area()`.
+/// Render one frame.
 pub fn render(f: &mut Frame, inputs: &RenderInputs<'_>) {
     let area = f.area();
     let input_h = inputs.input.desired_height();
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3), // chat + tools row
+            Constraint::Min(3),    // chat
+            Constraint::Length(1), // dim divider
             Constraint::Length(input_h),
-            Constraint::Length(1), // status bar
         ])
         .split(area);
+    let chat_area = outer[0];
+    let divider_area = outer[1];
+    let input_area = outer[2];
 
-    let top = outer[0];
-    let input_area = outer[1];
-    let status_area = outer[2];
+    crate::ui::chat::render(
+        f,
+        chat_area,
+        &ChatRenderInputs {
+            chat: inputs.chat,
+            tools: inputs.tools,
+            selected: inputs.selected,
+            expanded: inputs.expanded,
+            turn_thinking: inputs.turn_thinking,
+            spinner_tick: inputs.spinner_tick,
+        },
+    );
 
-    if inputs.show_tools {
-        let split = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-            .split(top);
-        crate::ui::chat::render(f, split[0], inputs.chat);
-        crate::ui::tools::render(f, split[1], inputs.tools, inputs.selected, inputs.expanded);
-    } else {
-        crate::ui::chat::render(f, top, inputs.chat);
-    }
+    // Single dim horizontal rule above the input.
+    let rule = "─".repeat(divider_area.width as usize);
+    let divider = Paragraph::new(Line::from(rule)).style(Style::default().fg(Color::DarkGray));
+    f.render_widget(divider, divider_area);
 
     inputs.input.render(f, input_area);
-    crate::ui::status::render(f, status_area, inputs.status);
 
     if let Some(prefix) = inputs.popup_prefix {
         crate::ui::popup::render(f, area, prefix);
@@ -94,29 +87,11 @@ pub fn render(f: &mut Frame, inputs: &RenderInputs<'_>) {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use cogito_protocol::stream::StreamEvent;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    use crate::render_model::{ChatModel, ToolTreeModel};
-    use crate::ui::input::InputWidget;
-    use crate::ui::status::StatusData;
-    use cogito_protocol::stream::StreamEvent;
-
-    fn fixture_status() -> StatusData {
-        StatusData {
-            strategy: "coder".into(),
-            model: "claude-opus-4-7".into(),
-            session_id: "01abcdefghij".into(),
-            turn_count: 1,
-            tools_visible: true,
-        }
-    }
-
-    /// Render all panes into a `w x h` `TestBackend` terminal and return the
-    /// buffer contents as a flat string (one row per line, separated by
-    /// newlines). `Buffer` does not implement `Display` in ratatui 0.29, so
-    /// we collect cell symbols directly.
-    fn draw_buf(show_tools: bool, with_text: bool, w: u16, h: u16) -> String {
+    fn draw_buf(with_text: bool, popup_prefix: Option<&str>, w: u16, h: u16) -> String {
         let mut chat = ChatModel::new();
         if with_text {
             chat.push_user_prompt("hi".into());
@@ -126,8 +101,6 @@ mod tests {
         }
         let tools = ToolTreeModel::new();
         let input = InputWidget::new();
-        let mut status = fixture_status();
-        status.tools_visible = show_tools;
         let expanded = HashSet::new();
         let backend = TestBackend::new(w, h);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -141,17 +114,16 @@ mod tests {
                         selected: None,
                         expanded: &expanded,
                         input: &input,
-                        show_tools,
-                        status: &status,
-                        popup_prefix: None,
+                        turn_thinking: false,
+                        spinner_tick: 0,
+                        popup_prefix,
                     },
                 );
             })
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         let width = buf.area().width as usize;
-        let cells = buf.content();
-        cells
+        buf.content()
             .chunks(width)
             .map(|row| {
                 row.iter()
@@ -163,64 +135,24 @@ mod tests {
     }
 
     #[test]
-    fn layout_with_tools_shows_both_panes() {
-        let out = draw_buf(true, true, 80, 20);
-        assert!(out.contains("chat"), "got:\n{out}");
-        assert!(out.contains("tools"), "got:\n{out}");
-        assert!(out.contains("> hi"), "got:\n{out}");
-        assert!(out.contains("agent: hello"), "got:\n{out}");
-        assert!(out.contains("strategy: coder"), "got:\n{out}");
+    fn single_column_layout_has_no_tools_pane() {
+        let out = draw_buf(true, None, 80, 20);
+        assert!(out.contains("▸  hi"), "got:\n{out}");
+        assert!(out.contains("∴  hello"), "got:\n{out}");
+        // No "tools" pane title anywhere.
+        assert!(!out.contains("tools "), "tools pane should be absent:\n{out}");
     }
 
     #[test]
-    fn layout_without_tools_omits_tools_pane() {
-        let out = draw_buf(false, true, 120, 20);
-        assert!(out.contains("chat"), "got:\n{out}");
-        assert!(
-            !out.contains("tools "),
-            "tools pane should be hidden, got:\n{out}"
-        );
-        assert!(out.contains("tools: off"), "status hint mismatch:\n{out}");
+    fn divider_row_renders_above_input() {
+        let out = draw_buf(false, None, 40, 6);
+        // The divider line uses '─' characters.
+        assert!(out.contains('─'), "expected divider, got:\n{out}");
     }
 
     #[test]
-    fn layout_with_popup_overlays_command_list() {
-        let chat = ChatModel::new();
-        let tools = ToolTreeModel::new();
-        let input = InputWidget::new();
-        let status = fixture_status();
-        let expanded = HashSet::new();
-        let backend = TestBackend::new(80, 20);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal
-            .draw(|f| {
-                render(
-                    f,
-                    &RenderInputs {
-                        chat: &chat,
-                        tools: &tools,
-                        selected: None,
-                        expanded: &expanded,
-                        input: &input,
-                        show_tools: true,
-                        status: &status,
-                        popup_prefix: Some("/sk"),
-                    },
-                );
-            })
-            .unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let width = buf.area().width as usize;
-        let cells = buf.content();
-        let out = cells
-            .chunks(width)
-            .map(|row| {
-                row.iter()
-                    .map(ratatui::buffer::Cell::symbol)
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+    fn popup_overlays_above_input_when_prefix_set() {
+        let out = draw_buf(false, Some("/sk"), 80, 20);
         assert!(out.contains("commands"), "popup title missing:\n{out}");
         assert!(out.contains("/skill"), "popup entry missing:\n{out}");
     }

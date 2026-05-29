@@ -6,7 +6,9 @@
 //! - PgUp/PgDn -> chat scrollback (no focus required)
 //! - Ctrl-Up/Down -> tool-tree selection cursor
 //! - Ctrl-Enter -> toggle expansion of selected node
-//! - Ctrl-T -> toggle tools pane visibility
+//! - 1-9 -> quick-expand N-th most recent tool block
+//! - e -> expand all in latest message
+//! - c -> collapse all in latest message
 //! - Ctrl-C -> cancel turn (with double-tap exit)
 //! - Ctrl-D on empty input -> exit
 //! - Esc -> dismiss popup (if shown); otherwise no-op
@@ -43,6 +45,17 @@ pub enum Action {
         /// transitioning back to collapsed.
         now_expanded: bool,
     },
+    /// Quick-expand the N-th most recent tool block in the entire
+    /// session (N = 1..=9). Pushes the `(path, true)` analogue of
+    /// `ExpandNode` but separate to make it explicit at the action layer.
+    ExpandRecent {
+        /// 1-based recency index (1 = most recent).
+        n: u8,
+    },
+    /// Expand all tool blocks in the most recent cogito message.
+    ExpandAllInLatestMessage,
+    /// Collapse all tool blocks in the most recent cogito message.
+    CollapseAllInLatestMessage,
     /// Quit the event loop.
     Quit,
 }
@@ -54,12 +67,6 @@ pub fn dispatch(app: &mut App, key: KeyEvent) -> Action {
     // still goes to the input.
     if matches!(key.code, KeyCode::Esc) && app.popup.is_some() {
         app.popup = None;
-        return Action::None;
-    }
-
-    // Ctrl-T toggles tools pane.
-    if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
-        app.show_tools = !app.show_tools;
         return Action::None;
     }
 
@@ -97,6 +104,23 @@ pub fn dispatch(app: &mut App, key: KeyEvent) -> Action {
     // Ctrl-Enter expands selected node.
     if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
         return expand_selected(app);
+    }
+
+    // 1-9: quick-expand N-th most recent tool block (session-wide).
+    if let KeyCode::Char(ch) = key.code
+        && key.modifiers.is_empty()
+        && let Some(n) = digit_index(ch)
+    {
+        return quick_expand(app, n);
+    }
+
+    // 'e' / 'c': expand-all / collapse-all in latest cogito message.
+    if key.modifiers.is_empty() {
+        match key.code {
+            KeyCode::Char('e') => return expand_all_latest(app),
+            KeyCode::Char('c') => return collapse_all_latest(app),
+            _ => {}
+        }
     }
 
     // Default: route to the input widget.
@@ -191,6 +215,76 @@ fn expand_selected(app: &mut App) -> Action {
     Action::ExpandNode { path, now_expanded }
 }
 
+/// Map a key character `'1'..='9'` to a 1-based index, otherwise None.
+fn digit_index(ch: char) -> Option<u8> {
+    if ('1'..='9').contains(&ch) {
+        let n = (ch as u32 - '0' as u32) as u8;
+        Some(n)
+    } else {
+        None
+    }
+}
+
+/// Find the `n`-th most recent tool (1 = most recent) across all
+/// turns; toggle expansion; return the appropriate Action.
+fn quick_expand(app: &mut App, n: u8) -> Action {
+    // Flatten all (TreePath, &ToolNode) in reverse order; pick n-th.
+    let mut flat: Vec<crate::render_model::TreePath> = Vec::new();
+    for (t_idx, group) in app.tools.turns.iter().enumerate().rev() {
+        for n_idx in (0..group.nodes.len()).rev() {
+            flat.push((t_idx, n_idx));
+        }
+    }
+    let Some(path) = flat.get(usize::from(n - 1)).copied() else {
+        return Action::None;
+    };
+    // Same finished-only restriction as Ctrl-Enter expansion.
+    let finished = app
+        .tools
+        .turns
+        .get(path.0)
+        .and_then(|g| g.nodes.get(path.1))
+        .is_some_and(|node| node.status.is_finished());
+    if !finished {
+        return Action::None;
+    }
+    let now_expanded = if app.expanded.contains(&path) {
+        app.expanded.remove(&path);
+        false
+    } else {
+        app.expanded.insert(path);
+        true
+    };
+    Action::ExpandNode { path, now_expanded }
+}
+
+/// Expand every finished node in the most recent turn group.
+fn expand_all_latest(app: &mut App) -> Action {
+    let Some(last_t) = app.tools.turns.len().checked_sub(1) else {
+        return Action::None;
+    };
+    if let Some(group) = app.tools.turns.get(last_t) {
+        for (n_idx, node) in group.nodes.iter().enumerate() {
+            if node.status.is_finished() {
+                app.expanded.insert((last_t, n_idx));
+            }
+        }
+    }
+    Action::ExpandAllInLatestMessage
+}
+
+fn collapse_all_latest(app: &mut App) -> Action {
+    let Some(last_t) = app.tools.turns.len().checked_sub(1) else {
+        return Action::None;
+    };
+    if let Some(group) = app.tools.turns.get(last_t) {
+        for (n_idx, _) in group.nodes.iter().enumerate() {
+            app.expanded.remove(&(last_t, n_idx));
+        }
+    }
+    Action::CollapseAllInLatestMessage
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -204,15 +298,6 @@ mod tests {
 
     fn fresh_app() -> (crate::app::App, tempfile::TempDir) {
         crate::app::tests::app_for_pure_test()
-    }
-
-    #[test]
-    fn ctrl_t_toggles_show_tools() {
-        let (mut app, _td) = fresh_app();
-        assert!(app.show_tools);
-        let a = dispatch(&mut app, k(KeyCode::Char('t'), KeyModifiers::CONTROL));
-        assert_eq!(a, Action::None);
-        assert!(!app.show_tools);
     }
 
     #[test]
@@ -336,5 +421,94 @@ mod tests {
         app.popup = Some(crate::app::Popup::SlashMenu { prefix: "/".into() });
         dispatch(&mut app, k(KeyCode::Esc, KeyModifiers::NONE));
         assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn digit_one_quick_expands_most_recent_finished_tool() {
+        let (mut app, _td) = fresh_app();
+        app.tools.on_event(&StreamEvent::TurnStarted);
+        app.tools.on_event(&StreamEvent::ToolDispatchStarted {
+            call_id: "c".into(),
+            tool_name: "t".into(),
+            args: json!({}),
+        });
+        app.tools.on_event(&StreamEvent::ToolDispatchEnded {
+            call_id: "c".into(),
+            ok: true,
+            error_message: None,
+        });
+        let a = dispatch(&mut app, k(KeyCode::Char('1'), KeyModifiers::NONE));
+        assert!(matches!(
+            a,
+            Action::ExpandNode {
+                path: (0, 0),
+                now_expanded: true,
+                ..
+            }
+        ));
+        assert!(app.expanded.contains(&(0, 0)));
+    }
+
+    #[test]
+    fn digit_for_n_greater_than_available_is_noop() {
+        let (mut app, _td) = fresh_app();
+        let a = dispatch(&mut app, k(KeyCode::Char('5'), KeyModifiers::NONE));
+        assert_eq!(a, Action::None);
+    }
+
+    #[test]
+    fn digit_on_running_tool_is_noop() {
+        let (mut app, _td) = fresh_app();
+        app.tools.on_event(&StreamEvent::TurnStarted);
+        app.tools.on_event(&StreamEvent::ToolDispatchStarted {
+            call_id: "c".into(),
+            tool_name: "t".into(),
+            args: json!({}),
+        });
+        let a = dispatch(&mut app, k(KeyCode::Char('1'), KeyModifiers::NONE));
+        assert_eq!(a, Action::None);
+        assert!(app.expanded.is_empty());
+    }
+
+    #[test]
+    fn e_expands_all_finished_in_latest_message() {
+        let (mut app, _td) = fresh_app();
+        app.tools.on_event(&StreamEvent::TurnStarted);
+        for id in ["c1", "c2"] {
+            app.tools.on_event(&StreamEvent::ToolDispatchStarted {
+                call_id: id.into(),
+                tool_name: id.into(),
+                args: json!({}),
+            });
+            app.tools.on_event(&StreamEvent::ToolDispatchEnded {
+                call_id: id.into(),
+                ok: true,
+                error_message: None,
+            });
+        }
+        let a = dispatch(&mut app, k(KeyCode::Char('e'), KeyModifiers::NONE));
+        assert_eq!(a, Action::ExpandAllInLatestMessage);
+        assert!(app.expanded.contains(&(0, 0)));
+        assert!(app.expanded.contains(&(0, 1)));
+    }
+
+    #[test]
+    fn c_collapses_all_in_latest_message() {
+        let (mut app, _td) = fresh_app();
+        app.tools.on_event(&StreamEvent::TurnStarted);
+        app.tools.on_event(&StreamEvent::ToolDispatchStarted {
+            call_id: "c1".into(),
+            tool_name: "t".into(),
+            args: json!({}),
+        });
+        app.tools.on_event(&StreamEvent::ToolDispatchEnded {
+            call_id: "c1".into(),
+            ok: true,
+            error_message: None,
+        });
+        app.expanded.insert((0, 0));
+        let a = dispatch(&mut app, k(KeyCode::Char('c'), KeyModifiers::NONE));
+        assert_eq!(a, Action::CollapseAllInLatestMessage);
+        assert!(!app.expanded.contains(&(0, 0)));
     }
 }

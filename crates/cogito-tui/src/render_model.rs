@@ -6,7 +6,6 @@
 //! and apply palette/layout there. This separation is the spec's
 //! "Q2-A locked: new ratatui-native translation; CLI Renderer untouched".
 
-use std::collections::HashMap;
 use std::time::Instant;
 
 use cogito_protocol::stream::StreamEvent;
@@ -25,32 +24,17 @@ pub enum ChatLine {
     AssistantText(String),
     /// Assistant reasoning block, accumulates across `ThinkingDelta`.
     AssistantThinking(String),
-    /// Tool dispatch start, paired with a `ToolEndLine` later.
-    ToolStartLine {
-        /// Tool name as reported by the dispatcher.
-        tool: String,
-        /// Compact JSON args preview, truncated.
-        args_preview: String,
-    },
-    /// Tool dispatch end.
-    ToolEndLine {
-        /// Tool name (same as the matching start line).
-        tool: String,
-        /// `true` if the tool returned successfully.
-        ok: bool,
-        /// Wall-clock duration from start to end.
-        elapsed_ms: u128,
-        /// Error message captured on failure; `None` on success.
-        error: Option<String>,
+    /// Inline tool block. Renderer looks up current state in
+    /// `ToolTreeModel` via `call_id` at render time.
+    ToolBlock {
+        /// `call_id` from the dispatcher; matches `StreamEvent` IDs and
+        /// `ToolNode.call_id`.
+        call_id: String,
     },
     /// System-emitted notice line — `[paused]`, `[cancelled]`,
     /// `[error] ...`, MCP banner, slash command echoes.
     SystemNotice(String),
 }
-
-/// Maximum chars to preview from a tool's args JSON. Matches the CLI
-/// `TOOL_ARGS_PREVIEW_MAX` to keep `[tool] foo {...}` lines bounded.
-pub const TOOL_ARGS_PREVIEW_MAX: usize = 200;
 
 /// Maximum chars to preview from a tool's error message.
 pub const TOOL_ERROR_PREVIEW_MAX: usize = 400;
@@ -69,10 +53,6 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
     out
 }
 
-/// Per-tool dispatch timer, keyed by `call_id`. Resolved into
-/// `ToolEndLine::elapsed_ms` when the matching end arrives.
-type ToolTimers = HashMap<String, (Instant, String)>;
-
 /// Chat scrollback state. Pure function of the `StreamEvent` stream.
 #[derive(Debug, Default)]
 pub struct ChatModel {
@@ -85,8 +65,6 @@ pub struct ChatModel {
     pub in_thinking: bool,
     /// Vertical scroll offset from the bottom (0 = follow tail).
     pub scroll_offset: u16,
-    /// `call_id` → (`started_at`, `tool_name`) for elapsed-ms tracking.
-    tool_timers: ToolTimers,
 }
 
 impl ChatModel {
@@ -141,43 +119,15 @@ impl ChatModel {
                 }
                 self.in_text = false;
             }
-            StreamEvent::ToolDispatchStarted {
-                call_id,
-                tool_name,
-                args,
-            } => {
-                self.tool_timers
-                    .insert(call_id.clone(), (Instant::now(), tool_name.clone()));
-                let args_preview = serde_json::to_string(args).map_or_else(
-                    |_| "{}".to_string(),
-                    |s| truncate_chars(&s, TOOL_ARGS_PREVIEW_MAX),
-                );
-                self.lines.push(ChatLine::ToolStartLine {
-                    tool: tool_name.clone(),
-                    args_preview,
+            StreamEvent::ToolDispatchStarted { call_id, .. } => {
+                self.lines.push(ChatLine::ToolBlock {
+                    call_id: call_id.clone(),
                 });
                 self.in_text = false;
                 self.in_thinking = false;
             }
-            StreamEvent::ToolDispatchEnded {
-                call_id,
-                ok,
-                error_message,
-            } => {
-                let (name, ms) = self.tool_timers.remove(call_id).map_or_else(
-                    || ("?".to_string(), 0_u128),
-                    |(started, name)| (name, started.elapsed().as_millis()),
-                );
-                self.lines.push(ChatLine::ToolEndLine {
-                    tool: name,
-                    ok: *ok,
-                    elapsed_ms: ms,
-                    error: error_message
-                        .as_ref()
-                        .map(|m| truncate_chars(m, TOOL_ERROR_PREVIEW_MAX)),
-                });
-                self.in_text = false;
-                self.in_thinking = false;
+            StreamEvent::ToolDispatchEnded { .. } => {
+                // State update lives in ToolTreeModel; ChatModel does nothing.
             }
             StreamEvent::TurnPaused => self.push_notice("[paused]"),
             StreamEvent::TurnResumed => self.push_notice("[resumed]"),
@@ -416,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_dispatch_emits_start_and_end_lines() {
+    fn tool_dispatch_emits_single_tool_block() {
         let m = run(&[
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
@@ -429,69 +379,11 @@ mod tests {
                 error_message: None,
             },
         ]);
-        assert!(matches!(m.lines[0], ChatLine::ToolStartLine { .. }));
-        assert!(matches!(m.lines[1], ChatLine::ToolEndLine { ok: true, .. }));
-    }
-
-    #[test]
-    fn tool_args_preview_is_compact_json() {
-        let m = run(&[StreamEvent::ToolDispatchStarted {
-            call_id: "c1".into(),
-            tool_name: "q".into(),
-            args: json!({"fuzzy_keyword": "深圳"}),
-        }]);
-        match &m.lines[0] {
-            ChatLine::ToolStartLine { args_preview, .. } => {
-                assert!(args_preview.contains("深圳"));
-                assert!(args_preview.contains("fuzzy_keyword"));
-            }
-            other => unreachable!("expected ToolStartLine, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn tool_args_preview_truncates_at_limit() {
-        let blob: String = "x".repeat(500);
-        let m = run(&[StreamEvent::ToolDispatchStarted {
-            call_id: "c1".into(),
-            tool_name: "t".into(),
-            args: json!({"blob": blob}),
-        }]);
-        match &m.lines[0] {
-            ChatLine::ToolStartLine { args_preview, .. } => {
-                assert!(args_preview.ends_with("..."));
-                assert!(args_preview.chars().count() <= TOOL_ARGS_PREVIEW_MAX);
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    #[test]
-    fn tool_error_message_truncates() {
-        let long: String = "x".repeat(800);
-        let m = run(&[
-            StreamEvent::ToolDispatchStarted {
-                call_id: "c1".into(),
-                tool_name: "t".into(),
-                args: json!({}),
-            },
-            StreamEvent::ToolDispatchEnded {
-                call_id: "c1".into(),
-                ok: false,
-                error_message: Some(long),
-            },
-        ]);
-        match &m.lines[1] {
-            ChatLine::ToolEndLine {
-                ok: false,
-                error: Some(msg),
-                ..
-            } => {
-                assert!(msg.ends_with("..."));
-                assert!(msg.chars().count() <= TOOL_ERROR_PREVIEW_MAX);
-            }
-            _ => unreachable!(),
-        }
+        assert_eq!(m.lines.len(), 1);
+        assert!(matches!(
+            &m.lines[0],
+            ChatLine::ToolBlock { call_id } if call_id == "c1"
+        ));
     }
 
     #[test]
