@@ -10,6 +10,9 @@ use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
+/// Spaces added per indent level (code blocks, nested list content).
+const NEST_INDENT: usize = 2;
+
 /// Styles the markdown builder applies, injected from the chat palette.
 #[derive(Clone, Copy)]
 pub struct MdStyles {
@@ -47,6 +50,8 @@ struct Builder<'s> {
     italic: u32,
     /// Whether a previous block has been fully emitted (drives inter-block spacing).
     prev_block_emitted: bool,
+    /// `true` while inside a fenced/indented code block.
+    in_code_block: bool,
 }
 
 impl<'s> Builder<'s> {
@@ -58,6 +63,7 @@ impl<'s> Builder<'s> {
             bold: 0,
             italic: 0,
             prev_block_emitted: false,
+            in_code_block: false,
         }
     }
 
@@ -107,13 +113,35 @@ impl<'s> Builder<'s> {
             Event::End(TagEnd::Strong) => self.bold = self.bold.saturating_sub(1),
             Event::Start(Tag::Emphasis) => self.italic += 1,
             Event::End(TagEnd::Emphasis) => self.italic = self.italic.saturating_sub(1),
+            Event::Start(Tag::CodeBlock(_)) => {
+                self.emit_block_separator();
+                self.in_code_block = true;
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                self.in_code_block = false;
+                self.prev_block_emitted = true;
+            }
             Event::Code(text) => {
                 // Inline code uses its own style standalone; surrounding
                 // bold/italic does not compose onto it (code color wins).
                 self.pending_spans
                     .push(Span::styled(text.to_string(), self.styles.code_inline));
             }
-            Event::Text(text) => self.push_text(&text),
+            Event::Text(text) => {
+                if self.in_code_block {
+                    // pulldown emits code-block text with trailing newlines; render
+                    // each source line as its own indented, styled line.
+                    for raw in text.lines() {
+                        let indent = " ".repeat(NEST_INDENT);
+                        self.lines.push(Line::from(vec![
+                            Span::raw(indent),
+                            Span::styled(raw.to_string(), self.styles.code_block),
+                        ]));
+                    }
+                } else {
+                    self.push_text(&text);
+                }
+            }
             _ => {}
         }
     }
@@ -232,5 +260,38 @@ mod tests {
         let code = pairs.iter().find(|(t, _)| t == "c").unwrap();
         assert_eq!(code.1.fg, Some(Color::Yellow));
         assert!(!code.1.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn code_block_lines_use_code_block_style_and_indent() {
+        let src = "```\nlet x = 1;\nlet y = 2;\n```";
+        let out = render(src, &styles());
+        // two code lines
+        let code_lines: Vec<_> = out.iter().filter(|l| text_of(l).contains("let ")).collect();
+        assert_eq!(code_lines.len(), 2);
+        // every non-blank code span carries the code_block style (DIM)
+        for l in &code_lines {
+            let styled = l.spans.iter().find(|s| s.content.contains("let")).unwrap();
+            assert!(styled.style.add_modifier.contains(Modifier::DIM));
+        }
+        // indented (leading-space span present)
+        assert!(text_of(code_lines[0]).starts_with(' '));
+    }
+
+    #[test]
+    fn asterisks_inside_code_block_stay_literal() {
+        let src = "```\n**not bold**\n```";
+        let out = render(src, &styles());
+        let line = out
+            .iter()
+            .find(|l| text_of(l).contains("not bold"))
+            .unwrap();
+        assert!(text_of(line).contains("**not bold**"));
+        // no span carries BOLD
+        assert!(
+            line.spans
+                .iter()
+                .all(|s| !s.style.add_modifier.contains(Modifier::BOLD))
+        );
     }
 }
