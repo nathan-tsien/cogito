@@ -7,7 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Sprint 11 · Subagent (S2 minimal) — v0.2 (2026-05-30)
+
+**Added**
+
+- **Synchronous `delegate(role, input) -> output` subagent tool** (ADR-0011
+  v0.2 minimal scope). A child runs as an independent top-level session and
+  its final assistant text is returned to the parent. No new crate — the
+  module lives in `cogito-core::runtime::subagent`.
+- `cogito-protocol`: new `subagent` module — `BrainSpawner` trait
+  (`async fn run_to_completion(&self, DelegateRequest) -> Result<String, SpawnError>`),
+  `DelegateRequest`, and `SpawnError` (`UnknownRole` / `OpenFailed` /
+  `ChildFailed` / `Timeout`).
+- `cogito-protocol`: `ExecCtx` gains `call_id: Option<String>` (the model's
+  tool-call id, set by the dispatcher before `invoke`), `subagent_depth: u32`,
+  and `brain_spawner: Option<Arc<dyn BrainSpawner>>`.
+- `cogito-protocol`: `SessionMeta` gains `parent_session_id`,
+  `parent_call_id`, and `subagent_depth` (linkage recorded child-side only).
+- `cogito-protocol`: `StreamEvent` gains `subagent_call_id: Option<String>`
+  on `TurnStarted` / `TurnCompleted` / `TurnFailed` / `TextDelta`, so a
+  child's events can be attributed to the originating `delegate` call on the
+  parent's broadcast.
+- `cogito-core`: `DelegateToolProvider` (`AlwaysSync`) plus the
+  `DELEGATE_TOOL_NAME` and `DEFAULT_MAX_SUBAGENT_DEPTH` (= 3) constants;
+  `RuntimeBuilder::strategy_registry(...)` setter for role-to-strategy
+  resolution. `Runtime` implements `BrainSpawner` via a `RuntimeSpawner`
+  newtype.
+- `cogito-config`: `ToolsConfig.max_subagent_depth: Option<u32>` (default 3).
+
+**Notes**
+
+- All additions are **additive** — no `ConversationEvent` `SCHEMA_VERSION`
+  bump (ADR-0007 / 0019). The new `SessionMeta` fields are default-skipped,
+  so top-level JSONL stays byte-identical. The JSONL store layout remains
+  flat (`<root>/<session_id>.jsonl`).
+- The v0.3 full `BrainSpawner` lifecycle (spawn / wait / send_input / cancel
+  + parent-child event tree) remains future work (ADR-0011 v0.3 amendment).
 
 ## [0.1.0] - 2026-05-29
 

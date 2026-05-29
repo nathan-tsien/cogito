@@ -1,6 +1,6 @@
 # H08 · Tool Dispatcher
 
-> **Status**: v0.1 complete · Sprint 8 (sync + async paths). The async path was wired in Sprint 8: `InvokeOutcome::Async(job_id)` causes H08 to record `JobSubmitted { call_id, job_id, tool_name }`, register `on_complete`, and signal H01 to transition to `Paused`. The turn resumes on the corresponding `JobCompletionEvent`.
+> **Status**: v0.1 complete · Sprint 8 (sync + async paths). The async path was wired in Sprint 8: `InvokeOutcome::Async(job_id)` causes H08 to record `JobSubmitted { call_id, job_id, tool_name }`, register `on_complete`, and signal H01 to transition to `Paused`. The turn resumes on the corresponding `JobCompletionEvent`. v0.2 Sprint 11 adds one behavior: H08 now populates `ExecCtx.call_id` (the model's tool-call id) before each `invoke`, enabling the `delegate` subagent tool to record child-side parent-call linkage.
 
 ## Role in Harness
 
@@ -24,7 +24,7 @@ Hands.
 ## Dependencies
 
 **Calls (out)**:
-- `ToolProvider::invoke(name, args, ctx) -> InvokeOutcome` — the entire Hands surface (per ADR-0004; Brain never sees `Sandbox` etc.)
+- `ToolProvider::invoke(name, args, ctx) -> InvokeOutcome` — the entire Hands surface (per ADR-0004; Brain never sees `Sandbox` etc.). Since Sprint 11, H08 sets `ctx.call_id = Some(<this call's id>)` before `invoke`, so tools can record parent-call linkage. The `delegate` subagent tool (`AlwaysSync`, in `cogito-core::runtime::subagent`) relies on this together with `ExecCtx.brain_spawner`.
 - H02 Step Recorder — for `ToolDispatched`, `ToolResultRecorded`, `JobSubmitted` events
 - H09 Hook Pipeline — `pre_dispatch` hook point (may `Reject` the call)
 
