@@ -116,7 +116,7 @@ async fn run_tests_against_fixture_crate_succeeds() -> Result<(), Box<dyn std::e
     let outcome = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return Outcome::Completed,
+                Ok(StreamEvent::TurnCompleted { .. }) => return Outcome::Completed,
                 Ok(StreamEvent::TurnFailed { .. }) => return Outcome::Failed,
                 Ok(_) => {}
                 Err(_) => return Outcome::StreamClosed,

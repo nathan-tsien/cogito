@@ -738,7 +738,7 @@ async fn run_repl(
                     // TurnResumed is mid-turn (agent continues) — no fresh prompt.
                     let terminal = matches!(
                         &e,
-                        StreamEvent::TurnCompleted
+                        StreamEvent::TurnCompleted { .. }
                             | StreamEvent::TurnFailed { .. }
                             | StreamEvent::TurnCancelled
                             | StreamEvent::TurnPaused

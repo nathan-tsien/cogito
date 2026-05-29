@@ -68,7 +68,7 @@ async fn open_send_complete_shutdown() -> Result<(), Box<dyn std::error::Error>>
     let got_completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return true,
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }

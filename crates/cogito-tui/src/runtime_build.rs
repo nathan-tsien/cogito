@@ -198,8 +198,10 @@ fn replay_into_models(
             chat.on_event(ev);
             tools.on_event(ev);
             match ev {
-                cogito_protocol::stream::StreamEvent::TurnStarted => turn_in_progress = true,
-                cogito_protocol::stream::StreamEvent::TurnCompleted => {
+                cogito_protocol::stream::StreamEvent::TurnStarted { .. } => {
+                    turn_in_progress = true;
+                }
+                cogito_protocol::stream::StreamEvent::TurnCompleted { .. } => {
                     turn_in_progress = false;
                     turn_count = turn_count.saturating_add(1);
                 }

@@ -122,11 +122,11 @@ impl ChatModel {
     /// Apply one `StreamEvent`. Pure state transition; never draws.
     pub fn on_event(&mut self, ev: &StreamEvent) {
         match ev {
-            StreamEvent::TurnStarted | StreamEvent::TurnCompleted => {
+            StreamEvent::TurnStarted { .. } | StreamEvent::TurnCompleted { .. } => {
                 self.in_text = false;
                 self.in_thinking = false;
             }
-            StreamEvent::TextDelta { chunk } => {
+            StreamEvent::TextDelta { chunk, .. } => {
                 if self.in_text {
                     if let Some(ChatLine::AssistantText(s)) = self.lines.last_mut() {
                         s.push_str(chunk);
@@ -163,7 +163,7 @@ impl ChatModel {
             StreamEvent::TurnPaused => self.push_notice("[paused]"),
             StreamEvent::TurnResumed => self.push_notice("[resumed]"),
             StreamEvent::TurnCancelled => self.push_notice("[cancelled]"),
-            StreamEvent::TurnFailed { reason } => self.push_notice(format!("[error] {reason}")),
+            StreamEvent::TurnFailed { reason, .. } => self.push_notice(format!("[error] {reason}")),
             // StreamEvent is #[non_exhaustive]; future variants render
             // as no-ops until a renderer is taught about them.
             _ => {}
@@ -250,7 +250,7 @@ impl ToolTreeModel {
     /// the tool-tree (`TextDelta`, `ThinkingDelta`, etc.).
     pub fn on_event(&mut self, ev: &StreamEvent) {
         match ev {
-            StreamEvent::TurnStarted => {
+            StreamEvent::TurnStarted { .. } => {
                 self.turns.push(TurnGroup {
                     turn_idx: self.next_turn_idx,
                     nodes: Vec::new(),
@@ -349,14 +349,20 @@ mod tests {
     #[test]
     fn text_delta_coalesces_within_block() {
         let m = run(&[
-            StreamEvent::TurnStarted,
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
             StreamEvent::TextDelta {
                 chunk: "hi ".into(),
+                subagent_call_id: None,
             },
             StreamEvent::TextDelta {
                 chunk: "there".into(),
+                subagent_call_id: None,
             },
-            StreamEvent::TurnCompleted,
+            StreamEvent::TurnCompleted {
+                subagent_call_id: None,
+            },
         ]);
         assert_eq!(m.lines, vec![ChatLine::AssistantText("hi there".into())]);
     }
@@ -385,6 +391,7 @@ mod tests {
             },
             StreamEvent::TextDelta {
                 chunk: "answer".into(),
+                subagent_call_id: None,
             },
         ]);
         assert_eq!(
@@ -425,6 +432,7 @@ mod tests {
             StreamEvent::TurnCancelled,
             StreamEvent::TurnFailed {
                 reason: "boom".into(),
+                subagent_call_id: None,
             },
         ]);
         assert_eq!(
@@ -453,9 +461,15 @@ mod tests {
     #[test]
     fn user_prompt_breaks_text_coalescing() {
         let mut m = ChatModel::new();
-        m.on_event(&StreamEvent::TextDelta { chunk: "a".into() });
+        m.on_event(&StreamEvent::TextDelta {
+            chunk: "a".into(),
+            subagent_call_id: None,
+        });
         m.push_user_prompt("hi".into());
-        m.on_event(&StreamEvent::TextDelta { chunk: "b".into() });
+        m.on_event(&StreamEvent::TextDelta {
+            chunk: "b".into(),
+            subagent_call_id: None,
+        });
         assert_eq!(
             m.lines,
             vec![
@@ -483,7 +497,9 @@ mod tree_tests {
 
     #[test]
     fn turn_started_pushes_empty_group() {
-        let m = run(&[StreamEvent::TurnStarted]);
+        let m = run(&[StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        }]);
         assert_eq!(m.turns.len(), 1);
         assert_eq!(m.turns[0].turn_idx, 1);
         assert!(m.turns[0].nodes.is_empty());
@@ -492,7 +508,9 @@ mod tree_tests {
     #[test]
     fn tool_dispatch_started_appends_running_node() {
         let m = run(&[
-            StreamEvent::TurnStarted,
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "read_file".into(),
@@ -507,7 +525,9 @@ mod tree_tests {
     #[test]
     fn tool_dispatch_ended_updates_status_to_ok() {
         let m = run(&[
-            StreamEvent::TurnStarted,
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
@@ -525,7 +545,9 @@ mod tree_tests {
     #[test]
     fn tool_dispatch_ended_with_error_captures_message() {
         let m = run(&[
-            StreamEvent::TurnStarted,
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
@@ -546,7 +568,9 @@ mod tree_tests {
     #[test]
     fn multi_tool_within_one_turn_lands_in_one_group() {
         let m = run(&[
-            StreamEvent::TurnStarted,
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "a".into(),
@@ -575,13 +599,17 @@ mod tree_tests {
     #[test]
     fn separate_turns_produce_separate_groups() {
         let m = run(&[
-            StreamEvent::TurnStarted,
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "a".into(),
                 args: json!({}),
             },
-            StreamEvent::TurnStarted,
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c2".into(),
                 tool_name: "b".into(),
@@ -609,9 +637,14 @@ mod tree_tests {
     #[test]
     fn text_events_are_noops_for_tree() {
         let m = run(&[
-            StreamEvent::TextDelta { chunk: "x".into() },
+            StreamEvent::TextDelta {
+                chunk: "x".into(),
+                subagent_call_id: None,
+            },
             StreamEvent::ThinkingDelta { chunk: "y".into() },
-            StreamEvent::TurnCompleted,
+            StreamEvent::TurnCompleted {
+                subagent_call_id: None,
+            },
         ]);
         assert!(m.turns.is_empty());
     }

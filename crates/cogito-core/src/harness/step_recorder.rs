@@ -144,7 +144,9 @@ impl StepRecorder {
         user_input: Vec<ContentBlock>,
         activate_skills: Vec<String>,
     ) -> Result<EventId, StoreError> {
-        let _ = self.events_tx.send(StreamEvent::TurnStarted);
+        let _ = self.events_tx.send(StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         self.append(
             Some(turn_id),
             EventPayload::TurnStarted {
@@ -168,7 +170,10 @@ impl StepRecorder {
         buf.text.push_str(&chunk);
         // Broadcast after the buffer push so the buffer is the source of
         // truth even if the channel has no live subscribers.
-        let _ = self.events_tx.send(StreamEvent::TextDelta { chunk });
+        let _ = self.events_tx.send(StreamEvent::TextDelta {
+            chunk,
+            subagent_call_id: None,
+        });
     }
 
     /// Persist the accumulated text block, if any. No-op when no
@@ -347,7 +352,9 @@ impl StepRecorder {
         turn_id: TurnId,
         outcome: TurnOutcome,
     ) -> Result<EventId, StoreError> {
-        let _ = self.events_tx.send(StreamEvent::TurnCompleted);
+        let _ = self.events_tx.send(StreamEvent::TurnCompleted {
+            subagent_call_id: None,
+        });
         self.append(Some(turn_id), EventPayload::TurnCompleted { outcome })
             .await
     }
@@ -550,6 +557,7 @@ impl StepRecorder {
     ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnFailed {
             reason: format!("{reason:?}"),
+            subagent_call_id: None,
         });
         self.append(Some(turn_id), EventPayload::TurnFailed { reason })
             .await

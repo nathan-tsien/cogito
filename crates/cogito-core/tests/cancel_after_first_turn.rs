@@ -140,7 +140,7 @@ async fn cancel_turn_works_after_first_turn() -> Result<(), Box<dyn std::error::
         let mut completed = 0u32;
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => {
+                Ok(StreamEvent::TurnCompleted { .. }) => {
                     completed += 1;
                     if completed == 2 {
                         return true;
@@ -165,7 +165,7 @@ async fn cancel_turn_works_after_first_turn() -> Result<(), Box<dyn std::error::
     let saw_turn2_started = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnStarted) => return true,
+                Ok(StreamEvent::TurnStarted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }

@@ -169,7 +169,7 @@ async fn mid_pause_user_input_drained_latest_wins() -> Result<(), Box<dyn std::e
         let mut n = 0u32;
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => {
+                Ok(StreamEvent::TurnCompleted { .. }) => {
                     n += 1;
                     if n >= 2 {
                         return true;

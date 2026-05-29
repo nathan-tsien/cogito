@@ -128,7 +128,7 @@ async fn wait_for_turn_completed(
         let mut seen = 0u8;
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => {
+                Ok(StreamEvent::TurnCompleted { .. }) => {
                     seen += 1;
                     if seen == 2 {
                         return true;

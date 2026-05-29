@@ -434,6 +434,7 @@ mod tests {
         let mut chat = ChatModel::new();
         chat.on_event(&StreamEvent::TextDelta {
             chunk: "I am cogito.".into(),
+            subagent_call_id: None,
         });
         let tools = empty_tools();
         let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 5);
@@ -460,7 +461,9 @@ mod tests {
         let mut chat = ChatModel::new();
         let mut tools = ToolTreeModel::new();
         for ev in [
-            StreamEvent::TurnStarted,
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
             StreamEvent::ToolDispatchStarted {
                 call_id: call_id.into(),
                 tool_name: name.into(),
@@ -536,6 +539,7 @@ mod tests {
         let mut chat = ChatModel::new();
         chat.on_event(&StreamEvent::TextDelta {
             chunk: "see **bold** here".into(),
+            subagent_call_id: None,
         });
         let tools = empty_tools();
         let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 5);
@@ -549,6 +553,7 @@ mod tests {
         let mut chat = ChatModel::new();
         chat.on_event(&StreamEvent::TextDelta {
             chunk: "first line\nsecond line".into(),
+            subagent_call_id: None,
         });
         let tools = empty_tools();
         let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 5);
@@ -562,6 +567,7 @@ mod tests {
         let mut chat = ChatModel::new();
         chat.on_event(&StreamEvent::TextDelta {
             chunk: "Plan:\n\n- step **one**\n- step `two`\n\n```\ncode\n```".into(),
+            subagent_call_id: None,
         });
         let tools = empty_tools();
         let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 12);

@@ -87,7 +87,7 @@ async fn bash_echo_completes_through_runtime() -> Result<(), Box<dyn std::error:
     let outcome = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return Outcome::Completed,
+                Ok(StreamEvent::TurnCompleted { .. }) => return Outcome::Completed,
                 Ok(StreamEvent::TurnFailed { .. }) => return Outcome::Failed,
                 Ok(_) => {}
                 Err(_) => return Outcome::StreamClosed,

@@ -174,7 +174,7 @@ async fn wait_for_terminal_with_store(
         loop {
             match events_rx.recv().await {
                 Ok(
-                    StreamEvent::TurnCompleted
+                    StreamEvent::TurnCompleted { .. }
                     | StreamEvent::TurnFailed { .. }
                     | StreamEvent::TurnCancelled
                     | StreamEvent::TurnPaused,
@@ -194,7 +194,7 @@ async fn wait_for_terminal_broadcast(handle: &SessionHandle) {
         loop {
             match events_rx.recv().await {
                 Ok(
-                    StreamEvent::TurnCompleted
+                    StreamEvent::TurnCompleted { .. }
                     | StreamEvent::TurnFailed { .. }
                     | StreamEvent::TurnCancelled
                     | StreamEvent::TurnPaused,
@@ -1286,7 +1286,7 @@ async fn wait_for_turn_completed_twice(handle: &SessionHandle) {
         let mut seen = 0u8;
         loop {
             match events_rx.recv().await {
-                Ok(StreamEvent::TurnCompleted) => {
+                Ok(StreamEvent::TurnCompleted { .. }) => {
                     seen += 1;
                     if seen == 2 {
                         return;
@@ -2026,7 +2026,7 @@ async fn async_run_with_y_fault(crash_after_n: u64) -> Vec<ConversationEvent> {
             loop {
                 match events_rx.recv().await {
                     Ok(
-                        StreamEvent::TurnCompleted
+                        StreamEvent::TurnCompleted { .. }
                         | StreamEvent::TurnFailed { .. }
                         | StreamEvent::TurnCancelled,
                     )

@@ -115,11 +115,16 @@ fn typing_and_model_response_render_into_chat() {
     app.chat.push_user_prompt("hi".into());
 
     // Simulate model response.
-    app.apply_stream_event(&StreamEvent::TurnStarted);
+    app.apply_stream_event(&StreamEvent::TurnStarted {
+        subagent_call_id: None,
+    });
     app.apply_stream_event(&StreamEvent::TextDelta {
         chunk: "hello!".into(),
+        subagent_call_id: None,
     });
-    app.apply_stream_event(&StreamEvent::TurnCompleted);
+    app.apply_stream_event(&StreamEvent::TurnCompleted {
+        subagent_call_id: None,
+    });
 
     let out = draw(&app);
     assert!(out.contains("▸  hi"), "user prompt missing:\n{out}");
@@ -168,7 +173,9 @@ fn slash_unknown_command_renders_error_notice() {
 #[test]
 fn tool_lifecycle_renders_inline() {
     let (mut app, _td) = e2e_app();
-    app.apply_stream_event(&StreamEvent::TurnStarted);
+    app.apply_stream_event(&StreamEvent::TurnStarted {
+        subagent_call_id: None,
+    });
     app.apply_stream_event(&StreamEvent::ToolDispatchStarted {
         call_id: "c1".into(),
         tool_name: "read_file".into(),
@@ -179,7 +186,9 @@ fn tool_lifecycle_renders_inline() {
         ok: true,
         error_message: None,
     });
-    app.apply_stream_event(&StreamEvent::TurnCompleted);
+    app.apply_stream_event(&StreamEvent::TurnCompleted {
+        subagent_call_id: None,
+    });
     let out = draw(&app);
     assert!(out.contains("read_file"), "chat lacking tool name:\n{out}");
     assert!(out.contains('✓'), "chat lacking completed glyph:\n{out}");
@@ -188,11 +197,16 @@ fn tool_lifecycle_renders_inline() {
 #[test]
 fn typing_thinking_response_shows_spinner_then_clears() {
     let (mut app, _td) = e2e_app();
-    app.apply_stream_event(&StreamEvent::TurnStarted);
+    app.apply_stream_event(&StreamEvent::TurnStarted {
+        subagent_call_id: None,
+    });
     // No content yet -> spinner present.
     let out1 = draw(&app);
     assert!(out1.contains("∴ ⠋"), "spinner missing pre-content:\n{out1}");
-    app.apply_stream_event(&StreamEvent::TextDelta { chunk: "hi".into() });
+    app.apply_stream_event(&StreamEvent::TextDelta {
+        chunk: "hi".into(),
+        subagent_call_id: None,
+    });
     let out2 = draw(&app);
     assert!(
         !out2.contains("∴ ⠋"),

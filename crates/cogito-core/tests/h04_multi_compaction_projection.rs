@@ -81,7 +81,7 @@ async fn drive_turns(handle: &cogito_core::runtime::SessionHandle, n: u32) {
         let ok = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 match events.recv().await {
-                    Ok(StreamEvent::TurnCompleted) => return true,
+                    Ok(StreamEvent::TurnCompleted { .. }) => return true,
                     Ok(StreamEvent::TurnFailed { .. }) | Err(_) => return false,
                     Ok(_) => {}
                 }

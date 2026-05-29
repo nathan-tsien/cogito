@@ -147,7 +147,7 @@ async fn user_input_queued_during_active_turn_drained_after()
     let saw_started = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnStarted) => return true,
+                Ok(StreamEvent::TurnStarted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }
@@ -174,7 +174,7 @@ async fn user_input_queued_during_active_turn_drained_after()
     let saw_turn_2_started = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnStarted) => return true,
+                Ok(StreamEvent::TurnStarted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }
