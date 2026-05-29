@@ -11,7 +11,6 @@ use cogito_protocol::stream::StreamEvent;
 use cogito_tui::app::App;
 use cogito_tui::render_model::{ChatModel, ToolTreeModel};
 use cogito_tui::ui::input::InputWidget;
-use cogito_tui::ui::status::StatusData;
 use cogito_tui::ui::{RenderInputs, render};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -21,7 +20,7 @@ use tempfile::TempDir;
 ///
 /// Returns `(App, TempDir)` so the JSONL store's backing directory
 /// outlives the test scope.
-fn make_app() -> (App, TempDir) {
+fn app() -> (App, TempDir) {
     let tempdir = tempfile::tempdir().unwrap();
     let store: Arc<dyn cogito_protocol::ConversationStore> =
         Arc::new(cogito_store_jsonl::JsonlStore::new(tempdir.path()));
@@ -39,12 +38,12 @@ fn make_app() -> (App, TempDir) {
         selected: None,
         expanded: HashSet::new(),
         input: InputWidget::new(),
-        show_tools: true,
         popup: None,
         strategy_name: "coder".into(),
         model_id: "claude-opus-4-7".into(),
         turn_count: 0,
         turn_in_progress: false,
+        current_turn_thinking: false,
         cancel_seen_at: None,
         should_quit: false,
     };
@@ -67,14 +66,8 @@ fn draw(app: &App, popup_prefix: Option<&str>) -> String {
                     selected: app.selected,
                     expanded: &app.expanded,
                     input: &app.input,
-                    show_tools: app.show_tools,
-                    status: &StatusData {
-                        strategy: app.strategy_name.clone(),
-                        model: app.model_id.clone(),
-                        session_id: app.session_id_str.clone(),
-                        turn_count: app.turn_count,
-                        tools_visible: app.show_tools,
-                    },
+                    turn_thinking: app.current_turn_thinking,
+                    spinner_tick: 0,
                     popup_prefix,
                 },
             );
@@ -95,24 +88,17 @@ fn draw(app: &App, popup_prefix: Option<&str>) -> String {
 }
 
 #[test]
-fn empty_state_shows_panes_and_status() {
-    let (app, _td) = make_app();
+fn empty_state_renders_no_tools_pane_and_no_status_bar() {
+    let (app, _td) = app();
     let out = draw(&app, None);
-    assert!(out.contains("chat"), "chat pane missing:\n{out}");
-    assert!(out.contains("tools"), "tools pane missing:\n{out}");
-    assert!(
-        out.contains("(no tool calls yet)"),
-        "tools placeholder missing:\n{out}"
-    );
-    assert!(out.contains("strategy: coder"), "strategy missing:\n{out}");
-    // At 80 columns the status bar fits "strategy ... turn: 0    tools:" but
-    // the hint text is truncated; assert on what is actually visible.
-    assert!(out.contains("turn: 0"), "turn counter missing:\n{out}");
+    assert!(!out.contains("tools "), "tools pane should be absent:\n{out}");
+    assert!(!out.contains("strategy:"), "status bar should be absent:\n{out}");
+    assert!(!out.contains("turn:"), "turn counter should be absent:\n{out}");
 }
 
 #[test]
 fn single_text_turn_renders_user_and_agent_lines() {
-    let (mut app, _td) = make_app();
+    let (mut app, _td) = app();
     app.chat.push_user_prompt("who are you?".into());
     app.apply_stream_event(&StreamEvent::TurnStarted);
     app.apply_stream_event(&StreamEvent::TextDelta {
@@ -120,50 +106,51 @@ fn single_text_turn_renders_user_and_agent_lines() {
     });
     app.apply_stream_event(&StreamEvent::TurnCompleted);
     let out = draw(&app, None);
-    assert!(
-        out.contains("> who are you?"),
-        "user prompt missing:\n{out}"
-    );
-    assert!(
-        out.contains("agent: I am cogito."),
-        "agent text missing:\n{out}"
-    );
+    assert!(out.contains("▸  who are you?"));
+    assert!(out.contains("∴  I am cogito."));
 }
 
 #[test]
 fn popup_overlays_when_prefix_set() {
-    let (app, _td) = make_app();
+    let (app, _td) = app();
     let out = draw(&app, Some("/"));
-    assert!(out.contains("commands"), "commands header missing:\n{out}");
-    assert!(out.contains("/skill"), "/skill entry missing:\n{out}");
+    assert!(out.contains("commands"));
+    assert!(out.contains("/skill"));
 }
 
 #[test]
-fn tools_hidden_grows_chat_width() {
-    let (mut app, _td) = make_app();
-    app.show_tools = false;
+fn chat_uses_full_width() {
+    let (mut app, _td) = app();
+    app.chat.push_user_prompt("test".into());
     let out = draw(&app, None);
-    // When the tools pane is hidden the chat box title is the only "chat"
-    // word — "tools " (with trailing space = pane title) must be absent.
-    assert!(
-        !out.contains("tools "),
-        "tools pane should be hidden:\n{out}"
-    );
-    // At 80 cols the status bar truncates the right-side hint text, but
-    // "tools:" token (from "tools: off · ...") must still appear in the
-    // status line even if "off" itself is cut; confirm the frame is wider
-    // by checking that the chat box spans the full width (no tools border).
-    assert!(out.contains("chat"), "chat pane title missing:\n{out}");
+    assert!(out.contains("▸  test"));
+    // No tool pane separator at 30% mark.
 }
 
 #[test]
 fn mcp_banner_lines_render_at_top_of_chat() {
-    let (mut app, _td) = make_app();
+    let (mut app, _td) = app();
     app.chat
-        .push_notice("[mcp] \u{2713} filesystem ready (4 tools)");
+        .push_notice("[mcp] \u{2713} filesystem ready (4 tools)".to_string());
     let out = draw(&app, None);
     assert!(
         out.contains("filesystem ready"),
         "mcp banner missing:\n{out}"
     );
+}
+
+#[test]
+fn startup_banner_renders_three_lines_with_sigil_and_identity() {
+    let (mut app, _td) = app();
+    // Mimic what runtime_build does at build time.
+    for line in cogito_tui::ui::banner::startup_lines("opus-4.7", "coder", "01abcdefghij") {
+        app.chat.push_notice(line);
+    }
+    let out = draw(&app, None);
+    assert!(out.contains("∴∴∴"), "sigil missing:\n{out}");
+    assert!(out.contains("cogito"));
+    assert!(out.contains("opus-4.7"));
+    assert!(out.contains("coder"));
+    assert!(out.contains("01abcdef"));
+    assert!(!out.contains("01abcdefghij"));
 }
