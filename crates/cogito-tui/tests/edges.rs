@@ -177,10 +177,14 @@ fn deep_tool_tree_renders_without_panic() {
     }
     assert_eq!(app.tools.total_nodes(), 60);
     let out = draw(&app, 80, 24);
-    // 60 inline tool blocks render as 60 chat lines. Even at a 24-row
-    // terminal, the first node must be visible and the render must not
-    // have panicked. No turn header any more (single-column layout).
-    assert!(out.contains("t0"), "first node missing:\n{out}");
+    // 60 inline tool blocks render as 60 chat lines. At a 24-row terminal
+    // the chat follows the tail, so the NEWEST node (t59) is visible and
+    // the oldest (t0) has scrolled off the top. The render must not panic.
+    assert!(out.contains("t59"), "newest node missing:\n{out}");
+    assert!(
+        !out.contains("t0 "),
+        "oldest node should be scrolled off:\n{out}"
+    );
 }
 
 #[test]

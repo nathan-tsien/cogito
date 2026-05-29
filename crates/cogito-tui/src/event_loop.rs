@@ -41,9 +41,10 @@ pub async fn run(app: &mut App) -> Result<()> {
     let mut spinner_tick: u64 = 0;
 
     // Initial draw so the user sees a frame immediately.
+    let mut max_scroll_back: u16 = 0;
     terminal
         .draw(|f| {
-            render(
+            max_scroll_back = render(
                 f,
                 &RenderInputs {
                     chat: &app.chat,
@@ -58,6 +59,7 @@ pub async fn run(app: &mut App) -> Result<()> {
             );
         })
         .context("initial draw")?;
+    app.chat.scroll_back = app.chat.scroll_back.min(max_scroll_back);
 
     loop {
         tokio::select! {
@@ -89,7 +91,7 @@ pub async fn run(app: &mut App) -> Result<()> {
                 spinner_tick = spinner_tick.wrapping_add(1);
                 terminal
                     .draw(|f| {
-                        render(
+                        max_scroll_back = render(
                             f,
                             &RenderInputs {
                                 chat: &app.chat,
@@ -104,6 +106,7 @@ pub async fn run(app: &mut App) -> Result<()> {
                         );
                     })
                     .context("draw on tick")?;
+                app.chat.scroll_back = app.chat.scroll_back.min(max_scroll_back);
             }
         }
     }

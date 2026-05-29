@@ -1,0 +1,115 @@
+<h2>角色标识 — 怎么换掉 "You / cogito"？</h2>
+<p class="subtitle">都在 A. Minimal Flat 基础上，只改角色标记的展现方式。</p>
+
+<div class="cards">
+  <div class="card" data-choice="A1" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0;background:#0d1117">
+      <pre style="margin:0;padding:18px 20px;font-family:'JetBrains Mono','SF Mono',monospace;font-size:11px;line-height:1.6;color:#c9d1d9;background:#0d1117;white-space:pre;overflow:hidden">
+<span style="color:#58a6ff">▸</span>  who are you?
+
+<span style="color:#3fb950">◆</span>  I am cogito, an embedded
+   agent runtime.
+
+   <span style="color:#6e7681">▸ read_file</span>  <span style="color:#3fb950">ok</span>  <span style="color:#6e7681">12ms</span>
+   <span style="color:#6e7681">▾ grep</span>  <span style="color:#3fb950">ok</span>  <span style="color:#6e7681">45ms</span>
+   <span style="color:#6e7681">  args: {"pattern": "fn main"}</span>
+
+<span style="color:#58a6ff">▸</span>  what's the weather?
+
+<span style="color:#3fb950">◆</span>  I can't access weather APIs
+   directly.
+
+<span style="color:#8b949e">─────────────────────────────────────</span>
+<span style="color:#6e7681">›</span> <span style="color:#c9d1d9">Type a message...</span>
+      </pre>
+    </div>
+    <div class="card-body">
+      <h3>A1. 几何符号</h3>
+      <p>蓝 <code>▸</code> = 你、绿 <code>◆</code> = agent。零文字，最克制。内容缩进 3 格自然形成视觉列。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="A2" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0;background:#0d1117">
+      <pre style="margin:0;padding:18px 20px;font-family:'JetBrains Mono','SF Mono',monospace;font-size:11px;line-height:1.6;color:#c9d1d9;background:#0d1117;white-space:pre;overflow:hidden">
+<span style="color:#58a6ff">▎</span>who are you?
+
+<span style="color:#3fb950">▎</span>I am cogito, an embedded
+<span style="color:#3fb950">▎</span>agent runtime.
+<span style="color:#3fb950">▎</span>
+<span style="color:#3fb950">▎</span><span style="color:#6e7681">▸ read_file</span>  <span style="color:#3fb950">ok</span>  <span style="color:#6e7681">12ms</span>
+<span style="color:#3fb950">▎</span><span style="color:#6e7681">▾ grep</span>  <span style="color:#3fb950">ok</span>  <span style="color:#6e7681">45ms</span>
+<span style="color:#3fb950">▎</span>  <span style="color:#6e7681">args: {"pattern": "fn main"}</span>
+
+<span style="color:#58a6ff">▎</span>what's the weather?
+
+<span style="color:#3fb950">▎</span>I can't access weather APIs
+<span style="color:#3fb950">▎</span>directly.
+
+<span style="color:#8b949e">─────────────────────────────────────</span>
+<span style="color:#6e7681">›</span> <span style="color:#c9d1d9">Type a message...</span>
+      </pre>
+    </div>
+    <div class="card-body">
+      <h3>A2. 左侧色条</h3>
+      <p>每行左侧一条彩色细竖线（蓝/绿）。引用块风格，多行消息很自然连成一段，视觉锚点强但不喧宾夺主。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="A3" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0;background:#0d1117">
+      <pre style="margin:0;padding:18px 20px;font-family:'JetBrains Mono','SF Mono',monospace;font-size:11px;line-height:1.6;color:#c9d1d9;background:#0d1117;white-space:pre;overflow:hidden">
+<span style="color:#6e7681">14:32</span>  <span style="color:#58a6ff">you</span>
+who are you?
+
+<span style="color:#6e7681">14:32</span>  <span style="color:#3fb950">opus-4.7</span>
+I am cogito, an embedded
+agent runtime.
+
+  <span style="color:#6e7681">▸ read_file</span>  <span style="color:#3fb950">ok</span>  <span style="color:#6e7681">12ms</span>
+  <span style="color:#6e7681">▾ grep</span>  <span style="color:#3fb950">ok</span>  <span style="color:#6e7681">45ms</span>
+  <span style="color:#6e7681">  args: {"pattern": "fn main"}</span>
+
+<span style="color:#6e7681">14:33</span>  <span style="color:#58a6ff">you</span>
+what's the weather?
+
+<span style="color:#6e7681">14:33</span>  <span style="color:#3fb950">opus-4.7</span>
+I can't access weather APIs directly.
+
+<span style="color:#8b949e">─────────────────────────────────────</span>
+<span style="color:#6e7681">›</span> <span style="color:#c9d1d9">Type a message...</span>
+      </pre>
+    </div>
+    <div class="card-body">
+      <h3>A3. 时间 + 模型名</h3>
+      <p>把 "cogito" 换成实际 <code>model_id</code>（如 <code>opus-4.7</code> / <code>claude-sonnet-4-6</code>）。带时间戳，更像 chat 工具的轻量 header。多模型时身份明确。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="A4" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0;background:#0d1117">
+      <pre style="margin:0;padding:18px 20px;font-family:'JetBrains Mono','SF Mono',monospace;font-size:11px;line-height:1.6;color:#c9d1d9;background:#0d1117;white-space:pre;overflow:hidden">
+<span style="color:#c9d1d9">› who are you?</span>
+
+  <span style="color:#c9d1d9">I am cogito, an embedded</span>
+  <span style="color:#c9d1d9">agent runtime.</span>
+
+  <span style="color:#6e7681">▸ read_file</span>  <span style="color:#3fb950">ok</span>  <span style="color:#6e7681">12ms</span>
+  <span style="color:#6e7681">▾ grep</span>  <span style="color:#3fb950">ok</span>  <span style="color:#6e7681">45ms</span>
+  <span style="color:#6e7681">  args: {"pattern": "fn main"}</span>
+
+<span style="color:#c9d1d9">› what's the weather?</span>
+
+  <span style="color:#c9d1d9">I can't access weather APIs</span>
+  <span style="color:#c9d1d9">directly.</span>
+
+<span style="color:#8b949e">─────────────────────────────────────</span>
+<span style="color:#6e7681">›</span> <span style="color:#c9d1d9">Type a message...</span>
+      </pre>
+    </div>
+    <div class="card-body">
+      <h3>A4. 不对称缩进</h3>
+      <p>你的输入有 <code>›</code> 前缀、零缩进；agent 回复无标记、缩进 2 格。极致克制，靠位置即区分。tool 调用天然属于 agent 段落内。</p>
+    </div>
+  </div>
+</div>

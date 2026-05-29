@@ -44,7 +44,11 @@ pub struct RenderInputs<'a> {
 }
 
 /// Render one frame.
-pub fn render(f: &mut Frame, inputs: &RenderInputs<'_>) {
+///
+/// Returns the maximum meaningful chat `scroll_back` for this frame, so
+/// the event loop can clamp the stored value (prevents scrolling past
+/// the top of history).
+pub fn render(f: &mut Frame, inputs: &RenderInputs<'_>) -> u16 {
     let area = f.area();
     let input_h = inputs.input.desired_height();
     let outer = Layout::default()
@@ -59,7 +63,7 @@ pub fn render(f: &mut Frame, inputs: &RenderInputs<'_>) {
     let divider_area = outer[1];
     let input_area = outer[2];
 
-    crate::ui::chat::render(
+    let max_scroll_back = crate::ui::chat::render(
         f,
         chat_area,
         &ChatRenderInputs {
@@ -82,6 +86,8 @@ pub fn render(f: &mut Frame, inputs: &RenderInputs<'_>) {
     if let Some(prefix) = inputs.popup_prefix {
         crate::ui::popup::render(f, area, prefix);
     }
+
+    max_scroll_back
 }
 
 #[cfg(test)]

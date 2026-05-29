@@ -67,8 +67,10 @@ pub struct ChatModel {
     pub in_text: bool,
     /// Same for `AssistantThinking`.
     pub in_thinking: bool,
-    /// Vertical scroll offset from the bottom (0 = follow tail).
-    pub scroll_offset: u16,
+    /// Lines scrolled up from the bottom. `0` follows the tail (newest
+    /// content visible); larger values reveal older history. The renderer
+    /// clamps this to the maximum meaningful value each frame.
+    pub scroll_back: u16,
 }
 
 impl ChatModel {
@@ -76,6 +78,22 @@ impl ChatModel {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Scroll up (toward older history) by `n` lines. The renderer
+    /// clamps the result to the available history each frame.
+    pub fn scroll_up(&mut self, n: u16) {
+        self.scroll_back = self.scroll_back.saturating_add(n);
+    }
+
+    /// Scroll down (toward the newest content) by `n` lines.
+    pub fn scroll_down(&mut self, n: u16) {
+        self.scroll_back = self.scroll_back.saturating_sub(n);
+    }
+
+    /// Jump back to the tail (newest content), resuming follow-tail.
+    pub fn scroll_to_bottom(&mut self) {
+        self.scroll_back = 0;
     }
 
     /// Push a user prompt line. Called by the input → send path, not

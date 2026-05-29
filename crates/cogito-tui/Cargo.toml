@@ -32,7 +32,11 @@ cogito-cli = { path = "../cogito-cli" }
 
 # UI
 pulldown-cmark.workspace = true
-ratatui.workspace = true
+# `unstable-rendered-line-info` exposes `Paragraph::line_count`, used to
+# bottom-anchor the chat scrollback (follow-tail). API is marked unstable
+# upstream; the ratatui version is pinned via the workspace, so it is
+# controlled across upgrades.
+ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
 crossterm = { workspace = true, features = ["event-stream"] }
 tui-textarea.workspace = true
 

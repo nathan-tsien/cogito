@@ -1,0 +1,92 @@
+<h2>Chrome —— 持久 UI 元素放哪里？</h2>
+<p class="subtitle">Turn 计数取消常驻。Model / strategy / session id 这些"会话身份"信息怎么处理？三种思路。</p>
+
+<div class="cards">
+  <div class="card" data-choice="C1" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0;background:#0d1117">
+      <pre style="margin:0;padding:18px 22px;font-family:'JetBrains Mono','SF Mono',monospace;font-size:11px;line-height:1.6;color:#c9d1d9;background:#0d1117;white-space:pre">
+<span style="color:#6e7681"> cogito  ·  opus-4.7  ·  coder  ·  01abcdef</span>
+<span style="color:#21262d">─────────────────────────────────────────────</span>
+
+<span style="color:#58a6ff">▸</span>  who are you?
+
+<span style="color:#3fb950">∴</span>  I am cogito, an embedded
+   agent runtime.
+
+   <span style="color:#6e7681">▸ read_file</span>  <span style="color:#3fb950">ok</span>  <span style="color:#6e7681">12ms</span>
+
+<span style="color:#58a6ff">▸</span>  what tools?
+
+<span style="color:#3fb950">∴</span>  I have <span style="color:#c9d1d9">read_file</span>, <span style="color:#c9d1d9">grep</span>,
+   <span style="color:#c9d1d9">run_tests</span>, and MCP tools.
+
+
+
+<span style="color:#21262d">─────────────────────────────────────────────</span>
+<span style="color:#6e7681">›</span> <span style="color:#c9d1d9">Type a message...</span>
+      </pre>
+    </div>
+    <div class="card-body">
+      <h3>C1. Idle Header</h3>
+      <p>顶部 1 dim 行写身份信息（项目名 · 模型 · 策略 · session 前 8 位）。底部干净，只有 input。Key hints 只在输入框 focus 时浮现。Turn 计数完全没了。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="C2" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0;background:#0d1117">
+      <pre style="margin:0;padding:18px 22px;font-family:'JetBrains Mono','SF Mono',monospace;font-size:11px;line-height:1.6;color:#c9d1d9;background:#0d1117;white-space:pre">
+
+<span style="color:#58a6ff">▸</span>  who are you?
+
+<span style="color:#3fb950">∴</span>  I am cogito, an embedded
+   agent runtime.
+
+   <span style="color:#6e7681">▸ read_file</span>  <span style="color:#3fb950">ok</span>  <span style="color:#6e7681">12ms</span>
+
+<span style="color:#58a6ff">▸</span>  what tools?
+
+<span style="color:#3fb950">∴</span>  I have <span style="color:#c9d1d9">read_file</span>, <span style="color:#c9d1d9">grep</span>,
+   <span style="color:#c9d1d9">run_tests</span>, and MCP tools.
+
+<span style="color:#3fb950">∴</span>  ...
+
+<span style="color:#21262d">─────────────────────────────────────────────</span>
+<span style="color:#6e7681">›</span> <span style="color:#c9d1d9">Type a message...</span>
+      </pre>
+    </div>
+    <div class="card-body">
+      <h3>C2. Hush</h3>
+      <p>完全隐藏所有 chrome。只剩 chat + input。要看身份信息：<code>/info</code> 或 <code>Ctrl-S</code> 临时弹出一个 overlay。Key hints 同样按需召出（<code>?</code> 键）。最激进，最 distraction-free。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="C3" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0;background:#0d1117">
+      <pre style="margin:0;padding:18px 22px;font-family:'JetBrains Mono','SF Mono',monospace;font-size:11px;line-height:1.6;color:#c9d1d9;background:#0d1117;white-space:pre">
+
+   <span style="color:#3fb950">∴∴∴</span>
+   <span style="color:#c9d1d9">cogito</span>  <span style="color:#6e7681">v0.1</span>
+   <span style="color:#6e7681">opus-4.7  ·  coder  ·  01abcdef</span>
+   <span style="color:#6e7681">read_file · grep · run_tests · mcp:fs</span>
+
+
+<span style="color:#58a6ff">▸</span>  who are you?
+
+<span style="color:#3fb950">∴</span>  I am cogito, an embedded
+   agent runtime.
+
+   <span style="color:#6e7681">▸ read_file</span>  <span style="color:#3fb950">ok</span>  <span style="color:#6e7681">12ms</span>
+
+
+<span style="color:#21262d">─────────────────────────────────────────────</span>
+<span style="color:#6e7681">› opus-4.7</span>  <span style="color:#c9d1d9">Type a message...</span>
+      </pre>
+    </div>
+    <div class="card-body">
+      <h3>C3. Ambient</h3>
+      <p>启动时一个 banner ( <code>∴∴∴</code> + 名称 + 模型 + 可用工具) 作为第一帧，随着对话自然向上滚走 —— 像 zsh shell 的 motd。底部 input 提示符里 ghost-text 显示当前模型名（<code>› opus-4.7</code>），不抢戏但能扫到。</p>
+    </div>
+  </div>
+</div>
+
+<p style="margin-top:24px;color:#8b949e;font-size:13px">关键问题：你想要"任何时候一眼能看到当前模型 / 策略"（→ C1），还是"完全沉浸，需要时才召出"（→ C2），还是"启动有仪式感，运行时低调"（→ C3）？</p>

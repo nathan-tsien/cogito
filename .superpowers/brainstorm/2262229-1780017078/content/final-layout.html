@@ -1,0 +1,90 @@
+<h2>整合后的最终布局 —— 真实会话场景</h2>
+<p class="subtitle">从启动到 2 个 turn 的完整流程。所有决策都体现进去了。</p>
+
+<div class="mockup">
+  <div class="mockup-header">Preview: cogito-tui v0.2 (启动后约 30 秒)</div>
+  <div class="mockup-body" style="padding:0">
+<pre style="margin:0;padding:24px 28px;font-family:'JetBrains Mono','SF Mono',monospace;font-size:12px;line-height:1.7;color:#c9d1d9;background:#0d1117;white-space:pre;border-radius:6px">
+
+   <span style="color:#3fb950">∴∴∴</span>
+   <span style="color:#c9d1d9">cogito</span>  <span style="color:#6e7681">v0.2</span>
+   <span style="color:#6e7681">opus-4.7  ·  coder  ·  01abcdef</span>
+
+<span style="color:#6e7681">   [mcp] ✓ filesystem ready (4 tools)</span>
+<span style="color:#6e7681">   [mcp] ✓ search ready (2 tools)</span>
+
+
+<span style="color:#58a6ff">▸</span>  show me main.rs
+
+<span style="color:#3fb950">∴</span>  Sure, let me read it.
+
+   <span style="color:#3fb950">✓</span> <span style="color:#a5a5a5">read_file</span>           <span style="color:#6e7681">12ms</span>
+
+   It's a simple hello-world:
+
+   <span style="color:#6e7681">pub fn main() {</span>
+   <span style="color:#6e7681">    println!("hello");</span>
+   <span style="color:#6e7681">}</span>
+
+
+<span style="color:#58a6ff">▸</span>  add a panic test and run it
+
+<span style="color:#3fb950">∴</span>  I'll add the test and run cargo test.
+
+   <span style="color:#3fb950">▾</span> <span style="color:#c9d1d9">write_file</span>          <span style="color:#6e7681">18ms</span>
+     <span style="color:#6e7681">args   {"path":"src/main.rs","content":"...","mode":"append"}</span>
+     <span style="color:#6e7681">↳ wrote 24 bytes</span>
+   <span style="color:#d29922">⠋</span> <span style="color:#a5a5a5">run_tests</span>           <span style="color:#6e7681">1.2s</span>
+   <span style="color:#3fb950">∴</span> <span style="color:#d29922">⠋</span>
+
+
+<span style="color:#21262d">─────────────────────────────────────────────────────────────────</span>
+<span style="color:#6e7681">›</span> <span style="color:#c9d1d9">Type a message...</span>
+</pre>
+  </div>
+</div>
+
+<h3 style="margin-top:32px">这帧里发生了什么</h3>
+
+<table style="width:100%;border-collapse:collapse;color:#c9d1d9;font-size:13px;line-height:1.6">
+  <tr style="border-bottom:1px solid #21262d">
+    <td style="padding:8px 12px;width:30%;color:#8b949e">启动 banner</td>
+    <td style="padding:8px 12px">最顶部 3 行：<code>∴∴∴</code> 锚定 cogito 身份、项目+版本号、当前 model · strategy · session id。会随对话自然向上滚走。</td>
+  </tr>
+  <tr style="border-bottom:1px solid #21262d">
+    <td style="padding:8px 12px;color:#8b949e">MCP banner</td>
+    <td style="padding:8px 12px">两行 dim notice 列出已挂载的 MCP server 状态。也会随对话滚走。</td>
+  </tr>
+  <tr style="border-bottom:1px solid #21262d">
+    <td style="padding:8px 12px;color:#8b949e">Turn 1</td>
+    <td style="padding:8px 12px">用户 <code>▸ show me main.rs</code>。Cogito <code>∴</code> 回复 + 一个已完成 collapsed 的 tool（<code>✓ read_file 12ms</code>）。后面是 agent 的文本回答。代码块当前是 dim 行（markdown 渲染留给下一 sprint）。</td>
+  </tr>
+  <tr style="border-bottom:1px solid #21262d">
+    <td style="padding:8px 12px;color:#8b949e">Turn 2 (进行中)</td>
+    <td style="padding:8px 12px">第一个 tool <code>▾ write_file</code> 已展开（args + 结果摘要均 dim）。第二个 tool <code>⠋ run_tests</code> 正在运行（黄 spinner + 已用时间）。最下面 <code>∴ ⠋</code> 表示 cogito 在等 tool 结果回来后继续思考（首字未出，spinner 等待中）。</td>
+  </tr>
+  <tr style="border-bottom:1px solid #21262d">
+    <td style="padding:8px 12px;color:#8b949e">Input</td>
+    <td style="padding:8px 12px">底部一条 dim 分割线 + <code>›</code> + placeholder。输入时变实，多行用 Shift+Enter。</td>
+  </tr>
+  <tr>
+    <td style="padding:8px 12px;color:#8b949e">没有的东西</td>
+    <td style="padding:8px 12px">没有 tools pane、没有 borders、没有持久 status bar、没有 turn 计数。Ctrl-T 快捷键也废了。</td>
+  </tr>
+</table>
+
+<h3 style="margin-top:32px">键盘交互速查</h3>
+<table style="width:100%;border-collapse:collapse;color:#c9d1d9;font-size:13px;line-height:1.6">
+  <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 12px;width:30%;color:#79c0ff"><code>Enter</code></td><td style="padding:6px 12px">发送消息 / 展开 selected tool</td></tr>
+  <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 12px;color:#79c0ff"><code>Shift+Enter</code></td><td style="padding:6px 12px">输入换行</td></tr>
+  <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 12px;color:#79c0ff"><code>Ctrl-↑/↓</code></td><td style="padding:6px 12px">在 tool 块间移动 selection (包括 running 的)</td></tr>
+  <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 12px;color:#79c0ff"><code>1-9</code></td><td style="padding:6px 12px">快速展开最近 N 个 tool</td></tr>
+  <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 12px;color:#79c0ff"><code>e</code> / <code>c</code></td><td style="padding:6px 12px">展开 / 折叠当前消息所有 tool</td></tr>
+  <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 12px;color:#79c0ff"><code>PgUp/PgDn</code></td><td style="padding:6px 12px">滚动 chat（不清空 selection）</td></tr>
+  <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 12px;color:#79c0ff"><code>Esc</code></td><td style="padding:6px 12px">取消 selection / 收起 popup</td></tr>
+  <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 12px;color:#79c0ff"><code>/</code></td><td style="padding:6px 12px">开 slash 命令 popup（v0.1 行为保留）</td></tr>
+  <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 12px;color:#79c0ff"><code>Ctrl-C</code></td><td style="padding:6px 12px">turn 进行时取消；空闲连按两下 = 退出</td></tr>
+  <tr><td style="padding:6px 12px;color:#79c0ff"><code>Ctrl-D</code></td><td style="padding:6px 12px">空 buffer 时退出</td></tr>
+</table>
+
+<p style="margin-top:24px;color:#8b949e;font-size:13px">看着对吗？OK 我就把这整套写成 spec 文档，commit 后做实现 plan。</p>
