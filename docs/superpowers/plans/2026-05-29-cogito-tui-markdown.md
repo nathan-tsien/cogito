@@ -414,18 +414,18 @@ const NEST_INDENT: usize = 2;
 ```
 
 Add an `in_code_block: bool` field to `Builder` (init `false` in `new`).
-Extend `handle` — add these arms (before the catch-all `_ => {}`):
+Extend `handle` — add these arms (before the catch-all `_ => {}`). Reuse
+the `emit_block_separator()` helper and the `prev_block_emitted` flag
+introduced in the Task 2 review refactor:
 
 ```rust
 Event::Start(Tag::CodeBlock(_)) => {
-    if self.emitted_block {
-        self.lines.push(Line::from(Vec::new()));
-    }
+    self.emit_block_separator();
     self.in_code_block = true;
 }
 Event::End(TagEnd::CodeBlock) => {
     self.in_code_block = false;
-    self.emitted_block = true;
+    self.prev_block_emitted = true;
 }
 ```
 
@@ -545,14 +545,14 @@ Add these arms to `handle` (before `_ => {}`):
 
 ```rust
 Event::Start(Tag::List(first)) => {
-    if self.lists.is_empty() && self.emitted_block {
-        self.lines.push(Line::from(Vec::new()));
+    if self.lists.is_empty() {
+        self.emit_block_separator();
     }
     self.lists.push(first);
 }
 Event::End(TagEnd::List(_)) => {
     self.lists.pop();
-    self.emitted_block = true;
+    self.prev_block_emitted = true;
 }
 Event::Start(Tag::Item) => {
     // Start a fresh line; build the marker from the innermost list.
@@ -578,20 +578,20 @@ Event::End(TagEnd::Item) => {
 Note: inside list items pulldown wraps text in a `Paragraph`. The
 existing `Start(Tag::Paragraph)` arm pushes a blank separator when
 `emitted_block` is true, which would break list items apart. Guard it:
-change the `Start(Tag::Paragraph)` arm to skip the separator while
-inside a list:
+change the `Start(Tag::Paragraph)` and `End(TagEnd::Paragraph)` arms to
+no-op while inside a list (the `Item` start/end manage list lines):
 
 ```rust
 Event::Start(Tag::Paragraph) => {
-    if self.emitted_block && self.lists.is_empty() {
-        self.lines.push(Line::from(Vec::new()));
+    if self.lists.is_empty() {
+        self.emit_block_separator();
     }
 }
 Event::End(TagEnd::Paragraph) => {
     // Inside a list item, the Item end flushes the line instead.
     if self.lists.is_empty() {
         self.flush_line();
-        self.emitted_block = true;
+        self.prev_block_emitted = true;
     }
 }
 ```
@@ -671,14 +671,10 @@ Event::SoftBreak | Event::HardBreak => {
         self.flush_line();
     }
 }
-Event::Start(Tag::Heading { .. }) => {
-    if self.emitted_block {
-        self.lines.push(Line::from(Vec::new()));
-    }
-}
+Event::Start(Tag::Heading { .. }) => self.emit_block_separator(),
 Event::End(TagEnd::Heading(_)) => {
     self.flush_line();
-    self.emitted_block = true;
+    self.prev_block_emitted = true;
 }
 ```
 
