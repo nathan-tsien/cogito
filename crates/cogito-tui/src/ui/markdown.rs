@@ -11,6 +11,9 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 /// Spaces added per indent level (code blocks, nested list content).
+/// This stacks on top of the chat gutter (`ui::chat::INDENT`, 3 spaces)
+/// that the chat widget prepends, so a code-block line renders at 3 + 2
+/// = 5 leading spaces.
 const NEST_INDENT: usize = 2;
 
 /// Styles the markdown builder applies, injected from the chat palette.
