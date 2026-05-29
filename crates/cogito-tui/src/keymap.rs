@@ -212,11 +212,9 @@ fn expand_selected(app: &mut App) -> Action {
 
 /// Map a key character `'1'..='9'` to a 1-based index, otherwise None.
 fn digit_index(ch: char) -> Option<u8> {
-    if ('1'..='9').contains(&ch) {
-        let n = (ch as u32 - '0' as u32) as u8;
-        Some(n)
-    } else {
-        None
+    match ch {
+        '1'..='9' => ch.to_digit(10).and_then(|d| u8::try_from(d).ok()),
+        _ => None,
     }
 }
 

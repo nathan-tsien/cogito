@@ -256,7 +256,9 @@ fn format_ms(ms: u128) -> String {
     if ms < 1000 {
         format!("{ms}ms")
     } else {
-        format!("{:.1}s", ms as f64 / 1000.0)
+        // Integer math avoids the u128 -> f64 precision-loss lint; we only
+        // render one decimal place of seconds.
+        format!("{}.{}s", ms / 1000, (ms % 1000) / 100)
     }
 }
 
@@ -269,6 +271,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use serde_json::json;
 
+    #[allow(clippy::too_many_arguments)]
     fn draw(
         chat: &ChatModel,
         tools: &ToolTreeModel,
@@ -388,11 +391,12 @@ mod tests {
     #[test]
     fn completed_ok_tool_renders_with_check_glyph() {
         let (mut chat, mut tools) = build_tools_with_one("c1", "read_file");
-        for ev in [StreamEvent::ToolDispatchEnded {
-            call_id: "c1".into(),
-            ok: true,
-            error_message: None,
-        }] {
+        {
+            let ev = StreamEvent::ToolDispatchEnded {
+                call_id: "c1".into(),
+                ok: true,
+                error_message: None,
+            };
             chat.on_event(&ev);
             tools.on_event(&ev);
         }
@@ -403,11 +407,12 @@ mod tests {
     #[test]
     fn failed_tool_renders_cross_and_error_message() {
         let (mut chat, mut tools) = build_tools_with_one("c1", "run_tests");
-        for ev in [StreamEvent::ToolDispatchEnded {
-            call_id: "c1".into(),
-            ok: false,
-            error_message: Some("panicked: assertion failed".into()),
-        }] {
+        {
+            let ev = StreamEvent::ToolDispatchEnded {
+                call_id: "c1".into(),
+                ok: false,
+                error_message: Some("panicked: assertion failed".into()),
+            };
             chat.on_event(&ev);
             tools.on_event(&ev);
         }
@@ -435,11 +440,12 @@ mod tests {
     #[test]
     fn expanded_completed_tool_renders_args_and_result_placeholder() {
         let (mut chat, mut tools) = build_tools_with_one("c1", "read_file");
-        for ev in [StreamEvent::ToolDispatchEnded {
-            call_id: "c1".into(),
-            ok: true,
-            error_message: None,
-        }] {
+        {
+            let ev = StreamEvent::ToolDispatchEnded {
+                call_id: "c1".into(),
+                ok: true,
+                error_message: None,
+            };
             chat.on_event(&ev);
             tools.on_event(&ev);
         }

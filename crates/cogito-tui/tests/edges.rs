@@ -144,7 +144,10 @@ fn unicode_in_tool_args_renders_without_corruption() {
     app.apply_stream_event(&StreamEvent::TurnCompleted);
     // Tools render inline now; the args are only shown when the tool
     // block is expanded. Expand the (only) tool block via Alt+1.
-    dispatch(&mut app, KeyEvent::new(KeyCode::Char('1'), KeyModifiers::ALT));
+    dispatch(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('1'), KeyModifiers::ALT),
+    );
     let out = draw(&app, 80, 24);
     // Wide characters (CJK, emoji) each occupy two terminal cells. The
     // cell-symbol collector puts a space in the trailing placeholder
@@ -196,7 +199,10 @@ fn quick_expand_via_digit_one_works_after_tool_completes() {
     });
     // Quick-expand the most recent tool block. Bare digits now route to
     // the input as text; quick-expand is Alt+1..9.
-    dispatch(&mut app, KeyEvent::new(KeyCode::Char('1'), KeyModifiers::ALT));
+    dispatch(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('1'), KeyModifiers::ALT),
+    );
     let out = draw(&app, 80, 24);
     assert!(out.contains('▾'), "expansion glyph missing:\n{out}");
     assert!(out.contains("args"), "args row missing:\n{out}");

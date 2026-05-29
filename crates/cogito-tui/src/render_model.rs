@@ -126,9 +126,11 @@ impl ChatModel {
                 self.in_text = false;
                 self.in_thinking = false;
             }
-            StreamEvent::ToolDispatchEnded { .. } => {
-                // State update lives in ToolTreeModel; ChatModel does nothing.
-            }
+            // Deliberate no-op for ChatModel: tool state lives in
+            // ToolTreeModel. Kept as an explicit arm (rather than folding
+            // into `_`) to document where ToolDispatchEnded is handled.
+            #[allow(clippy::match_same_arms)]
+            StreamEvent::ToolDispatchEnded { .. } => {}
             StreamEvent::TurnPaused => self.push_notice("[paused]"),
             StreamEvent::TurnResumed => self.push_notice("[resumed]"),
             StreamEvent::TurnCancelled => self.push_notice("[cancelled]"),

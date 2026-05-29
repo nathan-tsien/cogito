@@ -1,4 +1,4 @@
-//! Startup banner — three SystemNotice lines pushed into
+//! Startup banner — three `SystemNotice` lines pushed into
 //! `ChatModel` at App build time. Scrolls away naturally with chat
 //! history (spec §"Chrome strategy: Ambient (C3)").
 
