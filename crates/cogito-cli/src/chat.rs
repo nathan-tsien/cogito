@@ -9,13 +9,13 @@ use crate::render::Renderer;
 use anyhow::{Context, Result, anyhow};
 use clap::{Args, ValueEnum};
 use cogito_core::runtime::{OpenMode, Runtime};
-use cogito_jobs::{LocalJobManager, RunTestsTool};
+use cogito_jobs::{BashTool, LocalJobManager, RunTestsTool};
 use cogito_model::build_gateway;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::event::EventPayload;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::SessionId;
-use cogito_protocol::job::JobManager;
+use cogito_protocol::job::{JobManager, LocalJobSubmitter};
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::strategy_registry::{StrategyError, StrategyRegistry};
@@ -432,8 +432,9 @@ fn resolve_mode(args: &ChatArgs) -> Result<ChatMode> {
 }
 
 /// Construct the local tool inventory: sync builtins
-/// (`BuiltinToolProvider`) plus the async `run_tests` tool, composed
-/// via `CompositeToolProvider` with strict naming. Also brings up MCP
+/// (`BuiltinToolProvider`, including `read_file` and `web_fetch`) plus
+/// the async `run_tests` and adaptive `bash` tools, composed via
+/// `CompositeToolProvider` with strict naming. Also brings up MCP
 /// servers (per `cogito.toml`), prints the startup banner to stderr,
 /// and layers MCP on top of the local composite when at least one
 /// server came up.
@@ -450,21 +451,37 @@ async fn build_tool_provider(
     cfg: &cogito_config::RuntimeConfig,
     job_mgr: Arc<LocalJobManager>,
 ) -> Result<Arc<dyn cogito_protocol::tool::ToolProvider>> {
+    // Command executor for `bash`. Whether it is sandboxed is a policy
+    // decision made here at the Surface layer (ADR-0027): the CLI calls
+    // `build_executor` and receives a trait object, never matching on the
+    // sandbox kind itself.
+    let executor = cogito_sandbox::build_executor(&cfg.tools.sandbox)
+        .map_err(|e| anyhow!("build command executor: {e}"))?;
+
     let builtin: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(
         BuiltinToolProvider::builder()
             .with_tool(Arc::new(ReadFile))
+            .with_tool(Arc::new(cogito_tools::WebFetch::new(
+                cfg.tools.web_fetch.clone(),
+            )))
             .build(),
     );
-    // `RunTestsTool` implements `ToolProvider` directly (its dispatch
-    // outcome is `InvokeOutcome::Async`). `Arc<LocalJobManager>`
-    // coerces to `Arc<dyn LocalJobSubmitter>` via the unsized-coercion
-    // impl, so the same job-manager handle threads through here and
-    // `RuntimeBuilder::job_manager` below.
-    let run_tests: Arc<dyn cogito_protocol::tool::ToolProvider> =
-        Arc::new(RunTestsTool::new(job_mgr));
+    // `RunTestsTool` and `BashTool` implement `ToolProvider` directly
+    // (their dispatch outcome is `InvokeOutcome::Async`/`Adaptive`). The
+    // SAME job-manager handle threads through both async tools and
+    // `RuntimeBuilder::job_manager` below, so we `Arc::clone` it for each
+    // consumer and coerce to `Arc<dyn LocalJobSubmitter>`.
+    let run_tests: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(RunTestsTool::new(
+        Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>,
+    ));
+    let bash: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(BashTool::new(
+        executor,
+        Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>,
+        cfg.tools.bash.clone(),
+    ));
     let local: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(
-        CompositeToolProvider::new(vec![builtin, run_tests], NamingPolicy::Strict)
-            .map_err(|e| anyhow!("compose builtin + run_tests: {e}"))?,
+        CompositeToolProvider::new(vec![builtin, run_tests, bash], NamingPolicy::Strict)
+            .map_err(|e| anyhow!("compose builtin + run_tests + bash: {e}"))?,
     );
 
     let mcp_build = cogito_mcp::build_mcp_provider(&cfg.mcp_servers).await;
@@ -584,8 +601,8 @@ pub async fn run(args: ChatArgs) -> Result<()> {
 
     // `Arc<LocalJobManager>` -> `Arc<dyn JobManager>` via the unsized
     // coercion impl on `Arc<T>`. The typed `Arc<LocalJobManager>` was
-    // already cloned into `build_tool_provider` above for
-    // `RunTestsTool::new`; here we consume the original to produce the
+    // already cloned into `build_tool_provider` above for `RunTestsTool`
+    // and `BashTool`; here we consume the original to produce the
     // dyn-typed handle the `RuntimeBuilder::job_manager` setter wants.
     let job_mgr_dyn: Arc<dyn JobManager> = job_mgr;
     let mut builder = Runtime::builder()

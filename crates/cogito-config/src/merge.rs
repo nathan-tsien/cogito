@@ -31,6 +31,9 @@ fn merge_into(mut acc: RuntimeConfigPartial, next: RuntimeConfigPartial) -> Runt
     if let Some(skills_next) = next.skills {
         acc.skills = Some(skills_next);
     }
+    if let Some(tools_next) = next.tools {
+        acc.tools = Some(tools_next);
+    }
     acc
 }
 
@@ -106,6 +109,7 @@ impl RuntimeConfigPartial {
             mcp_servers,
             mcp_parse_failures,
             skills: self.skills,
+            tools: self.tools.unwrap_or_default(),
         })
     }
 }

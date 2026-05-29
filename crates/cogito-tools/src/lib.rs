@@ -9,6 +9,6 @@ pub mod builtins;
 pub mod composite;
 pub mod provider;
 
-pub use builtins::ReadFile;
+pub use builtins::{ReadFile, WebFetch, WebFetchConfig};
 pub use composite::{CompositeToolProvider, NamingPolicy};
 pub use provider::{BuiltinTool, BuiltinToolProvider, BuiltinToolProviderBuilder};

@@ -49,6 +49,7 @@ impl ConfigLoader for EnvConfigLoader {
             providers: None,
             mcp_servers: None,
             skills: None,
+            tools: None,
         };
         Ok(partial)
     }

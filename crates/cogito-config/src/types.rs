@@ -5,9 +5,12 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use cogito_jobs::BashConfig;
 use cogito_mcp::{McpServerConfig, McpStartupFailure};
 use cogito_model::ProviderConfig;
 use cogito_protocol::strategy::HarnessStrategy;
+use cogito_sandbox::SandboxConfig;
+use cogito_tools::WebFetchConfig;
 use serde::{Deserialize, Serialize};
 
 /// Finalized configuration value consumed by `RuntimeBuilder`. Always
@@ -33,6 +36,23 @@ pub struct RuntimeConfig {
     /// omitted"; finalize does not synthesize a default so absence
     /// stays distinguishable from `enabled = true`.
     pub skills: Option<SkillsConfig>,
+    /// Resolved `[tools]` section. Always present (defaults when omitted).
+    /// Unlike `skills`, `tools` has no omitted-vs-default distinction, so
+    /// `finalize` collapses an absent section straight to defaults.
+    pub tools: ToolsConfig,
+}
+
+/// `[tools]` cogito.toml section: aggregates per-tool config owned by the
+/// implementing crates. Whole-section replace on merge (like `[skills]`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct ToolsConfig {
+    /// `bash` tool tunables (owned by `cogito-jobs`).
+    pub bash: BashConfig,
+    /// `web_fetch` tool tunables (owned by `cogito-tools`).
+    pub web_fetch: WebFetchConfig,
+    /// Command-execution backend selection (owned by `cogito-sandbox`).
+    pub sandbox: SandboxConfig,
 }
 
 /// Finalized `[runtime]` section. All fields are resolved (no `Option`
@@ -77,6 +97,8 @@ pub struct RuntimeConfigPartial {
     /// Optional `[skills]` section (Sprint 7). Plumbed into
     /// `RuntimeBuilder` by `cogito-cli` to build a `SkillRegistry`.
     pub skills: Option<SkillsConfig>,
+    /// Optional `[tools]` section. Whole-section replace on merge.
+    pub tools: Option<ToolsConfig>,
 }
 
 /// `[skills]` cogito.toml section.
@@ -166,6 +188,7 @@ mod tests {
             providers: Some(vec![]),
             mcp_servers: None,
             skills: None,
+            tools: None,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: RuntimeConfigPartial = serde_json::from_str(&s).unwrap();
@@ -186,6 +209,7 @@ mod tests {
         assert!(p.providers.is_none());
         assert!(p.mcp_servers.is_none());
         assert!(p.skills.is_none());
+        assert!(p.tools.is_none());
     }
 
     #[test]
@@ -270,6 +294,34 @@ mod tests {
             msg.contains("userdir") || msg.contains("unknown"),
             "error should mention the offending field, got: {msg}"
         );
+    }
+
+    #[test]
+    fn tools_section_parses_and_defaults() {
+        let toml_str = r#"
+            [tools.bash]
+            sync_timeout_secs = 5
+
+            [tools.sandbox]
+            kind = "direct"
+            root = "/work"
+        "#;
+        let partial: RuntimeConfigPartial = toml::from_str(toml_str).unwrap();
+        let cfg = partial.finalize().unwrap();
+        assert_eq!(cfg.tools.bash.sync_timeout_secs, 5);
+        // web_fetch absent -> default.
+        assert_eq!(cfg.tools.web_fetch.timeout_secs, 30);
+        // sandbox root honored.
+        let cogito_sandbox::SandboxConfig::Direct(d) = &cfg.tools.sandbox;
+        assert_eq!(d.root, std::path::PathBuf::from("/work"));
+    }
+
+    #[test]
+    fn tools_default_when_section_absent() {
+        let partial: RuntimeConfigPartial =
+            toml::from_str("[runtime]\nsession_root='/tmp/x'\n").unwrap();
+        let cfg = partial.finalize().unwrap();
+        assert_eq!(cfg.tools.bash.max_output_bytes, 32 * 1024);
     }
 
     #[test]

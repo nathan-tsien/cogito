@@ -22,4 +22,5 @@
     clippy::missing_panics_doc
 )]
 
+pub mod contract_command_executor;
 pub mod contract_job_manager;

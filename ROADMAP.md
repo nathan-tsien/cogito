@@ -217,6 +217,7 @@ helper landed in 9a.
 
 - [ ] All component design docs cross-referenced and current
 - [ ] `cogito-store-jsonl` → `cogito-store` rename PR landed (see ADR-0024); JSONL becomes the default Cargo feature
+- [x] **明示追加(非原排期)**: 核心工具 `bash` + `web_fetch`,以及 `cogito-sandbox` 的 `CommandExecutor` 接缝(`DirectExecutor` + `build_executor`)与 `[tools]` 配置段。详见 ADR-0027 / `docs/components/cogito-sandbox.md`
 - [ ] CHANGELOG.md initial entry
 - [ ] Tag `v0.1.0`
 

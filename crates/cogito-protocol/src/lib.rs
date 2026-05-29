@@ -6,6 +6,7 @@
 //! Anything that defines the *contract* between components belongs here.
 //!
 //! Module map (1:1 with the Brain/Hands/Session boundaries in ADR-0004):
+//! - [`command`]: `CommandExecutor` trait + `CommandSpec`/`CommandOutcome` — subprocess execution seam (sandbox policy)
 //! - [`content`]: `ContentBlock` — wire-format unit shared between model, tools, persisted events
 //! - [`error`]: shared error kinds and helpers
 //! - [`event`]: `ConversationEvent` + `EventPayload` + `SCHEMA_VERSION` (persisted event log)
@@ -30,6 +31,7 @@
 //! All v0.1 contract modules ship as part of Sprint 0 (Tasks 7-10 of
 //! the Sprint 0 closure plan) and Sprint 1 (`event`, `store`).
 
+pub mod command;
 pub mod content;
 pub mod context;
 pub mod error;
@@ -53,6 +55,7 @@ pub mod tool;
 pub mod turn;
 pub mod turn_trigger;
 
+pub use command::{CommandError, CommandExecutor, CommandOutcome, CommandSpec};
 pub use content::ContentBlock;
 pub use context::{
     CompactionApplied, CompactionInput, CompactionKind, CompactionReplacement, Compactor,
