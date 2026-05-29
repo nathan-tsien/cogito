@@ -9,9 +9,10 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, Borders};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::Paragraph;
 use tui_textarea::TextArea;
 
 /// Maximum visible input lines (the input bar grows up to this, then
@@ -37,9 +38,8 @@ pub struct InputWidget {
 impl Default for InputWidget {
     fn default() -> Self {
         let mut ta = TextArea::default();
-        ta.set_block(Block::default().borders(Borders::ALL).title("message"));
         ta.set_cursor_line_style(Style::default());
-        ta.set_placeholder_text("Type a message; Enter to send, Shift+Enter for newline");
+        ta.set_placeholder_text("Type a message \u{2014} Enter to send, Shift+Enter for newline");
         ta.set_placeholder_style(Style::default().fg(Color::DarkGray));
         Self { textarea: ta }
     }
@@ -86,12 +86,14 @@ impl InputWidget {
         self.textarea.lines().first().and_then(|l| l.chars().next())
     }
 
-    /// Total visible height needed (clamped to `MAX_VISIBLE_INPUT_LINES`),
-    /// inclusive of the surrounding block border (2 rows).
+    /// Total visible height needed for the input, clamped to
+    /// `MAX_VISIBLE_INPUT_LINES`. No border rows — the layout draws a
+    /// divider above the input and a `▸` prompt marker sits in a left
+    /// gutter, so the input itself is borderless.
     #[must_use]
     pub fn desired_height(&self) -> u16 {
         let content = u16::try_from(self.textarea.lines().len()).unwrap_or(u16::MAX);
-        content.clamp(1, MAX_VISIBLE_INPUT_LINES) + 2
+        content.clamp(1, MAX_VISIBLE_INPUT_LINES)
     }
 
     /// Clear the buffer.
@@ -100,9 +102,19 @@ impl InputWidget {
         self.textarea.cut();
     }
 
-    /// Render into the given area.
+    /// Render into `area`: a 3-column `▸  ` prompt marker gutter (cyan,
+    /// matching the user role marker in scrollback) plus the textarea.
     pub fn render(&self, f: &mut Frame, area: Rect) {
-        f.render_widget(&self.textarea, area);
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(area);
+        let marker = Paragraph::new(Line::from(Span::styled(
+            "▸  ",
+            Style::default().fg(Color::Cyan),
+        )));
+        f.render_widget(marker, cols[0]);
+        f.render_widget(&self.textarea, cols[1]);
     }
 }
 
@@ -152,7 +164,7 @@ mod tests {
         }
         let _ = w.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(w.first_char(), None);
-        assert_eq!(w.desired_height(), 3); // 1 line + 2 border rows
+        assert_eq!(w.desired_height(), 1); // 1 line, no border
     }
 
     #[test]
@@ -161,7 +173,7 @@ mod tests {
         for _ in 0..10 {
             w.on_key(key(KeyCode::Enter, KeyModifiers::SHIFT));
         }
-        assert_eq!(w.desired_height(), MAX_VISIBLE_INPUT_LINES + 2);
+        assert_eq!(w.desired_height(), MAX_VISIBLE_INPUT_LINES);
     }
 
     #[test]
