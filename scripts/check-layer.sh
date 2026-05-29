@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-FORBIDDEN_PATTERN='use cogito_(tools|model|sandbox|jobs|store_jsonl|store_postgres|store_http|mcp|subagent|storage_local|storage_s3|storage_http)'
+FORBIDDEN_PATTERN='use cogito_(tools|model|sandbox|jobs|store|mcp|subagent|storage_local|storage_s3|storage_http)'
 
 TMP_PROD="$(mktemp -t layer-check-prod.XXXXXX.rs)"
 trap 'rm -f "$TMP_PROD"' EXIT

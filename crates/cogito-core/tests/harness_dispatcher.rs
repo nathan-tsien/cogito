@@ -9,7 +9,7 @@ use cogito_protocol::ExecCtx;
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::job::JobCompletionEvent;
 use cogito_protocol::tool::{ToolErrorKind, ToolResult};
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use cogito_test_fixtures::MockJobManager;
 use cogito_tools::{BuiltinToolProvider, ReadFile};
 use tokio::sync::{Mutex, broadcast, mpsc};

@@ -24,7 +24,7 @@ cogito-sandbox = { workspace = true }
 cogito-skills = { workspace = true }
 cogito-strategy = { workspace = true }
 cogito-tools = { workspace = true }
-cogito-store-jsonl = { workspace = true }
+cogito-store = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }

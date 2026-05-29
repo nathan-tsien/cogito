@@ -51,7 +51,7 @@ use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
 use cogito_protocol::tool::{ToolProvider, ToolResult};
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use futures::StreamExt as _;
 
 /// Terminal outcome of the broadcast-stream wait loop. Kept at module

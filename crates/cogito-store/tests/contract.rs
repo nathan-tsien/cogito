@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use cogito_protocol::ConversationStore;
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use cogito_test_fixtures::store_contract::run_store_contract;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -30,7 +30,7 @@ If `AGENTS.md` and this file conflict, `AGENTS.md` wins.
 3. **State lives in Conversation Service, not Harness memory.** If a Harness instance crashes mid-turn, a new instance must resume from the event log. No cross-turn state in structs. Ask: "can this be rebuilt from the event log?"
 4. **Turn Driver is a state machine**, not a function chain. States: `Init → PromptBuilt → ModelCalling → ModelCompleted → ToolDispatching → {Completed | Paused | Failed}`. Each transition writes an event *before* transitioning.
 5. **Tool failures are structured `ToolResult::Error`**, not panics or `unwrap`s.
-6. **Brain only sees Hands / Session / Boundary through Protocol traits.** `cogito-core::harness` may import **only** `cogito-protocol`. Concrete crates (`cogito-store-jsonl`, `cogito-model`, `cogito-tools`, `cogito-sandbox`, `cogito-jobs`, `cogito-mcp`, `cogito-subagent`, `cogito-storage-local`) are wired in by the Runtime layer and injected as trait objects. If you want to `use cogito_tools::…` inside `harness/`, add a trait to `cogito-protocol` instead. Hooks (H09) follow the same rule: pure policy gates, no I/O — side effects go through `ToolProvider`/`JobManager`. See **ADR-0004** for the full layer map.
+6. **Brain only sees Hands / Session / Boundary through Protocol traits.** `cogito-core::harness` may import **only** `cogito-protocol`. Concrete crates (`cogito-store`, `cogito-model`, `cogito-tools`, `cogito-sandbox`, `cogito-jobs`, `cogito-mcp`, `cogito-subagent`, `cogito-storage-local`) are wired in by the Runtime layer and injected as trait objects. If you want to `use cogito_tools::…` inside `harness/`, add a trait to `cogito-protocol` instead. Hooks (H09) follow the same rule: pure policy gates, no I/O — side effects go through `ToolProvider`/`JobManager`. See **ADR-0004** for the full layer map.
 
 ## Commands
 
@@ -64,8 +64,8 @@ Each crate maps to exactly one layer in the Brain / Hands / Session design (ADR-
 |---|---|---|---|
 | `cogito-protocol` | Protocol | v0.1 | All traits + events + `Vec<ContentBlock>` + value types. No internal deps. |
 | `cogito-core` | Brain + Runtime (will split) | v0.1 | `harness/` is Brain (H01–H10), may only `use cogito_protocol::*`; `runtime/` hosts Brain + implements `BrainSpawner` (v0.3+). |
-| `cogito-store-jsonl` | Session | v0.1 | Per-session JSONL backend; sole v0.1 store. |
-| `cogito-store-postgres` | Session | v0.4 | Production multi-replica backend. |
+| `cogito-store` | Session | v0.1 | `ConversationStore` umbrella; backends as features. Default `jsonl` is the sole v0.1 store. Renamed from `cogito-store-jsonl` per ADR-0024. |
+| `cogito-store --features postgres` | Session | v0.4 | Production multi-replica backend (folded into `cogito-store` per ADR-0024; was `cogito-store-postgres`). |
 | `cogito-model` | Boundary | v0.1 | `ModelGateway` impls (Anthropic + OpenAI) with ContentBlock serialization. |
 | `cogito-tools` | Hands | v0.1 | Builtin tools + `CompositeToolProvider` utility. |
 | `cogito-sandbox` | Hands (internal primitive) | v0.1 | Subprocess sandbox; not visible to Brain. |

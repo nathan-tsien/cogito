@@ -24,7 +24,7 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] CLAUDE.md added; ADR-0004 (Brain/Hands/Session) ratified
 - [x] ADR-0005 (production scope) ratified
 - [x] ADR-0006 (Runtime + H01 execution model) ratified
-- [x] Workspace topology fixed per ADR-0004: dropped `cogito-conversation`, added `cogito-store-jsonl`, stripped Hands/Boundary/Session deps from `cogito-core`
+- [x] Workspace topology fixed per ADR-0004: dropped `cogito-conversation`, added `cogito-store` (originally `cogito-store-jsonl`; renamed per ADR-0024), stripped Hands/Boundary/Session deps from `cogito-core`
 - [x] Protocol types landed: `ExecutionClass`, `StreamEvent`, `JobCompletionEvent`, `JobManager::on_complete`, `TurnOutcome`, `TurnFailureReason` (12+ serde-roundtrip tests passing)
 - [x] Runtime module scaffolded (stubs): `Runtime`, `RuntimeBuilder`, `SessionHandle`, per-session loop task (`runtime::session_loop::run_session` + `SessionShared`), `store_writer`
 - [x] CI runs `make ci` (fmt + clippy + layer-check + test) + cargo-deny job
@@ -33,7 +33,7 @@ Driver, panic isolation, and chaos-tested resume.
 #### Sprint 1 · H02 Step Recorder + JSONL store (1.5 day)
 - [x] `cogito-protocol` defines `ConversationEvent` with `schema_version: u32` + `Vec<ContentBlock>` payload (Text + ToolUse + ToolResult variants)
 - [x] `cogito-protocol` defines `ConversationStore` trait
-- [x] `cogito-store-jsonl` implementation: per-session file, `flush` per event, append-only (durability scope: dev/debug — see ADR-0007)
+- [x] `cogito-store` (then named `cogito-store-jsonl`) implementation: per-session file, `flush` per event, append-only (durability scope: dev/debug — see ADR-0007)
 - [x] Contract test infrastructure (shared test consumed by every backend crate)
 - [x] `cogito-core::harness::step_recorder` writes events
 - [x] Text-block batching: per content_block boundary (matches Codex / Claude Code; see ADR-0007 + H02 doc)
@@ -216,7 +216,7 @@ helper landed in 9a.
 `cogito-store-jsonl` → `cogito-store` rename PR (see ADR-0024).
 
 - [ ] All component design docs cross-referenced and current
-- [ ] `cogito-store-jsonl` → `cogito-store` rename PR landed (see ADR-0024); JSONL becomes the default Cargo feature
+- [x] `cogito-store-jsonl` → `cogito-store` rename PR landed (see ADR-0024); JSONL becomes the default Cargo feature
 - [x] **明示追加(非原排期)**: 核心工具 `bash` + `web_fetch`,以及 `cogito-sandbox` 的 `CommandExecutor` 接缝(`DirectExecutor` + `build_executor`)与 `[tools]` 配置段。详见 ADR-0027 / `docs/components/cogito-sandbox.md`
 - [ ] CHANGELOG.md initial entry
 - [ ] Tag `v0.1.0`

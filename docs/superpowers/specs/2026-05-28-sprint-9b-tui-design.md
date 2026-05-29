@@ -141,7 +141,7 @@ cogito-tools.workspace = true
 cogito-jobs.workspace = true
 cogito-mcp.workspace = true
 cogito-skills.workspace = true
-cogito-store-jsonl.workspace = true
+cogito-store.workspace = true
 cogito-sandbox.workspace = true
 cogito-cli.workspace = true             # library exports: resolve_strategy etc.
 

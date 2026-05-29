@@ -14,8 +14,8 @@ use crate::ids::SessionId;
 
 /// Persistent backend for a session's `ConversationEvent` stream.
 ///
-/// Implementations live in separate crates (`cogito-store-jsonl`,
-/// `cogito-store-postgres` v0.4). The Runtime holds **one**
+/// Implementations live in the `cogito-store` crate as feature-gated
+/// backends (`jsonl` default; `postgres` v0.4). The Runtime holds **one**
 /// `Arc<dyn ConversationStore>` shared by all per-session loop tasks;
 /// every method takes the session identifier explicitly.
 ///

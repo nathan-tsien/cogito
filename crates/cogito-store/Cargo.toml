@@ -1,10 +1,18 @@
 [package]
-name = "cogito-store-jsonl"
+name = "cogito-store"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[features]
+default = ["jsonl"]
+# JSONL-file backend (dev/debug). v0.1 ships this as the only backend.
+jsonl = []
+# Future backends land as feature-gated modules + optional deps (ADR-0024):
+#   postgres = ["dep:tokio-postgres", "dep:bb8-postgres"]  # v0.4
+#   sqlite   = ["dep:rusqlite"]                            # future
 
 [dependencies]
 cogito-protocol.workspace = true

@@ -1,7 +1,7 @@
-//! `cogito-store-jsonl` — JSONL-file-backed `ConversationStore`.
+//! JSONL-file-backed `ConversationStore`.
 //!
-//! **Scope: dev/debug only.** This backend is the v0.1 default while
-//! `cogito-store-postgres` is being built. It is intentionally simple:
+//! **Scope: dev/debug only.** This backend is the v0.1 default while the
+//! `postgres` backend (v0.4) is being built. It is intentionally simple:
 //!
 //! - One file per session at `<root>/<session_id>.jsonl`.
 //! - Per-event userspace flush via `tokio::fs::File::flush`.
@@ -12,10 +12,6 @@
 //! See spec
 //! `docs/superpowers/specs/2026-05-18-h02-conversation-store-and-event-log.md`
 //! §5 for rationale.
-
-#![warn(clippy::pedantic)]
-#![warn(missing_docs)]
-#![forbid(unsafe_code)]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,7 +26,7 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 
-/// JSONL backend for `ConversationStore`. Dev/debug only — see crate docs.
+/// JSONL backend for `ConversationStore`. Dev/debug only — see module docs.
 pub struct JsonlStore {
     root: PathBuf,
     handles: DashMap<SessionId, Arc<Mutex<File>>>,

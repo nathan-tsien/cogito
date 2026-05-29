@@ -28,7 +28,7 @@ use tempfile::TempDir;
 fn fresh_app() -> (App, TempDir) {
     let tempdir = tempfile::tempdir().unwrap();
     let store: Arc<dyn cogito_protocol::ConversationStore> =
-        Arc::new(cogito_store_jsonl::JsonlStore::new(tempdir.path()));
+        Arc::new(cogito_store::JsonlStore::new(tempdir.path()));
     let registry: Arc<dyn cogito_protocol::strategy_registry::StrategyRegistry> =
         Arc::new(cogito_test_fixtures::strategy::MapStrategyRegistry::default());
     let handle = cogito_core::runtime::SessionHandle::test_stub();

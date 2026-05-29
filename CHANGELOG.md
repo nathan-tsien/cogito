@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint 10 · v0.1 hardening (2026-05-29)
+
+**Changed**
+
+- **Renamed crate `cogito-store-jsonl` → `cogito-store`** (ADR-0024).
+  The crate is now named after its Session-layer role, not a backend.
+  The JSONL implementation moved into module `cogito_store::jsonl`,
+  gated by the default Cargo feature `jsonl`; `JsonlStore` is re-exported
+  at the crate root, so consumers change `use cogito_store_jsonl::JsonlStore`
+  to `use cogito_store::JsonlStore`. Future backends (`postgres` in v0.4,
+  `sqlite` later) land as additional feature-gated modules instead of new
+  workspace crates — the planned v0.4 `cogito-store-postgres` crate is now
+  `cogito-store --features postgres`. No on-disk format or schema change.
+
 ### Sprint 9b · TUI (2026-05-28)
 
 **Added**

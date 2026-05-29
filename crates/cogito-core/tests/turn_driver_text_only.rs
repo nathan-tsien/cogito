@@ -20,7 +20,7 @@ use cogito_protocol::gateway::{ModelEvent, StopReason, Usage};
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::turn::TurnOutcome;
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use cogito_tools::ReadFile;
 use cogito_tools::provider::BuiltinToolProvider;
 use tokio::sync::{Mutex, broadcast, mpsc};

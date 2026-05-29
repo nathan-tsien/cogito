@@ -750,7 +750,7 @@ adds a specific capability without breaking prior protocol guarantees
 | [ADR-0021](docs/adr/0021-plugin-manifest-and-loader.md) | Plugin manifest + loader (`cogito-plugin`, TOML primary + Claude-plugin JSON compat read, namespace, local-path-only v0.2) | Proposed — finalized in v0.2 Sprint 12 |
 | [ADR-0022](docs/adr/0022-plugin-distribution.md) | Plugin distribution (git fetch + lock file + `cogito plugin sync`) | Proposed — finalized in v0.3 |
 | [ADR-0023](docs/adr/0023-bundled-script-execution.md) | Bundled-script execution in Skills | **Deliberately deferred** — records design space, revisit when concrete use case surfaces or Subagent v0.3 lands |
-| [ADR-0024](docs/adr/0024-crate-naming-consolidation.md) | Crate naming consolidation (`cogito-store-jsonl` → `cogito-store` rename, name-by-layer/role principle) | Proposed — finalized in rename PR pre-v0.1.0 tag |
+| [ADR-0024](docs/adr/0024-crate-naming-consolidation.md) | Crate naming consolidation (`cogito-store-jsonl` → `cogito-store` rename, name-by-layer/role principle) | Accepted (2026-05-29) |
 
 ## v0.1 scope (IN / OUT)
 

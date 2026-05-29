@@ -209,7 +209,7 @@ impl App {
 #[allow(clippy::unwrap_used)]
 pub(crate) mod tests {
     use super::*;
-    use cogito_store_jsonl::JsonlStore;
+    use cogito_store::JsonlStore;
     use cogito_test_fixtures::strategy::MapStrategyRegistry;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use tempfile::TempDir;

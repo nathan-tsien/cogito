@@ -23,7 +23,7 @@ use cogito_protocol::ids::SessionId;
 use cogito_protocol::job::{JobManager, LocalJobSubmitter};
 use cogito_protocol::strategy_registry::StrategyRegistry;
 use cogito_protocol::tool::ToolProvider;
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use cogito_tools::{BuiltinToolProvider, CompositeToolProvider, NamingPolicy, ReadFile, WebFetch};
 
 use crate::app::App;

@@ -29,7 +29,7 @@ cogito-core.workspace = true
 cogito-mock-model.workspace = true
 cogito-protocol = { workspace = true, features = ["test-support"] }
 cogito-sandbox.workspace = true
-cogito-store-jsonl.workspace = true
+cogito-store.workspace = true
 cogito-test-fixtures.workspace = true
 cogito-tools.workspace = true
 serde_json = { workspace = true }

@@ -183,7 +183,7 @@ bench:
 	$(CARGO) bench --workspace
 
 bench-baseline:
-	$(CARGO) bench -p cogito-store-jsonl --bench append_throughput
+	$(CARGO) bench -p cogito-store --bench append_throughput
 
 # Schema
 gen-schema:

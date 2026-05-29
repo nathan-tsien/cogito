@@ -84,7 +84,7 @@ ADR-0001（workspace layout）、ADR-0002（event sourcing）、ADR-0003（FSM T
    └───────────────────┬───────────────────────────────────┘
                        │ implemented by
         ┌──────────────┼──────────────────────────────────┐
-        │ Session (cogito-store-jsonl)                    │
+        │ Session (cogito-store)                    │
         │ Boundary (cogito-model)                         │
         │ Hands (cogito-tools, cogito-jobs, cogito-sandbox)│
         └─────────────────────────────────────────────────┘
@@ -1151,7 +1151,7 @@ caller 通过 SessionHandle 看到的：next send → `Err(SessionClosed)` ；ev
 ### Sprint 1 SLO benchmark 计划
 
 ```
-crates/cogito-store-jsonl/benches/append_throughput.rs:
+crates/cogito-store/benches/append_throughput.rs:
   - bench_1: per-event fsync, 单 session, 10K events 顺序写
   - bench_2: 同上但 group commit（同一 turn 内事件攒到 turn 结束一次 fsync）
   - bench_3: 多 session 并发（10/100/1000 个 session 同时写各自的 jsonl）
@@ -1489,7 +1489,7 @@ crates/cogito-core/
     ├── resume_chaos.rs         # 在每个 state 转移点注入崩溃
     └── store_writer_batching.rs # text-delta 200ms/500-char 边界
 
-crates/cogito-store-jsonl/
+crates/cogito-store/
 ├── src/lib.rs
 ├── benches/
 │   └── append_throughput.rs    # SLO benchmark（Sprint 1 拍 TBD-T1）
@@ -1577,8 +1577,8 @@ bench_append_throughput 输出格式：
 | 步骤 | 动作 | 验收 |
 |---|---|---|
 | 1.1 | 删除 `crates/cogito-conversation/`（整个目录） | `cargo check` 失败处可见 |
-| 1.2 | 新建 `crates/cogito-store-jsonl/{Cargo.toml,src/lib.rs}` 骨架 | `cargo check -p cogito-store-jsonl` 通过 |
-| 1.3 | 更新 workspace `Cargo.toml`：members 列表删 `cogito-conversation`，加 `cogito-store-jsonl`；`[workspace.dependencies]` 同步 | `cargo check --workspace` 通过 |
+| 1.2 | 新建 `crates/cogito-store/{Cargo.toml,src/lib.rs}` 骨架 | `cargo check -p cogito-store` 通过 |
+| 1.3 | 更新 workspace `Cargo.toml`：members 列表删 `cogito-conversation`，加 `cogito-store`；`[workspace.dependencies]` 同步 | `cargo check --workspace` 通过 |
 | 1.4 | 修正 `crates/cogito-core/Cargo.toml`：**删除** 直接依赖 `cogito-conversation`、`cogito-model`、`cogito-tools`、`cogito-sandbox`、`cogito-jobs`；只保留 `cogito-protocol` | `cargo check -p cogito-core` 通过；layer 不变量首次由 Cargo 强制 |
 | 1.5 | 修正 `crates/cogito-jobs/Cargo.toml`：删除 `cogito-conversation`（已不存在）；保留 `cogito-protocol` | `cargo check -p cogito-jobs` 通过 |
 | 1.6 | 修正 `crates/cogito-cli/Cargo.toml`：依赖 `cogito-core`（含 runtime） + 所有 Hands/Boundary/Session crate（Surface 层可以全引） | `cargo check -p cogito-cli` 通过 |
@@ -1624,7 +1624,7 @@ Sprint 1 不能开始的硬阻塞：
 
 | 文件 | 更新内容 |
 |---|---|
-| `ARCHITECTURE.md` §"Workspace layout" | `cogito-conversation` 已是历史，删干净；`cogito-store-jsonl` 加进；`cogito-core` 行说明 `harness/` + `runtime/` 子模块分工 |
+| `ARCHITECTURE.md` §"Workspace layout" | `cogito-conversation` 已是历史，删干净；`cogito-store` 加进；`cogito-core` 行说明 `harness/` + `runtime/` 子模块分工 |
 | `ARCHITECTURE.md` §"Trait contracts" | `JobManager` 增加 `on_complete` 行；新增 `ExecutionClass`、`StreamEvent` 行 |
 | `ROADMAP.md` Sprint 0 复选框 | 把"13 crates created" 调成新 list，勾完；勾"CI workflow runs just ci" |
 | `docs/components/H01-turn-driver.md` | 加一段"Implementation note: runs as a per-turn tokio task spawned by SessionActor; FSM is `enum TurnState` with each variant carrying the data its transition needs" |

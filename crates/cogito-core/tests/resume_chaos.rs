@@ -61,7 +61,7 @@ use cogito_protocol::tool::{
     ExecutionClass, InvokeOutcome, ToolDescriptor, ToolProvider, ToolResult,
 };
 use cogito_protocol::{ConversationEvent, EventPayload};
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use cogito_test_fixtures::chaos_scenarios::{self, ChaosScenario};
 use cogito_test_fixtures::fault_store::{FaultInjectingStore, FaultTrigger};
 use cogito_test_fixtures::mock_job_manager::MockJobManager;

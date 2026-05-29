@@ -380,7 +380,7 @@ dependencies = [
  "cogito-protocol",
  "cogito-sandbox",
  "cogito-skills",
- "cogito-store-jsonl",
+ "cogito-store",
  "cogito-strategy",
  "cogito-test-fixtures",
  "cogito-tools",
@@ -445,7 +445,7 @@ dependencies = [
  "cogito-mock-model",
  "cogito-protocol",
  "cogito-skills",
- "cogito-store-jsonl",
+ "cogito-store",
  "cogito-test-fixtures",
  "cogito-tools",
  "criterion",
@@ -491,7 +491,7 @@ dependencies = [
  "cogito-mock-model",
  "cogito-protocol",
  "cogito-sandbox",
- "cogito-store-jsonl",
+ "cogito-store",
  "cogito-test-fixtures",
  "cogito-tools",
  "futures",
@@ -608,7 +608,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cogito-store-jsonl"
+name = "cogito-store"
 version = "0.1.0"
 dependencies = [
  "async-stream",
@@ -651,7 +651,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "cogito-protocol",
- "cogito-store-jsonl",
+ "cogito-store",
  "futures",
  "serde",
  "serde_json",
@@ -697,7 +697,7 @@ dependencies = [
  "cogito-protocol",
  "cogito-sandbox",
  "cogito-skills",
- "cogito-store-jsonl",
+ "cogito-store",
  "cogito-strategy",
  "cogito-test-fixtures",
  "cogito-tools",

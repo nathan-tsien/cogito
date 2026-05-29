@@ -2,9 +2,11 @@
 
 ## Status
 
-Proposed — placeholder (finalized as part of the
+Accepted (2026-05-29) — finalized as part of the
 `cogito-store-jsonl → cogito-store` rename PR, landing before v0.1.0
-tag).
+tag. The rename moved the JSONL backend into `cogito-store::jsonl`
+behind the default `jsonl` feature; `postgres`/`sqlite` features remain
+documented placeholders (no deps added) until their backends land.
 
 Captures the naming principle ratified in the
 [2026-05-22 roadmap rebalance spec](../superpowers/specs/2026-05-22-roadmap-rebalance-design.md)

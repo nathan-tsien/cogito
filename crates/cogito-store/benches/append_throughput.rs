@@ -18,7 +18,7 @@ use chrono::Utc;
 use cogito_protocol::{
     ConversationEvent, ConversationStore, EventId, EventPayload, SCHEMA_VERSION, SessionId, TurnId,
 };
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use criterion::{Criterion, criterion_group, criterion_main};
 use tokio::runtime::Runtime;
 

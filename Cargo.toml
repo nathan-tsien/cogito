@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "crates/cogito-core",
     "crates/cogito-protocol",
-    "crates/cogito-store-jsonl",
+    "crates/cogito-store",
     "crates/cogito-model",
     "crates/cogito-tools",
     "crates/cogito-sandbox",
@@ -44,7 +44,7 @@ cogito-config = { path = "crates/cogito-config" }
 cogito-context = { path = "crates/cogito-context" }
 cogito-core = { path = "crates/cogito-core" }
 cogito-protocol = { path = "crates/cogito-protocol" }
-cogito-store-jsonl = { path = "crates/cogito-store-jsonl" }
+cogito-store = { path = "crates/cogito-store" }
 cogito-model = { path = "crates/cogito-model" }
 cogito-tools = { path = "crates/cogito-tools" }
 cogito-sandbox = { path = "crates/cogito-sandbox" }

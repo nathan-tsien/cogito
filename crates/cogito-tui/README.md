@@ -73,7 +73,7 @@ The `/` discovery popup lists matching commands as you type.
 cogito-tui is a Surface-layer crate (ADR-0004). It depends on:
 - `cogito-protocol`, `cogito-config`, `cogito-strategy`,
   `cogito-model`, `cogito-tools`, `cogito-jobs`, `cogito-mcp`,
-  `cogito-skills`, `cogito-store-jsonl`, `cogito-sandbox`, `cogito-core`
+  `cogito-skills`, `cogito-store`, `cogito-sandbox`, `cogito-core`
 - `cogito-cli` (peer Surface crate — re-uses `chat_config`,
   `banner`, `resolve_strategy`, slash parser helpers)
 - `ratatui = 0.29`, `crossterm = 0.29`, `tui-textarea = 0.7`,

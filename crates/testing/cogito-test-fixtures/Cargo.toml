@@ -25,7 +25,7 @@ chrono.workspace = true
 # in scope during test compilation. Production builds of this crate
 # still pick up the dependency-section entry above, without the feature.
 cogito-protocol = { workspace = true, features = ["test-support"] }
-cogito-store-jsonl.workspace = true
+cogito-store.workspace = true
 tempfile.workspace = true
 
 [[bin]]

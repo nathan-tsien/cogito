@@ -198,7 +198,7 @@ mod tests {
     use cogito_protocol::gateway::{ModelEvent, StopReason, Usage};
     use cogito_protocol::ids::{SessionId, TurnId};
     use cogito_protocol::store::ConversationStore;
-    use cogito_store_jsonl::JsonlStore;
+    use cogito_store::JsonlStore;
     use futures::stream;
     use tokio::sync::broadcast;
 

@@ -38,7 +38,7 @@ async fn replay_canonical_fixture_reconstructs_chat() {
 
     // Open a JsonlStore rooted at the tempdir.
     let store: Arc<dyn cogito_protocol::ConversationStore> =
-        Arc::new(cogito_store_jsonl::JsonlStore::new(dir.path()));
+        Arc::new(cogito_store::JsonlStore::new(dir.path()));
 
     // Call the resume entry point. `is_new_session = false` triggers
     // the replay path.

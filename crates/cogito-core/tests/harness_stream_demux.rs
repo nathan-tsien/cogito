@@ -13,7 +13,7 @@ use cogito_protocol::gateway::{
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::session::SessionMeta;
 use cogito_protocol::store::ConversationStore;
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use tokio::sync::broadcast;
 
 fn empty_input() -> ModelInput {

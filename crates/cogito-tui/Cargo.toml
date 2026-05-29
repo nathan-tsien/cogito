@@ -24,7 +24,7 @@ cogito-tools.workspace = true
 cogito-jobs.workspace = true
 cogito-mcp.workspace = true
 cogito-skills.workspace = true
-cogito-store-jsonl.workspace = true
+cogito-store.workspace = true
 cogito-sandbox.workspace = true
 # Surface-layer sibling: re-uses chat_config, banner, slash parser.
 # Library promotion already done — cogito-cli/src/lib.rs exposes the needed modules.

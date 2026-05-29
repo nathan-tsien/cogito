@@ -805,7 +805,7 @@ impl EventRecorder for StepRecorder {
 mod tests {
     use super::*;
 
-    use cogito_store_jsonl::JsonlStore;
+    use cogito_store::JsonlStore;
 
     fn fresh_store_in(dir: &std::path::Path) -> Arc<dyn ConversationStore> {
         Arc::new(JsonlStore::new(dir.to_path_buf()))
