@@ -33,7 +33,7 @@ pub struct RenderInputs<'a> {
     pub expanded: &'a HashSet<TreePath>,
     /// Multi-line input widget.
     pub input: &'a InputWidget,
-    /// Lifecycle: `true` between TurnStarted | ToolDispatchEnded and
+    /// Lifecycle: `true` between `TurnStarted` | `ToolDispatchEnded` and
     /// the next content event.
     pub turn_thinking: bool,
     /// Redraw counter for spinner animation.
@@ -140,7 +140,10 @@ mod tests {
         assert!(out.contains("▸  hi"), "got:\n{out}");
         assert!(out.contains("∴  hello"), "got:\n{out}");
         // No "tools" pane title anywhere.
-        assert!(!out.contains("tools "), "tools pane should be absent:\n{out}");
+        assert!(
+            !out.contains("tools "),
+            "tools pane should be absent:\n{out}"
+        );
     }
 
     #[test]

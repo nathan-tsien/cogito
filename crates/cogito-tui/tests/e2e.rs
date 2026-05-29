@@ -132,7 +132,10 @@ fn typing_and_model_response_render_into_chat() {
 fn layout_has_no_tools_pane() {
     let (app, _td) = e2e_app();
     let out = draw(&app);
-    assert!(!out.contains("tools "), "tools pane should be absent:\n{out}");
+    assert!(
+        !out.contains("tools "),
+        "tools pane should be absent:\n{out}"
+    );
 }
 
 #[test]
@@ -191,6 +194,9 @@ fn typing_thinking_response_shows_spinner_then_clears() {
     assert!(out1.contains("∴ ⠋"), "spinner missing pre-content:\n{out1}");
     app.apply_stream_event(&StreamEvent::TextDelta { chunk: "hi".into() });
     let out2 = draw(&app);
-    assert!(!out2.contains("∴ ⠋"), "spinner should clear on content:\n{out2}");
+    assert!(
+        !out2.contains("∴ ⠋"),
+        "spinner should clear on content:\n{out2}"
+    );
     assert!(out2.contains("∴  hi"), "content missing:\n{out2}");
 }

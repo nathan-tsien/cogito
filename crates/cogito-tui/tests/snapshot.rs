@@ -91,9 +91,18 @@ fn draw(app: &App, popup_prefix: Option<&str>) -> String {
 fn empty_state_renders_no_tools_pane_and_no_status_bar() {
     let (app, _td) = app();
     let out = draw(&app, None);
-    assert!(!out.contains("tools "), "tools pane should be absent:\n{out}");
-    assert!(!out.contains("strategy:"), "status bar should be absent:\n{out}");
-    assert!(!out.contains("turn:"), "turn counter should be absent:\n{out}");
+    assert!(
+        !out.contains("tools "),
+        "tools pane should be absent:\n{out}"
+    );
+    assert!(
+        !out.contains("strategy:"),
+        "status bar should be absent:\n{out}"
+    );
+    assert!(
+        !out.contains("turn:"),
+        "turn counter should be absent:\n{out}"
+    );
 }
 
 #[test]

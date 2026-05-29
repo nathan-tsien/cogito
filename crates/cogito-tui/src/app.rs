@@ -108,10 +108,9 @@ impl App {
                 self.turn_in_progress = false;
                 self.current_turn_thinking = false;
             }
-            StreamEvent::TextDelta { .. } | StreamEvent::ThinkingDelta { .. } => {
-                self.current_turn_thinking = false;
-            }
-            StreamEvent::ToolDispatchStarted { .. } => {
+            StreamEvent::TextDelta { .. }
+            | StreamEvent::ThinkingDelta { .. }
+            | StreamEvent::ToolDispatchStarted { .. } => {
                 self.current_turn_thinking = false;
             }
             StreamEvent::ToolDispatchEnded { .. } => {
