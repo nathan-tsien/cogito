@@ -22,6 +22,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
 use crate::render_model::{ChatLine, ChatModel, ToolNode, ToolStatus, ToolTreeModel, TreePath};
+use crate::ui::markdown::{self, MdStyles};
 use crate::ui::spinner;
 
 /// Max args-preview chars rendered next to an expanded block.
@@ -87,7 +88,7 @@ pub fn render(f: &mut Frame, area: Rect, inputs: &ChatRenderInputs<'_>) {
     for line in &inputs.chat.lines {
         match line {
             ChatLine::UserPrompt(text) => out.push(user_line(text, &p)),
-            ChatLine::AssistantText(text) => out.push(cogito_line(text, &p)),
+            ChatLine::AssistantText(text) => out.extend(assistant_lines(text, &p)),
             ChatLine::AssistantThinking(text) => out.push(thinking_line(text, &p)),
             ChatLine::SystemNotice(text) => out.push(notice_line(text, &p)),
             ChatLine::ToolBlock { call_id } => {
@@ -114,11 +115,34 @@ fn user_line(text: &str, p: &Palette) -> Line<'static> {
     ])
 }
 
-fn cogito_line(text: &str, p: &Palette) -> Line<'static> {
-    Line::from(vec![
-        Span::styled("∴  ", p.cogito),
-        Span::raw(text.to_string()),
-    ])
+/// Markdown styles derived from the chat palette.
+fn md_styles(p: &Palette) -> MdStyles {
+    MdStyles {
+        bold: Style::default().add_modifier(Modifier::BOLD),
+        italic: Style::default().add_modifier(Modifier::ITALIC),
+        code_inline: Style::default().fg(Color::Yellow),
+        code_block: p.dim,
+        list_marker: p.cogito,
+    }
+}
+
+/// Render an assistant message as markdown body lines, prefixed with the
+/// `∴ ` marker on the first visual line and a 3-space gutter on the rest.
+fn assistant_lines(text: &str, p: &Palette) -> Vec<Line<'static>> {
+    let mut body = markdown::render(text, &md_styles(p));
+    if body.is_empty() {
+        // Message started but no content yet: bare marker line.
+        return vec![Line::from(vec![Span::styled("∴  ", p.cogito)])];
+    }
+    for (i, line) in body.iter_mut().enumerate() {
+        let prefix = if i == 0 {
+            Span::styled("∴  ", p.cogito)
+        } else {
+            Span::raw(INDENT.to_string())
+        };
+        line.spans.insert(0, prefix);
+    }
+    body
 }
 
 fn thinking_line(text: &str, p: &Palette) -> Line<'static> {
@@ -435,6 +459,32 @@ mod tests {
             8,
         );
         assert!(out.contains("▸ read_file"), "got:\n{out}");
+    }
+
+    #[test]
+    fn assistant_markdown_bold_renders_marker_and_styles() {
+        let mut chat = ChatModel::new();
+        chat.on_event(&StreamEvent::TextDelta {
+            chunk: "see **bold** here".into(),
+        });
+        let tools = empty_tools();
+        let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 5);
+        // marker present, asterisks gone (parsed as emphasis)
+        assert!(out.contains("∴  see bold here"), "got:\n{out}");
+        assert!(!out.contains("**"), "got:\n{out}");
+    }
+
+    #[test]
+    fn assistant_multiline_markdown_indents_continuation() {
+        let mut chat = ChatModel::new();
+        chat.on_event(&StreamEvent::TextDelta {
+            chunk: "first line\nsecond line".into(),
+        });
+        let tools = empty_tools();
+        let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 5);
+        // first line carries the marker, second carries the 3-space gutter
+        assert!(out.contains("∴  first line"), "got:\n{out}");
+        assert!(out.contains("   second line"), "got:\n{out}");
     }
 
     #[test]
