@@ -40,9 +40,30 @@ pub struct SessionMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tenant_id: Option<String>,
 
+    /// Parent session id when this session is a subagent (ADR-0011).
+    /// `Some` => this is a delegated child; `None` => top-level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<crate::ids::SessionId>,
+
+    /// The parent turn's `delegate` tool-call id that spawned this child.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_call_id: Option<String>,
+
+    /// Subagent nesting depth (0 = top-level, 1 = first delegate, ...).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub subagent_depth: u32,
+
     /// Opaque consumer-supplied metadata; preserved verbatim.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Serde skip predicate: omit `subagent_depth` when it is the 0 default.
+/// Takes `&u32` because serde's `skip_serializing_if` requires a `fn(&T) -> bool`
+/// signature (hence the `trivially_copy_pass_by_ref` allow).
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 #[cfg(test)]
@@ -74,7 +95,11 @@ mod tests {
             model: Some("claude-sonnet-4-6".into()),
             user_id: Some("u_42".into()),
             tenant_id: Some("acme".into()),
+            parent_session_id: Some(crate::ids::SessionId::new()),
+            parent_call_id: Some("c0".into()),
+            subagent_depth: 2,
             extra,
+            ..Default::default()
         };
         let json = serde_json::to_string(&meta)?;
         let back: SessionMeta = serde_json::from_str(&json)?;
@@ -92,6 +117,33 @@ mod tests {
             meta.cogito_version, "0.2.0",
             "known field must still decode despite unknown sibling"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn subagent_meta_roundtrips_and_defaults() -> serde_json::Result<()> {
+        // Default top-level: new fields absent / zero.
+        let base = SessionMeta {
+            cogito_version: "0.1.0".into(),
+            ..Default::default()
+        };
+        assert_eq!(base.subagent_depth, 0);
+        assert!(base.parent_session_id.is_none());
+        let json = serde_json::to_string(&base)?;
+        // depth 0 + None parents are omitted.
+        assert_eq!(json, r#"{"cogito_version":"0.1.0"}"#);
+
+        // Child: fields populated and round-trip.
+        let child = SessionMeta {
+            cogito_version: "0.1.0".into(),
+            strategy: Some("reviewer".into()),
+            parent_session_id: Some(crate::ids::SessionId::new()),
+            parent_call_id: Some("c1".into()),
+            subagent_depth: 1,
+            ..Default::default()
+        };
+        let back: SessionMeta = serde_json::from_str(&serde_json::to_string(&child)?)?;
+        assert_eq!(back, child);
         Ok(())
     }
 }
