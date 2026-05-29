@@ -291,11 +291,31 @@ commands; `Esc` dismisses. v0.1 ships with only `/skill <name>`.
 | `src/ui/spinner.rs` (or inline helper) | `pub fn frame(tick: u64) -> &'static str` returning the next braille frame. Tiny module; ≤ 30 LOC. |
 | `src/ui/banner.rs` (or inline in `runtime_build.rs`) | `pub fn startup_lines(model_id, strategy_name, session_id_str, version) -> Vec<String>` returning the 3 banner lines. |
 
+### ChatLine refactor (minor)
+
+`ChatLine::ToolStartLine { tool, args_preview }` and
+`ChatLine::ToolEndLine { tool, ok, elapsed_ms, error }` are
+**replaced** by a single `ChatLine::ToolBlock { call_id: String }`.
+The renderer looks up current state (status, duration, args, result
+preview) from `ToolTreeModel` via `call_id` at render time. This
+keeps a single block per dispatch and lets selection / expansion
+overlay the same logical row.
+
+`ChatModel::on_event` for `ToolDispatchStarted` pushes one
+`ToolBlock { call_id }`; `ToolDispatchEnded` becomes a no-op for
+`ChatModel` (state is owned by `ToolTreeModel`). The
+`TOOL_ARGS_PREVIEW_MAX` / `TOOL_ERROR_PREVIEW_MAX` / `tool_timers`
+helpers move out of `ChatModel`; truncation happens in the renderer
+or in `ToolTreeModel`'s existing fields.
+
 ### Preserved (no change)
 
-- `ChatModel` + `ToolTreeModel` data structures (sink-agnostic).
-- `StreamEvent` → state translation (`render_model::*::on_event`).
-- Resume replay (`resume::translate_events` + `load_initial_state`).
+- `ToolTreeModel` data structure (sink-agnostic).
+- `StreamEvent` → tool-tree translation (`tree_tests` unaffected).
+- Resume replay (`resume::translate_events` + `load_initial_state`)
+  — the `synth_from_block` already emits paired
+  `ToolDispatchStarted` + `ToolDispatchEnded`; ChatModel just stops
+  emitting end lines on the second.
 - Lazy tool-result lookup on first expand
   (`App::populate_result_preview`).
 - Three-layer `TerminalGuard` (RAII + panic hook + SIGTERM/SIGHUP).
@@ -331,10 +351,25 @@ redesign:
 
 ### Unit tests that survive unchanged
 
-- `render_model::tests::*` (ChatModel + tests for 9 lifecycle cases).
-- `render_model::tree_tests::*` (ToolTreeModel + 8 cases).
+- `render_model::tree_tests::*` (ToolTreeModel + 8 cases) — unchanged.
 - `slash::tests::*` (6 cases).
-- `resume::tests::*` (translator) + `resume::extract_tests::*` (5+ cases).
+- `resume::tests::*` (translator) + `resume::extract_tests::*` (5+
+  cases).
+
+### Unit tests rewritten (`render_model::tests::*`)
+
+`ChatModel` tests that assert on `ToolStartLine` / `ToolEndLine`
+variants are rewritten against the new `ToolBlock { call_id }`
+variant. The 9 existing cases become roughly:
+
+- `text_delta_coalesces_within_block` — unchanged in shape.
+- `thinking_delta_coalesces_within_block` — unchanged.
+- `thinking_then_text_emits_two_lines` — unchanged.
+- `tool_dispatch_emits_single_tool_block` (replaces
+  `tool_dispatch_emits_start_and_end_lines`).
+- (Drop `tool_args_preview_is_compact_json`, `tool_args_preview_truncates_at_limit`, `tool_error_message_truncates` — moved to renderer-side concerns.)
+- `turn_paused_resumed_cancelled_failed_emit_notices` — unchanged.
+- `user_prompt_breaks_text_coalescing` — unchanged.
 
 ### Unit tests rewritten
 
