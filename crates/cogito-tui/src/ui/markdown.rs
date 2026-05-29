@@ -174,6 +174,20 @@ impl<'s> Builder<'s> {
                 self.lists.pop();
                 self.prev_block_emitted = true;
             }
+            Event::SoftBreak | Event::HardBreak => {
+                // Preserve the author's line breaks. CommonMark would fold a
+                // soft break into a space, but for a chat surface keeping the
+                // break reads better. Code-block newlines are handled in the
+                // Text arm.
+                if !self.in_code_block {
+                    self.flush_line();
+                }
+            }
+            Event::Start(Tag::Heading { .. }) => self.emit_block_separator(),
+            Event::End(TagEnd::Heading(_)) => {
+                self.flush_line();
+                self.prev_block_emitted = true;
+            }
             Event::Start(Tag::Item) => {
                 // Start a fresh line; build the marker from the innermost list.
                 let indent = " ".repeat(self.list_indent());
@@ -421,5 +435,40 @@ mod tests {
         let pos_c = texts.iter().position(|t| t.contains("- c")).unwrap();
         // sibling "- c" immediately follows nested "- b": no blank between them.
         assert_eq!(pos_c, pos_b + 1, "stray blank line in: {texts:?}");
+    }
+
+    #[test]
+    fn soft_break_starts_a_new_line() {
+        let out = render("line one\nline two", &styles());
+        assert_eq!(text_of(&out[0]), "line one");
+        assert_eq!(text_of(&out[1]), "line two");
+    }
+
+    #[test]
+    fn heading_text_degrades_to_plain() {
+        let out = render("# Title", &styles());
+        let line = out.iter().find(|l| text_of(l).contains("Title")).unwrap();
+        // no '#' rendered; text present and unstyled (no bold modifier)
+        assert!(!text_of(line).contains('#'));
+        assert!(line.spans.iter().all(|s| {
+            !s.style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        }));
+    }
+
+    #[test]
+    fn link_renders_text_and_drops_url() {
+        let out = render("see [docs](https://example.com) here", &styles());
+        let joined: String = out.iter().map(text_of).collect();
+        assert!(joined.contains("docs"));
+        assert!(!joined.contains("example.com"));
+    }
+
+    #[test]
+    fn unterminated_bold_does_not_panic() {
+        let out = render("**oops no close", &styles());
+        let joined: String = out.iter().map(text_of).collect();
+        assert!(joined.contains("oops"));
     }
 }
