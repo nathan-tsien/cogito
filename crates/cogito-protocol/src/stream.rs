@@ -16,9 +16,14 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum StreamEvent {
-    /// A new turn has begun. Carries no payload; the input is on the
-    /// caller's side.
-    TurnStarted,
+    /// A new turn has begun. The input is on the caller's side.
+    TurnStarted {
+        /// Set when this event is forwarded from a subagent's stream,
+        /// naming the parent `delegate` call. `None` for the parent's own
+        /// turns. (ADR-0011 observability bridge.)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_call_id: Option<String>,
+    },
 
     /// The turn paused on an async tool call. The driving Brain task
     /// has exited; the actor is now in `PausedOnJob`.
@@ -32,7 +37,11 @@ pub enum StreamEvent {
 
     /// The turn reached terminal Completed state (model returned
     /// `stop_reason` = `end_turn` without further tool calls).
-    TurnCompleted,
+    TurnCompleted {
+        /// See `TurnStarted::subagent_call_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_call_id: Option<String>,
+    },
 
     /// The turn ended with a structured failure. `reason` is a
     /// human-readable rendering of `TurnFailureReason` for subscribers
@@ -40,6 +49,9 @@ pub enum StreamEvent {
     TurnFailed {
         /// Human-readable description of the failure.
         reason: String,
+        /// See `TurnStarted::subagent_call_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_call_id: Option<String>,
     },
 
     /// Per-chunk text delta from the model stream. Not persisted as-is;
@@ -48,6 +60,9 @@ pub enum StreamEvent {
     TextDelta {
         /// The text chunk emitted by the model.
         chunk: String,
+        /// See `TurnStarted::subagent_call_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_call_id: Option<String>,
     },
 
     /// Per-chunk reasoning delta from the model stream. Not persisted

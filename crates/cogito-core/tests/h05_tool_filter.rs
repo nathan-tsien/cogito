@@ -63,8 +63,8 @@ async fn run_one_turn(handle: &cogito_core::runtime::SessionHandle, msg: &str) {
     let ok = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return true,
-                Ok(StreamEvent::TurnFailed { reason }) => {
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
+                Ok(StreamEvent::TurnFailed { reason, .. }) => {
                     // Surface the failure reason so test diagnostics are clear.
                     panic!("TurnFailed: {reason:?}");
                 }
@@ -289,7 +289,7 @@ async fn h05_each_turn_writes_its_own_tool_filter_event() -> Result<(), Box<dyn 
         let mut completed_count = 0u32;
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => {
+                Ok(StreamEvent::TurnCompleted { .. }) => {
                     completed_count += 1;
                     // Drain both TurnCompleted broadcasts before proceeding
                     // (TurnDriver emits one; session_loop.on_turn_complete emits another).
@@ -298,7 +298,7 @@ async fn h05_each_turn_writes_its_own_tool_filter_event() -> Result<(), Box<dyn 
                         return true;
                     }
                 }
-                Ok(StreamEvent::TurnFailed { reason }) => {
+                Ok(StreamEvent::TurnFailed { reason, .. }) => {
                     panic!("turn 1 failed: {reason:?}");
                 }
                 Err(e) => panic!("turn 1 stream error: {e:?}"),
@@ -319,8 +319,8 @@ async fn h05_each_turn_writes_its_own_tool_filter_event() -> Result<(), Box<dyn 
     let turn2_ok = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return true,
-                Ok(StreamEvent::TurnFailed { reason }) => {
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
+                Ok(StreamEvent::TurnFailed { reason, .. }) => {
                     panic!("turn 2 failed: {reason:?}");
                 }
                 Err(e) => panic!("turn 2 stream error: {e:?}"),

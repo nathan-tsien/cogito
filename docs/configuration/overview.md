@@ -311,6 +311,9 @@ tool; `cogito-config` only aggregates them. Whole-section replace on merge
 (like `[skills]`); an absent `[tools]` collapses straight to defaults.
 
 ```toml
+[tools]
+# max_subagent_depth = 3            # maximum delegate subagent nesting depth (default 3)
+
 [tools.bash]
 sync_timeout_secs        = 30      # foreground command timeout (seconds)
 background_deadline_secs = 600     # background:true command deadline (seconds)
@@ -330,6 +333,7 @@ inherit_env = true                 # child inherits the parent environment
 
 | Field | Type | Default | Owner crate |
 |---|---|---|---|
+| `max_subagent_depth` | `Option<u32>` | `3` when unset | `cogito-config::ToolsConfig` |
 | `bash.sync_timeout_secs` | `u64` | `30` | `cogito-jobs::BashConfig` |
 | `bash.background_deadline_secs` | `u64` | `600` | `cogito-jobs::BashConfig` |
 | `bash.max_output_bytes` | `usize` | `32768` | `cogito-jobs::BashConfig` |

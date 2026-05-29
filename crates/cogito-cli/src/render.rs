@@ -79,7 +79,7 @@ impl<W: Write> Renderer<W> {
     /// Render one `StreamEvent` to the output sink.
     pub fn on_stream_event(&mut self, ev: &StreamEvent) -> IoResult<()> {
         match ev {
-            StreamEvent::TurnStarted => {
+            StreamEvent::TurnStarted { .. } => {
                 self.in_text = false;
                 self.in_thinking = false;
             }
@@ -97,7 +97,7 @@ impl<W: Write> Renderer<W> {
                 write!(self.out, "{painted}")?;
                 self.out.flush()?;
             }
-            StreamEvent::TextDelta { chunk } => {
+            StreamEvent::TextDelta { chunk, .. } => {
                 if !self.in_text {
                     self.write_agent_label()?;
                     self.in_text = true;
@@ -130,7 +130,7 @@ impl<W: Write> Renderer<W> {
                 self.in_text = false;
                 self.in_thinking = false;
             }
-            StreamEvent::TurnCompleted => {
+            StreamEvent::TurnCompleted { .. } => {
                 // Only emit a trailing newline when the previous event
                 // didn't already terminate its line (i.e. mid-stream
                 // text or thinking). Tool / lifecycle events use
@@ -160,7 +160,7 @@ impl<W: Write> Renderer<W> {
                 self.in_text = false;
                 self.in_thinking = false;
             }
-            StreamEvent::TurnFailed { reason } => {
+            StreamEvent::TurnFailed { reason, .. } => {
                 self.write_error_line(reason)?;
                 self.in_text = false;
                 self.in_thinking = false;
@@ -376,12 +376,20 @@ mod tests {
     #[test]
     fn plain_text_sequence_no_color() {
         let out = render_events(&[
-            StreamEvent::TurnStarted,
-            StreamEvent::TextDelta { chunk: "hi".into() },
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
+            StreamEvent::TextDelta {
+                chunk: "hi".into(),
+                subagent_call_id: None,
+            },
             StreamEvent::TextDelta {
                 chunk: " there".into(),
+                subagent_call_id: None,
             },
-            StreamEvent::TurnCompleted,
+            StreamEvent::TurnCompleted {
+                subagent_call_id: None,
+            },
         ]);
         assert_eq!(out, "\nagent: hi there\n");
     }
@@ -389,7 +397,9 @@ mod tests {
     #[test]
     fn tool_lifecycle_ok_no_color() {
         let out = render_events(&[
-            StreamEvent::TurnStarted,
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "read_file".into(),
@@ -400,7 +410,9 @@ mod tests {
                 ok: true,
                 error_message: None,
             },
-            StreamEvent::TurnCompleted,
+            StreamEvent::TurnCompleted {
+                subagent_call_id: None,
+            },
         ]);
         assert!(
             out.starts_with(
@@ -553,7 +565,10 @@ mod tests {
     #[test]
     fn text_after_tool_reprints_agent_prefix() {
         let out = render_events(&[
-            StreamEvent::TextDelta { chunk: "a".into() },
+            StreamEvent::TextDelta {
+                chunk: "a".into(),
+                subagent_call_id: None,
+            },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
@@ -564,7 +579,10 @@ mod tests {
                 ok: true,
                 error_message: None,
             },
-            StreamEvent::TextDelta { chunk: "b".into() },
+            StreamEvent::TextDelta {
+                chunk: "b".into(),
+                subagent_call_id: None,
+            },
         ]);
         let count = out.matches("agent: ").count();
         assert_eq!(count, 2, "expected two `agent: ` prefixes, got: {out:?}");
@@ -574,6 +592,7 @@ mod tests {
     fn turn_failed_prints_reason() {
         let out = render_events(&[StreamEvent::TurnFailed {
             reason: "boom".into(),
+            subagent_call_id: None,
         }]);
         assert_eq!(out, "\n[error] boom");
     }
@@ -604,8 +623,13 @@ mod tests {
     #[test]
     fn color_codes_balanced() {
         let out = render_events_color(&[
-            StreamEvent::TurnStarted,
-            StreamEvent::TextDelta { chunk: "hi".into() },
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
+            StreamEvent::TextDelta {
+                chunk: "hi".into(),
+                subagent_call_id: None,
+            },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
@@ -616,7 +640,10 @@ mod tests {
                 ok: false,
                 error_message: Some("oops".into()),
             },
-            StreamEvent::TurnFailed { reason: "x".into() },
+            StreamEvent::TurnFailed {
+                reason: "x".into(),
+                subagent_call_id: None,
+            },
         ]);
         // Every ESC-bracketed open code must be paired with a reset (ESC[0m).
         let resets = out.matches("\x1b[0m").count();
@@ -631,13 +658,19 @@ mod tests {
     #[test]
     fn no_color_path_emits_no_escape_sequences() {
         let out = render_events(&[
-            StreamEvent::TextDelta { chunk: "hi".into() },
+            StreamEvent::TextDelta {
+                chunk: "hi".into(),
+                subagent_call_id: None,
+            },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: serde_json::json!({}),
             },
-            StreamEvent::TurnFailed { reason: "x".into() },
+            StreamEvent::TurnFailed {
+                reason: "x".into(),
+                subagent_call_id: None,
+            },
         ]);
         assert!(
             !out.contains('\x1b'),
@@ -727,14 +760,18 @@ mod tests {
     #[test]
     fn thinking_delta_sequence_no_color() {
         let out = render_events(&[
-            StreamEvent::TurnStarted,
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
             StreamEvent::ThinkingDelta {
                 chunk: "I should ".into(),
             },
             StreamEvent::ThinkingDelta {
                 chunk: "grep.".into(),
             },
-            StreamEvent::TurnCompleted,
+            StreamEvent::TurnCompleted {
+                subagent_call_id: None,
+            },
         ]);
         assert_eq!(out, "\nthinking: I should grep.\n");
     }
@@ -742,14 +779,19 @@ mod tests {
     #[test]
     fn thinking_then_text_emits_separate_labels() {
         let out = render_events(&[
-            StreamEvent::TurnStarted,
+            StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            },
             StreamEvent::ThinkingDelta {
                 chunk: "I should grep.".into(),
             },
             StreamEvent::TextDelta {
                 chunk: "Looking now.".into(),
+                subagent_call_id: None,
             },
-            StreamEvent::TurnCompleted,
+            StreamEvent::TurnCompleted {
+                subagent_call_id: None,
+            },
         ]);
         assert_eq!(out, "\nthinking: I should grep.\nagent: Looking now.\n");
     }
@@ -804,8 +846,11 @@ mod tests {
             },
             StreamEvent::TextDelta {
                 chunk: "done".into(),
+                subagent_call_id: None,
             },
-            StreamEvent::TurnCompleted,
+            StreamEvent::TurnCompleted {
+                subagent_call_id: None,
+            },
         ]);
         assert!(
             out.starts_with("\nthinking: let me check\n[tool] t "),

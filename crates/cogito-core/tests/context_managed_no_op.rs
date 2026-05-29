@@ -84,7 +84,7 @@ async fn no_op_context_pipeline_writes_four_decision_events()
     let got_completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return true,
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }

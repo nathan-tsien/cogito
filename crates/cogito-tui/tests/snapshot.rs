@@ -109,11 +109,16 @@ fn empty_state_renders_no_tools_pane_and_no_status_bar() {
 fn single_text_turn_renders_user_and_agent_lines() {
     let (mut app, _td) = app();
     app.chat.push_user_prompt("who are you?".into());
-    app.apply_stream_event(&StreamEvent::TurnStarted);
+    app.apply_stream_event(&StreamEvent::TurnStarted {
+        subagent_call_id: None,
+    });
     app.apply_stream_event(&StreamEvent::TextDelta {
         chunk: "I am cogito.".into(),
+        subagent_call_id: None,
     });
-    app.apply_stream_event(&StreamEvent::TurnCompleted);
+    app.apply_stream_event(&StreamEvent::TurnCompleted {
+        subagent_call_id: None,
+    });
     let out = draw(&app, None);
     assert!(out.contains("▸  who are you?"));
     assert!(out.contains("∴  I am cogito."));

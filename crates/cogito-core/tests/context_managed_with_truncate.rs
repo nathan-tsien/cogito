@@ -132,7 +132,7 @@ async fn truncate_compactor_produces_at_least_one_compacted_event()
         let got = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 match events.recv().await {
-                    Ok(StreamEvent::TurnCompleted) => return true,
+                    Ok(StreamEvent::TurnCompleted { .. }) => return true,
                     Ok(StreamEvent::TurnFailed { .. }) | Err(_) => return false,
                     Ok(_) => {}
                 }

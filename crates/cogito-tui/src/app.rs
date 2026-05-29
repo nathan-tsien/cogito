@@ -93,11 +93,11 @@ impl App {
         self.chat.on_event(ev);
         self.tools.on_event(ev);
         match ev {
-            StreamEvent::TurnStarted => {
+            StreamEvent::TurnStarted { .. } => {
                 self.turn_in_progress = true;
                 self.current_turn_thinking = true;
             }
-            StreamEvent::TurnCompleted => {
+            StreamEvent::TurnCompleted { .. } => {
                 self.turn_in_progress = false;
                 self.current_turn_thinking = false;
                 self.turn_count = self.turn_count.saturating_add(1);
@@ -253,15 +253,21 @@ pub(crate) mod tests {
     #[test]
     fn turn_started_sets_turn_in_progress() {
         let (mut app, _td) = app_for_pure_test();
-        app.apply_stream_event(&StreamEvent::TurnStarted);
+        app.apply_stream_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         assert!(app.turn_in_progress);
     }
 
     #[test]
     fn turn_completed_clears_flag_and_increments_counter() {
         let (mut app, _td) = app_for_pure_test();
-        app.apply_stream_event(&StreamEvent::TurnStarted);
-        app.apply_stream_event(&StreamEvent::TurnCompleted);
+        app.apply_stream_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
+        app.apply_stream_event(&StreamEvent::TurnCompleted {
+            subagent_call_id: None,
+        });
         assert!(!app.turn_in_progress);
         assert_eq!(app.turn_count, 1);
     }
@@ -269,8 +275,13 @@ pub(crate) mod tests {
     #[test]
     fn turn_failed_clears_flag_but_does_not_increment() {
         let (mut app, _td) = app_for_pure_test();
-        app.apply_stream_event(&StreamEvent::TurnStarted);
-        app.apply_stream_event(&StreamEvent::TurnFailed { reason: "x".into() });
+        app.apply_stream_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
+        app.apply_stream_event(&StreamEvent::TurnFailed {
+            reason: "x".into(),
+            subagent_call_id: None,
+        });
         assert!(!app.turn_in_progress);
         assert_eq!(app.turn_count, 0);
     }
@@ -278,19 +289,27 @@ pub(crate) mod tests {
     #[test]
     fn turn_started_sets_thinking_and_content_clears_it() {
         let (mut app, _td) = app_for_pure_test();
-        app.apply_stream_event(&StreamEvent::TurnStarted);
+        app.apply_stream_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         assert!(app.current_turn_thinking);
-        app.apply_stream_event(&StreamEvent::TextDelta { chunk: "hi".into() });
+        app.apply_stream_event(&StreamEvent::TextDelta {
+            chunk: "hi".into(),
+            subagent_call_id: None,
+        });
         assert!(!app.current_turn_thinking);
     }
 
     #[test]
     fn tool_dispatch_ended_rearms_thinking_until_next_content() {
         let (mut app, _td) = app_for_pure_test();
-        app.apply_stream_event(&StreamEvent::TurnStarted);
+        app.apply_stream_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         // First content clears the spinner.
         app.apply_stream_event(&StreamEvent::TextDelta {
             chunk: "calling a tool".into(),
+            subagent_call_id: None,
         });
         assert!(!app.current_turn_thinking);
         app.apply_stream_event(&StreamEvent::ToolDispatchStarted {
@@ -309,6 +328,7 @@ pub(crate) mod tests {
         // Next content event clears it again.
         app.apply_stream_event(&StreamEvent::TextDelta {
             chunk: "done".into(),
+            subagent_call_id: None,
         });
         assert!(!app.current_turn_thinking);
     }
@@ -316,13 +336,19 @@ pub(crate) mod tests {
     #[test]
     fn turn_terminal_events_clear_thinking() {
         let (mut app, _td) = app_for_pure_test();
-        app.apply_stream_event(&StreamEvent::TurnStarted);
+        app.apply_stream_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         assert!(app.current_turn_thinking);
-        app.apply_stream_event(&StreamEvent::TurnCompleted);
+        app.apply_stream_event(&StreamEvent::TurnCompleted {
+            subagent_call_id: None,
+        });
         assert!(!app.current_turn_thinking);
 
         // TurnCancelled also clears it.
-        app.apply_stream_event(&StreamEvent::TurnStarted);
+        app.apply_stream_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         assert!(app.current_turn_thinking);
         app.apply_stream_event(&StreamEvent::TurnCancelled);
         assert!(!app.current_turn_thinking);
@@ -350,7 +376,9 @@ pub(crate) mod tests {
     async fn populate_result_preview_is_noop_for_running_node() {
         let (mut app, _td) = app_for_pure_test();
         app.tools
-            .on_event(&cogito_protocol::stream::StreamEvent::TurnStarted);
+            .on_event(&cogito_protocol::stream::StreamEvent::TurnStarted {
+                subagent_call_id: None,
+            });
         app.tools
             .on_event(&cogito_protocol::stream::StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),

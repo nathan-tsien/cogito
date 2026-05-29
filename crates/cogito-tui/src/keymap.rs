@@ -379,7 +379,9 @@ mod tests {
     #[test]
     fn ctrl_down_initializes_selection() {
         let (mut app, _td) = fresh_app();
-        app.tools.on_event(&StreamEvent::TurnStarted);
+        app.tools.on_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c".into(),
             tool_name: "t".into(),
@@ -392,7 +394,9 @@ mod tests {
     #[test]
     fn ctrl_enter_on_finished_node_expands() {
         let (mut app, _td) = fresh_app();
-        app.tools.on_event(&StreamEvent::TurnStarted);
+        app.tools.on_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c".into(),
             tool_name: "t".into(),
@@ -419,7 +423,9 @@ mod tests {
     #[test]
     fn ctrl_enter_on_running_node_is_noop() {
         let (mut app, _td) = fresh_app();
-        app.tools.on_event(&StreamEvent::TurnStarted);
+        app.tools.on_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c".into(),
             tool_name: "t".into(),
@@ -442,7 +448,9 @@ mod tests {
     #[test]
     fn digit_one_quick_expands_most_recent_finished_tool() {
         let (mut app, _td) = fresh_app();
-        app.tools.on_event(&StreamEvent::TurnStarted);
+        app.tools.on_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c".into(),
             tool_name: "t".into(),
@@ -475,7 +483,9 @@ mod tests {
     #[test]
     fn digit_on_running_tool_is_noop() {
         let (mut app, _td) = fresh_app();
-        app.tools.on_event(&StreamEvent::TurnStarted);
+        app.tools.on_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c".into(),
             tool_name: "t".into(),
@@ -489,7 +499,9 @@ mod tests {
     #[test]
     fn e_expands_all_finished_in_latest_message() {
         let (mut app, _td) = fresh_app();
-        app.tools.on_event(&StreamEvent::TurnStarted);
+        app.tools.on_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         for id in ["c1", "c2"] {
             app.tools.on_event(&StreamEvent::ToolDispatchStarted {
                 call_id: id.into(),
@@ -511,7 +523,9 @@ mod tests {
     #[test]
     fn ctrl_l_collapses_all_in_latest_message() {
         let (mut app, _td) = fresh_app();
-        app.tools.on_event(&StreamEvent::TurnStarted);
+        app.tools.on_event(&StreamEvent::TurnStarted {
+            subagent_call_id: None,
+        });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c1".into(),
             tool_name: "t".into(),

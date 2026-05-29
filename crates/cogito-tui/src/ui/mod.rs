@@ -104,6 +104,7 @@ mod tests {
             chat.push_user_prompt("hi".into());
             chat.on_event(&StreamEvent::TextDelta {
                 chunk: "hello".into(),
+                subagent_call_id: None,
             });
         }
         let tools = ToolTreeModel::new();

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use crate::render::Renderer;
 use anyhow::{Context, Result, anyhow};
 use clap::{Args, ValueEnum};
-use cogito_core::runtime::{OpenMode, Runtime};
+use cogito_core::runtime::{DEFAULT_MAX_SUBAGENT_DEPTH, DelegateToolProvider, OpenMode, Runtime};
 use cogito_jobs::{BashTool, LocalJobManager, RunTestsTool};
 use cogito_model::build_gateway;
 use cogito_protocol::content::ContentBlock;
@@ -479,9 +479,23 @@ async fn build_tool_provider(
         Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>,
         cfg.tools.bash.clone(),
     ));
+    // Subagent `delegate` tool. The spawner is resolved per-call from
+    // `ExecCtx`; this provider only carries the max nesting depth.
+    // Resolution of the `delegate` role to a child strategy relies on the
+    // strategy registry being passed to `Runtime::builder().strategy_registry(...)`
+    // below — without it, every `delegate` call errors `UnknownRole`.
+    let max_subagent_depth = cfg
+        .tools
+        .max_subagent_depth
+        .unwrap_or(DEFAULT_MAX_SUBAGENT_DEPTH);
+    let delegate: Arc<dyn cogito_protocol::tool::ToolProvider> =
+        Arc::new(DelegateToolProvider::new(max_subagent_depth));
     let local: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(
-        CompositeToolProvider::new(vec![builtin, run_tests, bash], NamingPolicy::Strict)
-            .map_err(|e| anyhow!("compose builtin + run_tests + bash: {e}"))?,
+        CompositeToolProvider::new(
+            vec![builtin, run_tests, bash, delegate],
+            NamingPolicy::Strict,
+        )
+        .map_err(|e| anyhow!("compose builtin + run_tests + bash + delegate: {e}"))?,
     );
 
     let mcp_build = cogito_mcp::build_mcp_provider(&cfg.mcp_servers).await;
@@ -610,7 +624,11 @@ pub async fn run(args: ChatArgs) -> Result<()> {
         .model(gateway)
         .tools(tools)
         .strategy(strategy)
-        .job_manager(job_mgr_dyn);
+        .job_manager(job_mgr_dyn)
+        // Inject the strategy registry so the subagent spawner can resolve
+        // the `delegate` role into a child strategy. The concrete
+        // `Arc<FsStrategyRegistry>` coerces to `Arc<dyn StrategyRegistry>`.
+        .strategy_registry(Arc::clone(&registry) as Arc<dyn StrategyRegistry>);
     if let Some(provider) = skills.clone() {
         builder = builder.skills(provider);
     }
@@ -738,7 +756,7 @@ async fn run_repl(
                     // TurnResumed is mid-turn (agent continues) — no fresh prompt.
                     let terminal = matches!(
                         &e,
-                        StreamEvent::TurnCompleted
+                        StreamEvent::TurnCompleted { .. }
                             | StreamEvent::TurnFailed { .. }
                             | StreamEvent::TurnCancelled
                             | StreamEvent::TurnPaused

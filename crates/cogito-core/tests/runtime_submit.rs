@@ -76,7 +76,7 @@ async fn submit_user_text_projects_to_text_content_block() -> Result<(), Box<dyn
     let got_completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return true,
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }

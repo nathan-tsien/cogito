@@ -212,7 +212,7 @@ async fn resume_paused_job_synthesizes_failure_when_job_is_unknown()
     let got_completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events_rx.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return true,
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }

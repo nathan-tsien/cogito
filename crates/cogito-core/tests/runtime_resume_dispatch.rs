@@ -150,7 +150,7 @@ async fn resume_from_model_completed_fast_paths_to_turn_completed()
     let got_completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events_rx.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return true,
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }
@@ -235,7 +235,7 @@ async fn resume_with_completed_session_idles_then_serves_new_input()
     let got_completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events_rx.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return true,
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }

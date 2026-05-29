@@ -42,18 +42,25 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
         match &ev.payload {
             EventPayload::TurnStarted { .. } => {
                 if in_turn {
-                    out.push(StreamEvent::TurnCompleted);
+                    out.push(StreamEvent::TurnCompleted {
+                        subagent_call_id: None,
+                    });
                 }
-                out.push(StreamEvent::TurnStarted);
+                out.push(StreamEvent::TurnStarted {
+                    subagent_call_id: None,
+                });
                 in_turn = true;
             }
             EventPayload::TurnCompleted { .. } => {
-                out.push(StreamEvent::TurnCompleted);
+                out.push(StreamEvent::TurnCompleted {
+                    subagent_call_id: None,
+                });
                 in_turn = false;
             }
             EventPayload::TurnFailed { reason } => {
                 out.push(StreamEvent::TurnFailed {
                     reason: format!("{reason:?}"),
+                    subagent_call_id: None,
                 });
                 in_turn = false;
             }
@@ -61,6 +68,7 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
                 if !text.is_empty() {
                     out.push(StreamEvent::TextDelta {
                         chunk: text.clone(),
+                        subagent_call_id: None,
                     });
                 }
             }
@@ -109,7 +117,9 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
         }
     }
     if in_turn {
-        out.push(StreamEvent::TurnCompleted);
+        out.push(StreamEvent::TurnCompleted {
+            subagent_call_id: None,
+        });
     }
     out
 }
@@ -233,8 +243,8 @@ mod tests {
             }),
         ];
         let s = translate_events(&log);
-        assert!(matches!(s[0], StreamEvent::TurnStarted));
-        assert!(matches!(s[1], StreamEvent::TurnCompleted));
+        assert!(matches!(s[0], StreamEvent::TurnStarted { .. }));
+        assert!(matches!(s[1], StreamEvent::TurnCompleted { .. }));
     }
 
     #[test]
@@ -253,7 +263,7 @@ mod tests {
         ];
         let s = translate_events(&log);
         match &s[1] {
-            StreamEvent::TextDelta { chunk } => assert_eq!(chunk, "hello"),
+            StreamEvent::TextDelta { chunk, .. } => assert_eq!(chunk, "hello"),
             other => panic!("expected TextDelta, got {other:?}"),
         }
     }
@@ -296,7 +306,7 @@ mod tests {
         let s = translate_events(&log);
         assert!(
             s.last()
-                .is_some_and(|e| matches!(e, StreamEvent::TurnCompleted))
+                .is_some_and(|e| matches!(e, StreamEvent::TurnCompleted { .. }))
         );
     }
 }

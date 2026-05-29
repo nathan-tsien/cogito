@@ -97,7 +97,7 @@ async fn skill_activation_with_text_projects_correctly() -> Result<(), Box<dyn s
     let got_completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return true,
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }
@@ -152,7 +152,7 @@ async fn skill_activation_no_text_projects_to_empty_user_input()
     let got_completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return true,
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }

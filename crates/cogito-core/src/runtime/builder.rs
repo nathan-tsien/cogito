@@ -17,7 +17,7 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::handle::{SessionHandle, SessionShared};
-use super::session_loop::{SessionDeps, SessionState, record_session_started};
+use super::session_loop::{SessionDeps, SessionState, record_session_started_with_meta};
 use super::types::{OpenMode, SessionId};
 use crate::harness::step_recorder::StepRecorder;
 
@@ -52,6 +52,10 @@ pub struct Runtime {
     /// that async tool submissions and Brain `on_complete` registrations
     /// resolve against the same manager instance.
     job_mgr: Arc<dyn JobManager>,
+    /// Optional strategy registry, used by the subagent spawner to resolve
+    /// a `delegate` role into a child `HarnessStrategy`. `None` => delegate
+    /// returns `SpawnError::UnknownRole`.
+    strategy_registry: Option<Arc<dyn cogito_protocol::strategy_registry::StrategyRegistry>>,
 }
 
 impl Runtime {
@@ -71,15 +75,41 @@ impl Runtime {
     /// - `RuntimeError::StoreError` — backend I/O or serde failure while reading the store.
     // DI container setup inherently lists many wiring steps; the line count is
     // structural, not complexity that can be usefully extracted.
-    #[allow(clippy::too_many_lines)]
     pub async fn open_session(
         self: &Arc<Self>,
         id: SessionId,
         mode: OpenMode,
     ) -> Result<SessionHandle, RuntimeError> {
+        let strategy = self.strategy.clone();
+        self.open_inner(id, mode, strategy, None, 0, true).await
+    }
+
+    /// Internal open path shared by [`Runtime::open_session`] (top-level,
+    /// `register = true`) and the subagent spawner (child sessions,
+    /// `register = false`).
+    ///
+    /// - `strategy` — the per-session strategy (the default for top-level
+    ///   sessions; the resolved child role for subagent sessions).
+    /// - `meta_override` — when `Some`, used verbatim as the `SessionMeta`
+    ///   recorded for a fresh session (carries parent linkage + depth for a
+    ///   subagent child). `None` derives the meta from `strategy`, preserving
+    ///   the historical top-level behavior byte-for-byte.
+    /// - `subagent_depth` — flowed into every turn's `ExecCtx`.
+    /// - `register` — when `false`, the session is not added to the in-memory
+    ///   `sessions` registry (used for ephemeral subagent children).
+    #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+    async fn open_inner(
+        self: &Arc<Self>,
+        id: SessionId,
+        mode: OpenMode,
+        strategy: HarnessStrategy,
+        meta_override: Option<cogito_protocol::SessionMeta>,
+        subagent_depth: u32,
+        register: bool,
+    ) -> Result<SessionHandle, RuntimeError> {
         use futures::TryStreamExt as _;
 
-        if self.sessions.contains_key(&id) {
+        if register && self.sessions.contains_key(&id) {
             return Err(RuntimeError::SessionAlreadyOpen { id });
         }
 
@@ -157,7 +187,17 @@ impl Runtime {
         // the loop writes is correlated with a turn, not the session itself.
         // See run_session's startup-sequence doc.
         if !session_exists {
-            record_session_started(&recorder, id, &self.strategy).await;
+            // Top-level (no override) derives the meta from `strategy`, which
+            // reproduces the historical `record_session_started` payload
+            // exactly. A subagent child supplies an override that adds parent
+            // linkage + depth.
+            let meta = meta_override.unwrap_or_else(|| cogito_protocol::SessionMeta {
+                cogito_version: env!("CARGO_PKG_VERSION").into(),
+                strategy: Some(strategy.name.clone()),
+                model: Some(strategy.model_params.model.clone()),
+                ..Default::default()
+            });
+            record_session_started_with_meta(&recorder, id, meta).await;
         }
 
         // Build metrics first so the hook pipeline shares the same Arc rather
@@ -178,16 +218,17 @@ impl Runtime {
         // `build_pipeline_v2` threads the optional `SkillProvider` into the
         // pipeline so the `SkillInjector` (when selected) gets its handle.
         let context_pipeline = Arc::new(
-            cogito_context::build_pipeline_v2(&self.strategy.context, self.skills.clone())
-                .map_err(|e| RuntimeError::ResumeFailed {
+            cogito_context::build_pipeline_v2(&strategy.context, self.skills.clone()).map_err(
+                |e| RuntimeError::ResumeFailed {
                     id,
                     reason: e.to_string(),
-                })?,
+                },
+            )?,
         );
 
         let state = SessionState {
             session_id: id,
-            strategy: self.strategy.clone(),
+            strategy: strategy.clone(),
             in_flight: None,
             current_cancel_token: Arc::clone(&cancel),
             job_completion_rx: job_rx,
@@ -207,12 +248,24 @@ impl Runtime {
             context_pipeline,
             skills: self.skills.clone(),
             pending_user_input: None,
+            subagent_depth,
         };
 
         let deps = SessionDeps {
             model: Arc::clone(&self.model),
             tools: Arc::clone(&self.tools),
             job_mgr: Arc::clone(&self.job_mgr),
+            // Every session (top-level and child) carries a spawner so a child
+            // can itself delegate up to the depth limit (enforced by the
+            // `delegate` tool, not here). NOTE: the spawned actor task owns this
+            // Arc<Runtime> clone, so the Runtime stays alive until each
+            // session's actor exits (mailbox close / shutdown) - dropping
+            // external Arc<Runtime> handles alone does not tear it down. This is
+            // intentional: a child mid-delegate must keep the Runtime alive.
+            // There is no Arc cycle (SessionHandle holds no back-reference to
+            // Runtime).
+            brain_spawner: Some(Arc::new(RuntimeSpawner(Arc::clone(self)))
+                as Arc<dyn cogito_protocol::subagent::BrainSpawner>),
         };
 
         let mailbox_tx_for_loop = mailbox_tx.clone();
@@ -253,7 +306,9 @@ impl Runtime {
             job_completion_tx: job_tx,
         });
         let handle = SessionHandle::new(shared);
-        self.sessions.insert(id, handle.clone());
+        if register {
+            self.sessions.insert(id, handle.clone());
+        }
         Ok(handle)
     }
 
@@ -275,6 +330,7 @@ pub struct RuntimeBuilder {
     strategy: Option<HarnessStrategy>,
     skills: Option<Arc<dyn SkillProvider>>,
     job_mgr: Option<Arc<dyn JobManager>>,
+    strategy_registry: Option<Arc<dyn cogito_protocol::strategy_registry::StrategyRegistry>>,
 }
 
 impl RuntimeBuilder {
@@ -341,6 +397,17 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Inject a strategy registry so the subagent `delegate` tool can
+    /// resolve roles. Optional - without it, `delegate` errors on any role.
+    #[must_use]
+    pub fn strategy_registry(
+        mut self,
+        registry: Arc<dyn cogito_protocol::strategy_registry::StrategyRegistry>,
+    ) -> Self {
+        self.strategy_registry = Some(registry);
+        self
+    }
+
     /// Finalize.
     ///
     /// # Errors
@@ -381,6 +448,7 @@ impl RuntimeBuilder {
             strategy,
             skills: self.skills,
             job_mgr,
+            strategy_registry: self.strategy_registry,
         }))
     }
 }
@@ -418,4 +486,181 @@ pub enum RuntimeError {
     /// Backend store I/O or serde failure during `open_session`.
     #[error("store error during open: {0}")]
     StoreError(String),
+}
+
+/// Backstop deadline for driving a subagent child to a terminal turn.
+/// A child that neither completes nor fails within this budget (e.g. a
+/// wedged tool) must not hang the parent turn forever. Generous on purpose;
+/// per-role configurability is a v0.3 item (ADR-0011).
+const CHILD_DRIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Grace period for tearing the child actor down after its turn is terminal.
+const CHILD_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Owns an `Arc<Runtime>` so `run_to_completion` has the Arc that
+/// `open_inner` needs (and so a spawned child can itself delegate).
+pub(crate) struct RuntimeSpawner(pub(crate) Arc<Runtime>);
+
+#[async_trait::async_trait]
+impl cogito_protocol::subagent::BrainSpawner for RuntimeSpawner {
+    async fn run_to_completion(
+        &self,
+        req: cogito_protocol::subagent::DelegateRequest,
+    ) -> Result<String, cogito_protocol::subagent::SpawnError> {
+        use cogito_protocol::stream::StreamEvent;
+        use cogito_protocol::subagent::SpawnError;
+        use futures::TryStreamExt as _;
+
+        let rt = &self.0; // &Arc<Runtime>
+
+        // 1. Resolve the role -> child strategy.
+        let registry = rt
+            .strategy_registry
+            .as_ref()
+            .ok_or_else(|| SpawnError::UnknownRole {
+                role: req.role.clone(),
+            })?;
+        let strategy = registry
+            .get(&req.role)
+            .map_err(|_| SpawnError::UnknownRole {
+                role: req.role.clone(),
+            })?;
+
+        // 2. Child SessionMeta (linkage recorded child-side only).
+        let child_id = SessionId::new();
+        let meta = cogito_protocol::SessionMeta {
+            cogito_version: env!("CARGO_PKG_VERSION").into(),
+            strategy: Some(strategy.name.clone()),
+            model: Some(strategy.model_params.model.clone()),
+            parent_session_id: Some(req.parent_session_id),
+            parent_call_id: Some(req.parent_call_id.clone()),
+            subagent_depth: req.parent_depth + 1,
+            ..Default::default()
+        };
+
+        // 3. Open the child as an unregistered top-level session.
+        let child = rt
+            .open_inner(
+                child_id,
+                OpenMode::New,
+                strategy,
+                Some(meta),
+                req.parent_depth + 1,
+                false,
+            )
+            .await
+            .map_err(|e| SpawnError::OpenFailed {
+                reason: e.to_string(),
+            })?;
+
+        // 4. Drive to a terminal turn via the broadcast stream, bounded by a
+        //    backstop deadline so a wedged child can't hang the parent turn.
+        //    The child does not inherit the parent cancel token in v0.2, so
+        //    this timeout is the only guard against an unbounded child turn.
+        let mut rx = child.subscribe();
+        child
+            .submit_user_text(req.input)
+            .await
+            .map_err(|e| SpawnError::OpenFailed {
+                reason: e.to_string(),
+            })?;
+
+        // Observability bridge: if the parent session is still registered,
+        // forward the child's stream onto the parent's broadcast tagged with
+        // the delegate call id, so a UI watching the parent shows subagent
+        // progress live. Broadcast-only - never persisted.
+        let parent_tx = rt
+            .sessions
+            .get(&req.parent_session_id)
+            .map(|h| h.shared.events_tx.clone());
+        let bridge_call_id = req.parent_call_id.clone();
+
+        let drive = tokio::time::timeout(CHILD_DRIVE_TIMEOUT, async {
+            loop {
+                match rx.recv().await {
+                    Ok(ev) => {
+                        if let Some(tx) = &parent_tx {
+                            // Ignore send errors: no receivers is fine.
+                            let _ = tx.send(tag_subagent(ev.clone(), &bridge_call_id));
+                        }
+                        match ev {
+                            StreamEvent::TurnFailed { reason, .. } => return Some(reason),
+                            // Terminal completion: stop waiting and fall through to
+                            // the log replay, which is the source of truth for the
+                            // child's final assistant text.
+                            StreamEvent::TurnCompleted { .. } => return None,
+                            // Intermediate events (paused/resumed/deltas) - keep waiting.
+                            _ => {}
+                        }
+                    }
+                    // Lagged/closed broadcast: stop waiting and fall through to
+                    // the log replay.
+                    Err(_) => return None,
+                }
+            }
+        })
+        .await;
+
+        // 5. Tear the child actor down regardless of how the drive ended.
+        let _ = child.shutdown(CHILD_SHUTDOWN_GRACE).await;
+        let Ok(failure) = drive else {
+            return Err(SpawnError::Timeout {
+                seconds: CHILD_DRIVE_TIMEOUT.as_secs(),
+            });
+        };
+        if let Some(reason) = failure {
+            return Err(SpawnError::ChildFailed { reason });
+        }
+
+        // 6. Extract the final assistant text from the child log.
+        let events: Vec<cogito_protocol::ConversationEvent> = rt
+            .store
+            .replay(child_id, 0)
+            .try_collect()
+            .await
+            .map_err(|e| SpawnError::OpenFailed {
+                reason: e.to_string(),
+            })?;
+        // A child that completed with no assistant message yields an empty
+        // string for v0.2. Distinguishing "completed-empty" from real output
+        // (so the parent can surface a clearer signal) is a v0.3 item.
+        Ok(last_assistant_text(&events).unwrap_or_default())
+    }
+}
+
+/// Walk events newest-first; return the last non-empty assistant message
+/// text. `EventPayload::AssistantMessageAppended { text }` is the flat-text
+/// shape used by the event log.
+fn last_assistant_text(events: &[cogito_protocol::ConversationEvent]) -> Option<String> {
+    use cogito_protocol::event::EventPayload;
+    events.iter().rev().find_map(|ev| match &ev.payload {
+        EventPayload::AssistantMessageAppended { text } if !text.is_empty() => Some(text.clone()),
+        _ => None,
+    })
+}
+
+/// Stamp `subagent_call_id` onto the forwarded events that carry it; pass
+/// other variants through unchanged. Broadcast-only - never persisted.
+fn tag_subagent(
+    ev: cogito_protocol::stream::StreamEvent,
+    call_id: &str,
+) -> cogito_protocol::stream::StreamEvent {
+    use cogito_protocol::stream::StreamEvent as S;
+    match ev {
+        S::TextDelta { chunk, .. } => S::TextDelta {
+            chunk,
+            subagent_call_id: Some(call_id.to_string()),
+        },
+        S::TurnStarted { .. } => S::TurnStarted {
+            subagent_call_id: Some(call_id.to_string()),
+        },
+        S::TurnCompleted { .. } => S::TurnCompleted {
+            subagent_call_id: Some(call_id.to_string()),
+        },
+        S::TurnFailed { reason, .. } => S::TurnFailed {
+            reason,
+            subagent_call_id: Some(call_id.to_string()),
+        },
+        other => other,
+    }
 }

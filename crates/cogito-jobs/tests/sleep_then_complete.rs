@@ -85,7 +85,7 @@ async fn sleep_then_complete_drives_full_async_loop() -> Result<(), Box<dyn std:
     let saw_completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted) => return true,
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }

@@ -540,20 +540,53 @@ P5 is never cogito's concern. Consumers point cogito at a workspace
 root; cogito records paths in events but does not manage directory
 contents.
 
-## Subagent layer (v0.3+)
+## Subagent layer (v0.2 minimal → v0.3+ full)
 
 A subagent is **a recursive Brain instance hosted by the same Runtime**.
-From the parent's perspective, the subagent is exposed as a `ToolProvider`
-with four tools. From cogito's perspective, the subagent's lifecycle is
-managed entirely by Runtime + `JobManager` — no new top-level concept.
+From the parent's perspective, the subagent is exposed as a `ToolProvider`.
+From cogito's perspective, the subagent's lifecycle is managed entirely by
+Runtime — no new top-level concept.
+
+### v0.2 minimal (shipped Sprint 11 — ADR-0011 v0.2 scope)
+
+v0.2 ships a single synchronous `delegate(role, input) -> output` tool, with
+no new crate (it lives in `cogito-core::runtime::subagent`):
+
+- `cogito-protocol::subagent` defines the `BrainSpawner` seam
+  (`run_to_completion(DelegateRequest) -> Result<String, SpawnError>`),
+  `DelegateRequest`, and `SpawnError` (`UnknownRole` / `OpenFailed` /
+  `ChildFailed` / `Timeout`). The seam is injected into tools via
+  `ExecCtx.brain_spawner` (ADR-0004 layer rule: Hands cannot import Runtime).
+- `cogito-core::runtime` implements `BrainSpawner` through a `RuntimeSpawner`
+  newtype over `Arc<Runtime>`. `run_to_completion` opens an unregistered
+  child **independent top-level session**, drives it to a terminal turn over
+  the broadcast stream (bounded by a 300s backstop), and replays the child
+  log for the final assistant text.
+- `DelegateToolProvider` (`AlwaysSync`) reads `ExecCtx.brain_spawner` and
+  enforces a recursion depth guard (`DEFAULT_MAX_SUBAGENT_DEPTH = 3`,
+  overridable via `ToolsConfig.max_subagent_depth`). Exceeding it returns a
+  `ToolResult::Error`.
+- A live observability bridge forwards the child's `StreamEvent`s onto the
+  parent's broadcast, tagged with the delegate `call_id` via
+  `StreamEvent::subagent_call_id`.
+- Parent↔child linkage is recorded **child-side only**, in `SessionMeta`
+  (`parent_session_id` / `parent_call_id` / `subagent_depth`); there is no
+  parent-side event tree at v0.2. The JSONL store layout stays flat
+  (`<root>/<session_id>.jsonl`).
+- All additions are additive: no `SCHEMA_VERSION` bump (ADR-0007 / 0019);
+  top-level JSONL stays byte-identical.
+
+See ADR-0011 (v0.2 minimal section) and the design spec
+`docs/superpowers/specs/2026-05-30-sprint-11-subagent-minimal-design.md`.
+See [docs/components/cogito-subagent.md](docs/components/cogito-subagent.md)
+for the component design. The four-tool surface below describes the **v0.3 S1
+full** upgrade, which remains future work.
 
 ### Tools exposed to the LLM (v0.3 full surface — `cogito-subagent` or `cogito-core::runtime::subagent`)
 
-> **v0.2 ships only `delegate(role, input) → output`** as a minimal
-> form (Subagent S2; lives in `cogito-core::runtime::subagent`). The
-> four-tool table below describes the v0.3 S1 full upgrade per
-> ADR-0011 amendment.
-
+> The four-tool table below describes the v0.3 S1 full upgrade per
+> ADR-0011 amendment. The shipped v0.2 minimal `delegate` tool is
+> described in the section above.
 
 | Tool | Outcome | Pauses parent? |
 |---|---|---|
@@ -681,7 +714,7 @@ Notes:
 | `ModelGateway` | `cogito-model::anthropic` + `cogito-model::openai_compat` (v0.1 Sprint 2); future provider adapters | `async fn stream(input, ctx) -> BoxStream<Result<ModelEvent, ModelError>>`; provider adapter pre-aggregates per-content-block sealed events (`TextBlockCompleted`, `ToolUseCompleted`, `MessageCompleted`). See `cogito-protocol::gateway`. | v0.1 |
 | `ModelInput` / `ModelOutput` / `ModelEvent` / `Message` / `ModelParams` / `StopReason` / `Usage` / `ModelError` (types) | (value types in `cogito-protocol::gateway`) | Provider-agnostic shapes consumed by `ModelGateway`; `Message` is `User { content: Vec<ContentBlock> }` ｜ `Assistant { content: Vec<ContentBlock> }` — tool_result lives inside `Message::User` per Anthropic semantics | v0.1 |
 | `HarnessStrategy` / `ToolFilter` (types) | (value types in `cogito-protocol::strategy`) | Per-turn behavior knobs: name, system_prompt, allowed_tools, tool_order, model_params, max_turns. v0.1 Sprint 2 ships `default_with_model` factory; Sprint 6 adds YAML registry. | v0.1 |
-| `ExecCtx` (type) | (value type in `cogito-protocol::exec_ctx`) | Per-invocation context handed to every tool/hook: `session_id`, `turn_id`, `deadline: Option<Instant>`, `cancel: CancellationToken`. v0.2 adds `brain_spawner` (for Subagent S2 delegate); v0.4 adds `tenant`; v0.5 adds `storage`. | v0.1 |
+| `ExecCtx` (type) | (value type in `cogito-protocol::exec_ctx`) | Per-invocation context handed to every tool/hook: `session_id`, `turn_id`, `deadline: Option<Instant>`, `cancel: CancellationToken`. v0.2 (Sprint 11) adds `call_id: Option<String>` (the model's tool-call id, set by H08 before `invoke`), `subagent_depth: u32`, and `brain_spawner: Option<Arc<dyn BrainSpawner>>` (for Subagent S2 `delegate`); v0.4 adds `tenant`; v0.5 adds `storage`. | v0.1 |
 | `ToolProvider` | `cogito-tools` / `cogito-mcp` / `cogito-skills` (Skill activation) / `cogito-core::runtime::subagent` / `cogito-plugin` (composed) / consumer | Tool catalog + `invoke(name, args, ctx) → InvokeOutcome` | v0.1 |
 | `JobManager` | `cogito-jobs` / consumer | Async work state tracking (`status` / `result` / `cancel`) plus mailbox-injected completion callback (`on_complete`). Submission lives on the concrete `LocalJobManager` type per ADR-0004 (Hands-internal). | v0.1 |
 | `HookHandler` / `HookProvider` | `cogito-core::harness::hook` impls + `cogito-plugin` (composed) + consumer | Brain-side policy gates (see H09) | v0.1 (Sprint 5) |
@@ -691,7 +724,7 @@ Notes:
 | `ExecutionClass` (type) | (value type) | `ToolDescriptor.execution_class` ∈ {`AlwaysSync`, `AlwaysAsync`, `Adaptive`}; H08 uses it to validate `InvokeOutcome` variant (see spec §6) | v0.1 |
 | `TurnOutcome` / `TurnFailureReason` (types) | (value types) | Terminal turn states + structured failure reasons returned by the actor (see spec §9) | v0.1 |
 | `StorageSystem` | `cogito-storage-*` / consumer | Non-text I/O via URI strings: `resolve` / `open` / `create` | v0.5 (moved from v0.2 by 2026-05-22 rebalance) |
-| `BrainSpawner` | `cogito-core::runtime` | Recursive Brain spawning — used by `cogito-core::runtime::subagent` in v0.2 (S2 minimal) and by `cogito-subagent` if extracted in v0.3 (S1 full) | v0.2 (sync only) → v0.3 (full lifecycle: spawn / wait / send_input / cancel + parent-child event tree) |
+| `BrainSpawner` | `cogito-core::runtime` (`RuntimeSpawner` newtype over `Arc<Runtime>`) | Recursive Brain spawning. v0.2 (Sprint 11) ships a single synchronous `async fn run_to_completion(&self, DelegateRequest) -> Result<String, SpawnError>` driving a child to a terminal turn and returning its final assistant text; injected into tools via `ExecCtx.brain_spawner`. Used by `cogito-core::runtime::subagent` in v0.2 and by `cogito-subagent` if extracted in v0.3. | v0.2 (sync `run_to_completion`) → v0.3 (full lifecycle: spawn / wait / send_input / cancel + parent-child event tree) |
 | `MetricsRecorder` | `cogito-observability-otel` / consumer | Pluggable metrics sink (no hard Prometheus dep) | v0.4 |
 
 > **Harness-internal value types** (`TurnState`, `TurnCtx`, `TurnDeps`,

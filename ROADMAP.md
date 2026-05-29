@@ -11,7 +11,8 @@
 > live-server MCP happy-path integration test (see the Sprint 4 closure
 > note); candidate for a v0.2 task once an in-process MCP test-server
 > fixture exists.
-> **Next: v0.2 · Extensibility (Sprint 11 — Subagent S2 minimal).**
+> **Sprint 11 (Subagent S2 minimal) shipped. Next: v0.2 · Extensibility
+> (Sprint 12 — Plugin P1 local-only).**
 
 ## Version plan
 
@@ -247,13 +248,13 @@ tool); Plugin ships local-path only.
 
 #### Sprint 11 · Subagent (S2 minimal) — ADR-0011 v0.2 scope (1–1.5 days)
 
-- [ ] **ADR-0011 v0.2 amendment**: Subagent minimal scope — `delegate(role, input) → output` tool; child session is an independent top-level session (no `parent_session_id` event tree); failure semantics = child failure → `ToolResult::Error`; no child-session state persisted in parent's event log
-- [ ] **No new crate** — module lives in `cogito-core::runtime::subagent` (~200 LoC)
-- [ ] `cogito-protocol`: add `BrainSpawner` trait (the v0.3 full surface is amendment-only)
-- [ ] `cogito-core::runtime`: implement `BrainSpawner` (recursive task hosting; sync child-completion path only)
-- [ ] `cogito-core::runtime::subagent`: `DelegateToolProvider` (impl `ToolProvider`) holding `Arc<dyn BrainSpawner>` via `ExecCtx`
-- [ ] Strategy YAML loading: `delegate` arg `role` maps to a known strategy
-- [ ] Integration test: parent session invokes `delegate`, child session runs to completion, parent receives final text
+- [x] **ADR-0011 v0.2 amendment**: Subagent minimal scope — `delegate(role, input) → output` tool; child session is an independent top-level session (no `parent_session_id` event tree); failure semantics = child failure → `ToolResult::Error`; no child-session state persisted in parent's event log. Linkage (`parent_session_id` / `parent_call_id` / `subagent_depth`) is recorded child-side in `SessionMeta`; a live observability bridge tags child `StreamEvent`s with the delegate call id (`StreamEvent::subagent_call_id`).
+- [x] **No new crate** — module lives in `cogito-core::runtime::subagent`
+- [x] `cogito-protocol`: add `BrainSpawner` trait (`run_to_completion(DelegateRequest) -> Result<String, SpawnError>`; injected via `ExecCtx.brain_spawner`). The v0.3 full surface is amendment-only.
+- [x] `cogito-core::runtime`: implement `BrainSpawner` (via `RuntimeSpawner` newtype over `Arc<Runtime>`; sync child-completion path only, bounded by a 300s `CHILD_DRIVE_TIMEOUT` backstop)
+- [x] `cogito-core::runtime::subagent`: `DelegateToolProvider` (impl `ToolProvider`, `AlwaysSync`) reading `Arc<dyn BrainSpawner>` from `ExecCtx`; depth guard via `DEFAULT_MAX_SUBAGENT_DEPTH = 3`
+- [x] Strategy role mapping: `delegate` arg `role` resolves to a known strategy via `RuntimeBuilder::strategy_registry`
+- [x] Integration test: parent session invokes `delegate`, child session runs to completion, parent receives final text (acceptance test); plus a depth test asserting recursion terminates at the limit with a depth-limit `ToolResult::Error`
 
 #### Sprint 12 · Plugin (P1 local-only) — ADR-0021 (1.5–2 days)
 

@@ -97,9 +97,12 @@ fn draw(app: &App, w: u16, h: u16) -> String {
 #[test]
 fn resize_mid_stream_does_not_lose_content() {
     let (mut app, _td) = fresh_app();
-    app.apply_stream_event(&StreamEvent::TurnStarted);
+    app.apply_stream_event(&StreamEvent::TurnStarted {
+        subagent_call_id: None,
+    });
     app.apply_stream_event(&StreamEvent::TextDelta {
         chunk: "before resize".into(),
+        subagent_call_id: None,
     });
     // Render at one size, then another. Content must appear in both.
     let small = draw(&app, 40, 10);
@@ -130,7 +133,9 @@ fn extremely_long_input_does_not_panic() {
 #[test]
 fn unicode_in_tool_args_renders_without_corruption() {
     let (mut app, _td) = fresh_app();
-    app.apply_stream_event(&StreamEvent::TurnStarted);
+    app.apply_stream_event(&StreamEvent::TurnStarted {
+        subagent_call_id: None,
+    });
     app.apply_stream_event(&StreamEvent::ToolDispatchStarted {
         call_id: "c1".into(),
         tool_name: "q".into(),
@@ -141,7 +146,9 @@ fn unicode_in_tool_args_renders_without_corruption() {
         ok: true,
         error_message: None,
     });
-    app.apply_stream_event(&StreamEvent::TurnCompleted);
+    app.apply_stream_event(&StreamEvent::TurnCompleted {
+        subagent_call_id: None,
+    });
     // Tools render inline now; the args are only shown when the tool
     // block is expanded. Expand the (only) tool block via Alt+1.
     dispatch(
@@ -161,7 +168,9 @@ fn unicode_in_tool_args_renders_without_corruption() {
 #[test]
 fn deep_tool_tree_renders_without_panic() {
     let (mut app, _td) = fresh_app();
-    app.apply_stream_event(&StreamEvent::TurnStarted);
+    app.apply_stream_event(&StreamEvent::TurnStarted {
+        subagent_call_id: None,
+    });
     for i in 0..60 {
         let call_id = format!("c{i}");
         app.apply_stream_event(&StreamEvent::ToolDispatchStarted {
@@ -190,7 +199,9 @@ fn deep_tool_tree_renders_without_panic() {
 #[test]
 fn quick_expand_via_digit_one_works_after_tool_completes() {
     let (mut app, _td) = fresh_app();
-    app.apply_stream_event(&StreamEvent::TurnStarted);
+    app.apply_stream_event(&StreamEvent::TurnStarted {
+        subagent_call_id: None,
+    });
     app.apply_stream_event(&StreamEvent::ToolDispatchStarted {
         call_id: "c".into(),
         tool_name: "read_file".into(),

@@ -53,6 +53,9 @@ pub struct ToolsConfig {
     pub web_fetch: WebFetchConfig,
     /// Command-execution backend selection (owned by `cogito-sandbox`).
     pub sandbox: SandboxConfig,
+    /// Maximum subagent (`delegate`) nesting depth. Defaults to 3 when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_subagent_depth: Option<u32>,
 }
 
 /// Finalized `[runtime]` section. All fields are resolved (no `Option`

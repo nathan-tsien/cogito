@@ -345,7 +345,7 @@
       }
     },
     {
-      "description": "Recorded at the start of the `Init -> ContextManaged` transition. v0.1 ships an immediate companion `ContextManageCompleted` because H11 is a pass-through; ADR-0008 will replace the body with real context decisions. `turn_id` is on the envelope.",
+      "description": "Recorded at the start of the `Init -> ContextManaged` transition. An empty bracket marker for the transition boundary: the real context decisions H11 makes (per ADR-0008, implemented in Sprint 6) are carried by the dedicated `ContextCompacted` / `SystemPromptInjected` / `ToolFilterOverridden` / `ContextDecisionRecorded` events, not by this body. `turn_id` is on the envelope.",
       "type": "object",
       "required": [
         "data",
@@ -364,7 +364,7 @@
       }
     },
     {
-      "description": "Recorded at the end of the `ContextManaged -> PromptBuilt` transition. v0.1 pass-through carries no decision body. `turn_id` is on the envelope.",
+      "description": "Recorded at the end of the `ContextManaged -> PromptBuilt` transition. Empty bracket marker for the transition boundary; the decisions are carried by the dedicated context events above. `turn_id` is on the envelope.",
       "type": "object",
       "required": [
         "data",
@@ -1215,12 +1215,32 @@
             "null"
           ]
         },
+        "parent_call_id": {
+          "description": "The parent turn's `delegate` tool-call id that spawned this child.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_session_id": {
+          "description": "Parent session id when this session is a subagent (ADR-0011). `Some` => this is a delegated child; `None` => top-level.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "strategy": {
           "description": "Strategy name (from `HarnessStrategy::name`) selected for this session.",
           "type": [
             "string",
             "null"
           ]
+        },
+        "subagent_depth": {
+          "description": "Subagent nesting depth (0 = top-level, 1 = first delegate, ...).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
         },
         "tenant_id": {
           "description": "Optional consumer-supplied tenant identifier. Cogito propagates only; enforcement is the consumer's responsibility.",
