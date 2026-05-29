@@ -2,12 +2,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use cogito_jobs::{BashConfig, BashTool, LocalJobManager};
 use cogito_protocol::ExecCtx;
 use cogito_protocol::command::CommandExecutor;
 use cogito_protocol::ids::{SessionId, TurnId};
-use cogito_protocol::job::LocalJobSubmitter;
+use cogito_protocol::job::{JobManager, JobOutcome, LocalJobSubmitter};
 use cogito_protocol::tool::{InvokeOutcome, ToolErrorKind, ToolProvider, ToolResult};
 use cogito_sandbox::{DirectConfig, DirectExecutor};
 
@@ -86,4 +87,36 @@ async fn sync_timeout_surfaces_timeout_error() {
         panic!("expected Sync Error");
     };
     assert!(matches!(kind, ToolErrorKind::Timeout), "kind={kind:?}");
+}
+
+#[tokio::test]
+async fn background_returns_async_and_completes() {
+    let (tool, job_mgr) = bash(BashConfig::default());
+    let out = tool
+        .invoke(
+            "bash",
+            serde_json::json!({ "command": "echo bg", "background": true }),
+            ctx(),
+        )
+        .await;
+    let InvokeOutcome::Async(job_id) = out else {
+        panic!("expected Async");
+    };
+
+    // Poll the job manager until the job reaches a terminal outcome.
+    let outcome = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(o) = job_mgr.result(job_id).await {
+                return o;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("job should complete within 10s");
+
+    let JobOutcome::Success { result } = outcome else {
+        panic!("expected Success, got {outcome:?}");
+    };
+    assert_eq!(exit_code(&result), Some(0));
 }

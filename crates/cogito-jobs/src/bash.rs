@@ -11,7 +11,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use cogito_protocol::ExecCtx;
 use cogito_protocol::command::{CommandError, CommandExecutor, CommandSpec};
-use cogito_protocol::job::LocalJobSubmitter;
+use cogito_protocol::job::{JobOutcome, LocalJobSubmitter};
 use cogito_protocol::tool::{
     ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
 };
@@ -62,9 +62,6 @@ struct BashArgs {
 /// Adaptive shell tool bound to a `CommandExecutor` + job submitter.
 pub struct BashTool {
     executor: Arc<dyn CommandExecutor>,
-    // Consumed by `invoke_background` in Task 7; the sync path does not
-    // submit jobs.
-    #[allow(dead_code)]
     job_mgr: Arc<dyn LocalJobSubmitter>,
     cfg: BashConfig,
 }
@@ -192,10 +189,36 @@ impl BashTool {
         };
         InvokeOutcome::Sync(result)
     }
-    // Stubbed in this skeleton; real submission (which awaits the job
-    // submitter) lands in Task 7. The `async` is part of the eventual signature.
-    #[allow(clippy::unused_async)]
-    async fn invoke_background(&self, _args: BashArgs, _ctx: ExecCtx) -> InvokeOutcome {
-        InvokeOutcome::Sync(ToolResult::text("todo"))
+    async fn invoke_background(&self, args: BashArgs, ctx: ExecCtx) -> InvokeOutcome {
+        let timeout = Duration::from_secs(self.cfg.background_deadline_secs);
+        let spec = self.spec(&args, timeout);
+        let executor = Arc::clone(&self.executor);
+        // Background commands carry the turn's cancel token so a session
+        // shutdown / cancel still kills the child.
+        let run_ctx = ctx;
+        let job_id = self
+            .job_mgr
+            .clone()
+            .submit_boxed(Box::pin(async move {
+                match executor.run(spec, run_ctx).await {
+                    Ok(o) if o.timed_out => JobOutcome::Failed {
+                        message: format!("bash background command exceeded {}s", timeout.as_secs()),
+                    },
+                    Ok(o) => JobOutcome::Success {
+                        result: ToolResult::Output(vec![outcome_value(&o)]),
+                    },
+                    Err(CommandError::Cancelled) => JobOutcome::Cancelled,
+                    Err(CommandError::Spawn(e)) => JobOutcome::Failed {
+                        message: format!("bash: {e}"),
+                    },
+                    // `CommandError` is `#[non_exhaustive]`; treat any future
+                    // variant as a generic failure rather than panicking.
+                    Err(e) => JobOutcome::Failed {
+                        message: format!("bash: {e}"),
+                    },
+                }
+            }))
+            .await;
+        InvokeOutcome::Async(job_id)
     }
 }
