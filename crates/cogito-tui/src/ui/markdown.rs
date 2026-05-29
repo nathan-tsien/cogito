@@ -129,12 +129,13 @@ impl<'s> Builder<'s> {
             }
             Event::Text(text) => {
                 if self.in_code_block {
-                    // pulldown emits code-block text with trailing newlines; render
-                    // each source line as its own indented, styled line.
-                    for raw in text.lines() {
-                        let indent = " ".repeat(NEST_INDENT);
+                    // pulldown emits code-block content as one Text with a trailing
+                    // newline. Strip only the trailing newline(s) and split on '\n'
+                    // so blank lines in the MIDDLE of the block are preserved.
+                    let indent = " ".repeat(NEST_INDENT);
+                    for raw in text.trim_end_matches('\n').split('\n') {
                         self.lines.push(Line::from(vec![
-                            Span::raw(indent),
+                            Span::raw(indent.clone()),
                             Span::styled(raw.to_string(), self.styles.code_block),
                         ]));
                     }
@@ -276,6 +277,24 @@ mod tests {
         }
         // indented (leading-space span present)
         assert!(text_of(code_lines[0]).starts_with(' '));
+    }
+
+    #[test]
+    fn code_block_preserves_blank_middle_line() {
+        let src = "```\na\n\nb\n```";
+        let out = render(src, &styles());
+        // a, blank code line, b — three code lines (the middle one empty).
+        let code: Vec<_> = out
+            .iter()
+            .filter(|l| {
+                // code lines start with the 2-space indent and use code_block style
+                l.spans.first().map(|s| s.content.as_ref()) == Some("  ")
+            })
+            .collect();
+        assert_eq!(code.len(), 3, "expected 3 code lines, got {}", code.len());
+        assert_eq!(text_of(code[0]).trim_end(), "  a");
+        assert_eq!(text_of(code[1]), "  ");
+        assert_eq!(text_of(code[2]).trim_end(), "  b");
     }
 
     #[test]
