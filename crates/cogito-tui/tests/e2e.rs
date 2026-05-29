@@ -18,7 +18,6 @@ use cogito_tui::app::App;
 use cogito_tui::keymap::{Action, dispatch};
 use cogito_tui::render_model::{ChatModel, ToolTreeModel};
 use cogito_tui::ui::input::InputWidget;
-use cogito_tui::ui::status::StatusData;
 use cogito_tui::ui::{RenderInputs, render};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -49,12 +48,12 @@ fn e2e_app() -> (App, TempDir) {
         selected: None,
         expanded: HashSet::new(),
         input: InputWidget::new(),
-        show_tools: true,
         popup: None,
         strategy_name: "test".into(),
         model_id: "model-x".into(),
         turn_count: 0,
         turn_in_progress: false,
+        current_turn_thinking: false,
         cancel_seen_at: None,
         should_quit: false,
     };
@@ -77,14 +76,8 @@ fn draw(app: &App) -> String {
                     selected: app.selected,
                     expanded: &app.expanded,
                     input: &app.input,
-                    show_tools: app.show_tools,
-                    status: &StatusData {
-                        strategy: app.strategy_name.clone(),
-                        model: app.model_id.clone(),
-                        session_id: app.session_id_str.clone(),
-                        turn_count: app.turn_count,
-                        tools_visible: app.show_tools,
-                    },
+                    turn_thinking: app.current_turn_thinking,
+                    spinner_tick: 0,
                     popup_prefix: None,
                 },
             );
@@ -129,22 +122,17 @@ fn typing_and_model_response_render_into_chat() {
     app.apply_stream_event(&StreamEvent::TurnCompleted);
 
     let out = draw(&app);
-    assert!(out.contains("> hi"), "user prompt missing:\n{out}");
-    assert!(out.contains("agent: hello!"), "agent text missing:\n{out}");
+    assert!(out.contains("▸  hi"), "user prompt missing:\n{out}");
+    assert!(out.contains("∴  hello!"), "agent text missing:\n{out}");
     assert_eq!(app.turn_count, 1);
     assert!(!app.turn_in_progress);
 }
 
 #[test]
-fn ctrl_t_hides_tools_pane_in_render() {
-    let (mut app, _td) = e2e_app();
-    dispatch(&mut app, key(KeyCode::Char('t'), KeyModifiers::CONTROL));
+fn layout_has_no_tools_pane() {
+    let (app, _td) = e2e_app();
     let out = draw(&app);
-    assert!(!app.show_tools);
-    assert!(
-        !out.contains("tools "),
-        "tools pane should be hidden:\n{out}"
-    );
+    assert!(!out.contains("tools "), "tools pane should be absent:\n{out}");
 }
 
 #[test]
@@ -175,7 +163,7 @@ fn slash_unknown_command_renders_error_notice() {
 }
 
 #[test]
-fn tool_lifecycle_renders_into_both_panes() {
+fn tool_lifecycle_renders_inline() {
     let (mut app, _td) = e2e_app();
     app.apply_stream_event(&StreamEvent::TurnStarted);
     app.apply_stream_event(&StreamEvent::ToolDispatchStarted {
@@ -190,12 +178,19 @@ fn tool_lifecycle_renders_into_both_panes() {
     });
     app.apply_stream_event(&StreamEvent::TurnCompleted);
     let out = draw(&app);
-    // Chat pane shows the textual record.
-    assert!(
-        out.contains("[tool] read_file"),
-        "chat lacking tool line:\n{out}"
-    );
-    // Tools pane shows the structural entry.
-    assert!(out.contains("turn 1"), "tools pane lacking group:\n{out}");
-    assert!(out.contains("read_file"), "tools pane lacking node:\n{out}");
+    assert!(out.contains("read_file"), "chat lacking tool name:\n{out}");
+    assert!(out.contains('✓'), "chat lacking completed glyph:\n{out}");
+}
+
+#[test]
+fn typing_thinking_response_shows_spinner_then_clears() {
+    let (mut app, _td) = e2e_app();
+    app.apply_stream_event(&StreamEvent::TurnStarted);
+    // No content yet -> spinner present.
+    let out1 = draw(&app);
+    assert!(out1.contains("∴ ⠋"), "spinner missing pre-content:\n{out1}");
+    app.apply_stream_event(&StreamEvent::TextDelta { chunk: "hi".into() });
+    let out2 = draw(&app);
+    assert!(!out2.contains("∴ ⠋"), "spinner should clear on content:\n{out2}");
+    assert!(out2.contains("∴  hi"), "content missing:\n{out2}");
 }
