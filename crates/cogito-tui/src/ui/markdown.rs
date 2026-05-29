@@ -52,6 +52,8 @@ struct Builder<'s> {
     prev_block_emitted: bool,
     /// `true` while inside a fenced/indented code block.
     in_code_block: bool,
+    /// Active list levels. `Some(n)` = ordered (next number), `None` = bullet.
+    lists: Vec<Option<u64>>,
 }
 
 impl<'s> Builder<'s> {
@@ -64,7 +66,13 @@ impl<'s> Builder<'s> {
             italic: 0,
             prev_block_emitted: false,
             in_code_block: false,
+            lists: Vec::new(),
         }
+    }
+
+    /// Leading indent (spaces) implied by current list nesting.
+    fn list_indent(&self) -> usize {
+        self.lists.len().saturating_sub(1) * NEST_INDENT
     }
 
     /// Inline style implied by the active bold/italic depth.
@@ -104,10 +112,17 @@ impl<'s> Builder<'s> {
     /// accumulate spans onto the current line.
     fn handle(&mut self, event: Event<'_>) {
         match event {
-            Event::Start(Tag::Paragraph) => self.emit_block_separator(),
+            Event::Start(Tag::Paragraph) => {
+                if self.lists.is_empty() {
+                    self.emit_block_separator();
+                }
+            }
             Event::End(TagEnd::Paragraph) => {
-                self.flush_line();
-                self.prev_block_emitted = true;
+                // Inside a list item, End(Item) flushes the line instead.
+                if self.lists.is_empty() {
+                    self.flush_line();
+                    self.prev_block_emitted = true;
+                }
             }
             Event::Start(Tag::Strong) => self.bold += 1,
             Event::End(TagEnd::Strong) => self.bold = self.bold.saturating_sub(1),
@@ -142,6 +157,42 @@ impl<'s> Builder<'s> {
                 } else {
                     self.push_text(&text);
                 }
+            }
+            Event::Start(Tag::List(first)) => {
+                if self.lists.is_empty() {
+                    self.emit_block_separator();
+                } else {
+                    // Nested list: flush the parent item's partial line so the
+                    // parent text and nested items don't merge onto one line.
+                    if !self.pending_spans.is_empty() {
+                        self.flush_line();
+                    }
+                }
+                self.lists.push(first);
+            }
+            Event::End(TagEnd::List(_)) => {
+                self.lists.pop();
+                self.prev_block_emitted = true;
+            }
+            Event::Start(Tag::Item) => {
+                // Start a fresh line; build the marker from the innermost list.
+                let indent = " ".repeat(self.list_indent());
+                let marker = match self.lists.last_mut() {
+                    Some(Some(n)) => {
+                        let m = format!("{n}. ");
+                        *n += 1;
+                        m
+                    }
+                    _ => "- ".to_string(),
+                };
+                if !indent.is_empty() {
+                    self.pending_spans.push(Span::raw(indent));
+                }
+                self.pending_spans
+                    .push(Span::styled(marker, self.styles.list_marker));
+            }
+            Event::End(TagEnd::Item) => {
+                self.flush_line();
             }
             _ => {}
         }
@@ -312,5 +363,46 @@ mod tests {
                 .iter()
                 .all(|s| !s.style.add_modifier.contains(Modifier::BOLD))
         );
+    }
+
+    #[test]
+    fn unordered_list_items_get_dash_markers() {
+        let out = render("- alpha\n- beta", &styles());
+        let items: Vec<_> = out
+            .iter()
+            .filter(|l| {
+                let t = text_of(l);
+                t.contains("alpha") || t.contains("beta")
+            })
+            .collect();
+        assert_eq!(items.len(), 2);
+        assert!(text_of(items[0]).contains("- "));
+        assert!(text_of(items[0]).contains("alpha"));
+        // marker span carries list_marker style (green fg)
+        let marker = items[0]
+            .spans
+            .iter()
+            .find(|s| s.content.contains('-'))
+            .unwrap();
+        assert_eq!(marker.style.fg, Some(ratatui::style::Color::Green));
+    }
+
+    #[test]
+    fn ordered_list_items_get_numbered_markers() {
+        let out = render("1. first\n2. second", &styles());
+        let first = out.iter().find(|l| text_of(l).contains("first")).unwrap();
+        let second = out.iter().find(|l| text_of(l).contains("second")).unwrap();
+        assert!(text_of(first).contains("1. "));
+        assert!(text_of(second).contains("2. "));
+    }
+
+    #[test]
+    fn nested_list_item_is_indented() {
+        let out = render("- top\n  - nested", &styles());
+        let nested = out.iter().find(|l| text_of(l).contains("nested")).unwrap();
+        let top = out.iter().find(|l| text_of(l).contains("top")).unwrap();
+        // nested item starts with more leading whitespace than the top item
+        let lead = |l: &Line<'static>| text_of(l).len() - text_of(l).trim_start().len();
+        assert!(lead(nested) > lead(top));
     }
 }
