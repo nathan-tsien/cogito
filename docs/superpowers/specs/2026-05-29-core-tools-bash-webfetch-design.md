@@ -66,6 +66,42 @@ Surface (cogito-cli chat.rs / cogito-tui runtime_build.rs)
 
 依赖合规性(ADR-0004):`CommandExecutor` 在 protocol;bash/web_fetch 是 Hands;Brain 不直接看见 `cogito-sandbox`。`cogito-jobs` 新增对 `cogito-protocol`(trait)依赖即可拿到 `CommandExecutor`;executor 实例由 Surface 注入。
 
+### 3.1 两层模型:Tool 抽象 vs CommandExecutor
+
+cogito 里"tool"与"子进程执行"是**两个不同层次**,这是理解本设计边界的总纲:
+
+- **Layer 1 · Tool 抽象(Brain 可见,H08 调度的对象)**:`ToolProvider` 是 Brain/H08 **唯一**看得见的东西。模型能调的一切都是 tool——builtin(`read_file`/`web_fetch`)、异步(`run_tests`/`bash`)、MCP(`mcp__server__tool`)、subagent。H08 只做 `provider.invoke(name,args,ctx) -> InvokeOutcome::{Sync,Async}` 然后驱动 FSM。**H08 不知道 CommandExecutor 的存在。**
+- **Layer 2 · CommandExecutor(Hands 内部,tool 之下的子进程原语)**:"在策略选定的环境里跑一个子进程"。它在 ToolProvider 边界**之下**,对 Brain/H08 不可见。只有**需要 spawn 子进程**的 tool/子系统才用它;`bash` 在自己的 `invoke` 内部决定同步直跑还是 spawn job,H08 只看到最终的 `InvokeOutcome`。
+
+### 3.2 各子进程 spawn 点的归属
+
+| spawn 点 | 走 CommandExecutor? | 说明 |
+|---|---|---|
+| `bash` 工具 | **是**(本次设计) | 首位消费者 |
+| `run_tests` | 否(当前 raw `tokio::process`) | 已绿代码;收敛去重留后续可选项 |
+| MCP stdio transport | 否(rmcp 内部,connect 时一次性 spawn) | 非 per-call;见 §3.4 |
+| skill 脚本(今天) | **是**(经 `bash`) | ADR-0023 B-defer:脚本是数据,模型用 bash 跑 |
+| skill 脚本(未来 ADR-0023 B/C) | 应当是 | 落地时 funnel through;见 §3.5 |
+
+`CommandExecutor` 是 cogito 自身发起的子进程执行的**预期单一漏斗**。v0.1 仅 `bash` 接入;其余为已知现状/未来项,逐条说明如下。
+
+### 3.3 H08 Tool Dispatcher 如何使用(含 Adaptive 现状订正)
+
+- H08 是 Brain 中**唯一**调用 Hands 的组件。流程:H09 `pre_dispatch` hook(可 `Reject`)→ `catch_unwind(provider.invoke)` → `InvokeOutcome::Sync` 出 `DispatchOutcome::SyncResult`;`Async` 则先记 `JobSubmitted`、再注册 `on_complete` sink、转 `TurnState::Paused`,在 `JobCompletionEvent` 到来时恢复。
+- **CommandExecutor 对 H08 不可见。**
+- **Adaptive 已被支持,无需额外打通**:`dispatcher.rs` 自 Sprint 8 起按**实际返回的** `InvokeOutcome` 路由,不再用 `execution_class` 校验返回类型——descriptor 上的 `ExecutionClass` "现在纯粹是给 surface(如 H05 过滤)的 advisory"。因此 Adaptive 工具(按参数返回 Sync 或 Async)开箱即跑。`bash` 是**首个真 Adaptive 工具**。`docs/components/H08-tool-dispatcher.md` 里"v0.1 scope: Adaptive deferred"为 Sprint 8 之前的**陈旧表述,本次订正**。
+
+### 3.4 MCP tools 与 CommandExecutor
+
+- MCP 的 **tool 调用**(`tools/call`)是把 JSON-RPC 消息发给一个**已建立的 transport**,**不 spawn 任何进程**。所以 MCP tool invocation 与 CommandExecutor 无关。
+- 但 MCP **stdio server** 的进程在 **connect 时一次性 spawn**,且该 spawn 发生在 **rmcp 的 `transport-child-process` 内部**(cogito-mcp 仅把 `command`/`args` 交给 rmcp)。**它不经过 CommandExecutor。**
+- **含义(尤其 SaaS)**:CommandExecutor 接缝**不覆盖** MCP stdio 子进程。ApiServer 多租户下,要么只用 streamable-HTTP MCP,要么后续用专门 ADR 把 rmcp 的 command spawn 也包到 executor 之后。**已知边界,本设计仅记录、不在 v0.1 解决。**
+
+### 3.5 skill 脚本执行的归属
+
+- **今天(ADR-0023 = B-defer)**:skill 的 `scripts/` 只是磁盘数据,loader **不执行**;模型用 `read_file` 读、用 `bash` 跑——即 skill 脚本执行**今天已天然走 CommandExecutor**(经 bash),无特殊机制。
+- **未来(ADR-0023 Position B 构建期内联 / Position C 脚本即 tool)**:真正"主动执行脚本"时,按同一接缝原则**应 funnel through CommandExecutor**。本设计为 ADR-0023 未决项提供这一落点。
+
 ## 4. Protocol:CommandExecutor 接缝
 
 新增于 `cogito-protocol`(运行期 trait,不进事件日志、不参与跨语言 wire,故**不动 `SCHEMA_VERSION`**):
@@ -250,8 +286,8 @@ inherit_env = true
 
 ## 11. 文档与决策记录
 
-- **ADR-0027**(新增):sandbox 作为策略选择的 `CommandExecutor` 接缝 + builtin 工具集做小哲学(reference impl + provider-free 原语;web_search 推 MCP;web_fetch 不调模型的分层理由)。
-- 更新 `docs/components/H08-tool-dispatcher.md`(bash Adaptive 双路径 + executor 注入)。
+- **ADR-0027**(新增):核心内容含 (a) **Tool/CommandExecutor 两层模型**(§3.1)与子进程 spawn 点归属表(§3.2);(b) sandbox 作为**策略选择**的 `CommandExecutor` 接缝、v0.4 演进;(c) builtin 工具集做小哲学(reference impl + provider-free 原语;web_search 推 MCP;web_fetch 不调模型的分层理由);(d) **已知边界**:MCP stdio 子进程不经 CommandExecutor(§3.4)、skill 脚本执行归属(§3.5)。
+- 更新 `docs/components/H08-tool-dispatcher.md`:**订正**"v0.1 scope: Adaptive deferred"陈旧表述(dispatcher 自 Sprint 8 起按实际 `InvokeOutcome` 路由、`execution_class` 仅 advisory,bash 为首个 Adaptive 工具,无需改 dispatcher 代码);补 bash 同步/background 双路径说明。executor 注入在工具内部,H08 不涉及。
 - 更新 `docs/configuration/overview.md`(新增 `[tools]` 段)。
 - 新增 `docs/components/cogito-sandbox.md`(CommandExecutor 接缝 + DirectExecutor + 工厂 + v0.4 演进)。
 - `ROADMAP.md` Sprint 10 记一笔:本项为 Sprint 10 期间明示追加,非原排期;完成后在 `docs/experiments/` 补实验报告。
