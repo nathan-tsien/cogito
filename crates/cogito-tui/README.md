@@ -1,8 +1,9 @@
 # cogito-tui
 
-Multi-pane terminal UI for the cogito runtime. Replicates `cogito chat`
-in a ratatui frontend with a per-turn tool-call tree alongside the chat
-scrollback.
+Single-column terminal UI for the cogito runtime. Replicates `cogito
+chat` in a ratatui frontend with `▸` / `∴` role markers and inline,
+expandable tool blocks in the chat scrollback (no separate tools pane,
+no persistent status bar).
 
 ## Quick start
 
@@ -18,19 +19,24 @@ at `$XDG_STATE_HOME/cogito/tui.log`.
 ## Layout
 
 ```
-┌───────────────────────┬──────────────┐
-│ chat (70%)            │ tools (30%)  │
-│   > who are you?      │  turn 1      │
-│   agent: I am cogito. │   read_file ok│
-│   [tool] read_file ok │              │
-├───────────────────────┴──────────────┤
-│ message (multi-line, Shift+Enter)    │
+┌──────────────────────────────────────┐
+│ ∴∴∴                                  │
+│ cogito  v0.2                         │
+│ <model>  ·  <strategy>  ·  <session> │
+│ ▸  who are you?                      │
+│ ∴  I am cogito.                      │
+│    ✓ read_file  12ms                 │
 ├──────────────────────────────────────┤
-│ strategy: coder · model: ... · ...   │
+│ message (multi-line, Shift+Enter)    │
 └──────────────────────────────────────┘
 ```
 
-`Ctrl-T` toggles the tools pane.
+A single chat column with an input footer (separated by a dim
+divider). `▸` marks user prompts, `∴` marks cogito replies. Tool calls
+render inline as `⠋` (running) / `✓` (ok) / `✗` (error); `▸` when
+selected, `▾` when expanded. A `∴ ⠋` spinner shows between turn
+dispatch and the first content. The startup banner and any MCP banner
+scroll away with history.
 
 ## Keymap
 
@@ -39,14 +45,19 @@ at `$XDG_STATE_HOME/cogito/tui.log`.
 | Enter | Send message |
 | Shift+Enter | Newline in message buffer |
 | PgUp / PgDn | Scroll chat (5 rows) |
-| Ctrl-↑ / Ctrl-↓ | Move tool-tree selection |
-| Ctrl-Enter | Expand / collapse selected tool node |
-| Ctrl-T | Toggle tools pane |
+| Ctrl-↑ / Ctrl-↓ | Move tool-block selection |
+| Ctrl-Enter | Expand / collapse selected tool block |
+| Alt-1 … Alt-9 | Quick-expand the N-th most recent tool block |
+| Ctrl-E | Expand all tool blocks in the latest cogito message |
+| Ctrl-L | Collapse all tool blocks in the latest cogito message |
 | Ctrl-C (during turn) | Cancel turn |
 | Ctrl-C twice within 2s (idle) | Exit |
 | Ctrl-D on empty buffer | Exit |
 | / (start of buffer) | Open slash command popup |
 | Esc | Dismiss popup |
+
+All printable keys (including `e`, `c`, digits) always go to the input;
+tool commands are modifier-gated so typing is never captured.
 
 ## Slash commands (v0.1)
 
@@ -69,12 +80,14 @@ State models (`ChatModel`, `ToolTreeModel`) are sink-agnostic — they
 transition on `StreamEvent` without touching ratatui types. The UI
 widgets in `src/ui/` borrow `&Model` and paint at render time.
 
-Result-preview text in the tool-tree is loaded lazily on first
-`Ctrl-Enter` expansion via `ConversationStore::read_session` (spec
-§5.3 α.1). No new event broadcast was added in v0.1.
+Result-preview text for a tool block is loaded lazily on first
+expansion (`Ctrl-Enter` / `Alt-N`) via
+`ConversationStore::read_session`. No new event broadcast was added.
 
-See `docs/superpowers/specs/2026-05-28-sprint-9b-tui-design.md` for the
-full design.
+See `docs/superpowers/specs/2026-05-29-cogito-tui-redesign-design.md`
+for the current visual + interaction design, and
+`docs/superpowers/specs/2026-05-28-sprint-9b-tui-design.md` for the
+original v0.1 multi-pane design it superseded.
 
 ## Manual smoke test (panic recovery)
 
