@@ -3,7 +3,7 @@
 //!
 //! - Typing characters -> input widget
 //! - Enter / Shift+Enter -> input widget (send or newline)
-//! - PgUp/PgDn -> chat scrollback (no focus required)
+//! - PgUp/PgDn -> chat scrollback (no focus required); End -> tail
 //! - Ctrl-Up/Down -> tool-tree selection cursor
 //! - Ctrl-Enter -> toggle expansion of selected node
 //! - Alt-1..9 -> quick-expand N-th most recent tool block
@@ -24,6 +24,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{App, CTRL_C_EXIT_WINDOW};
 use crate::ui::input::InputOutcome;
+
+/// Lines moved per PgUp/PgDn press in the chat scrollback.
+const SCROLL_STEP: u16 = 5;
 
 /// What the event loop should do as a result of one key event.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,13 +79,21 @@ pub fn dispatch(app: &mut App, key: KeyEvent) -> Action {
         return Action::None;
     }
 
-    // PgUp/PgDn scroll the chat (always; no focus mode).
+    // PgUp/PgDn scroll the chat (always; no focus mode). `scroll_back` is
+    // measured up from the bottom, so PgUp increases it (older history)
+    // and PgDn decreases it (toward the newest content). The renderer
+    // clamps to the available history each frame.
     if matches!(key.code, KeyCode::PageUp) {
-        app.chat.scroll_offset = app.chat.scroll_offset.saturating_add(5);
+        app.chat.scroll_up(SCROLL_STEP);
         return Action::None;
     }
     if matches!(key.code, KeyCode::PageDown) {
-        app.chat.scroll_offset = app.chat.scroll_offset.saturating_sub(5);
+        app.chat.scroll_down(SCROLL_STEP);
+        return Action::None;
+    }
+    // End jumps back to the tail (resume follow-tail).
+    if matches!(key.code, KeyCode::End) {
+        app.chat.scroll_to_bottom();
         return Action::None;
     }
 
@@ -347,10 +358,22 @@ mod tests {
     }
 
     #[test]
-    fn pgup_increases_scroll_offset() {
+    fn pgup_increases_scroll_back() {
         let (mut app, _td) = fresh_app();
         dispatch(&mut app, k(KeyCode::PageUp, KeyModifiers::NONE));
-        assert_eq!(app.chat.scroll_offset, 5);
+        assert_eq!(app.chat.scroll_back, 5);
+    }
+
+    #[test]
+    fn pgdn_then_end_returns_to_tail() {
+        let (mut app, _td) = fresh_app();
+        dispatch(&mut app, k(KeyCode::PageUp, KeyModifiers::NONE));
+        dispatch(&mut app, k(KeyCode::PageUp, KeyModifiers::NONE));
+        assert_eq!(app.chat.scroll_back, 10);
+        dispatch(&mut app, k(KeyCode::PageDown, KeyModifiers::NONE));
+        assert_eq!(app.chat.scroll_back, 5);
+        dispatch(&mut app, k(KeyCode::End, KeyModifiers::NONE));
+        assert_eq!(app.chat.scroll_back, 0);
     }
 
     #[test]

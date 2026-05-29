@@ -82,7 +82,12 @@ impl Palette {
 }
 
 /// Render the chat pane into `area`.
-pub fn render(f: &mut Frame, area: Rect, inputs: &ChatRenderInputs<'_>) {
+///
+/// Returns the maximum meaningful `scroll_back` for this frame
+/// (`wrapped_rows - viewport_height`). The caller clamps the stored
+/// `ChatModel::scroll_back` to this so scrolling up can't run past the
+/// top into empty space.
+pub fn render(f: &mut Frame, area: Rect, inputs: &ChatRenderInputs<'_>) -> u16 {
     let p = Palette::default_dark();
     let mut out: Vec<Line<'static>> = Vec::new();
     for line in &inputs.chat.lines {
@@ -103,10 +108,17 @@ pub fn render(f: &mut Frame, area: Rect, inputs: &ChatRenderInputs<'_>) {
             Span::styled(spinner::frame(inputs.spinner_tick), p.running),
         ]));
     }
-    let para = Paragraph::new(out)
-        .wrap(Wrap { trim: false })
-        .scroll((inputs.chat.scroll_offset, 0));
-    f.render_widget(para, area);
+    let para = Paragraph::new(out).wrap(Wrap { trim: false });
+    // Bottom-anchor the scrollback. `line_count` gives the post-wrap row
+    // count at this width; subtracting the viewport height yields the
+    // top offset that pins the newest content to the bottom. Scrolling
+    // up (larger `scroll_back`) moves the top offset toward 0 (older).
+    let total = u16::try_from(para.line_count(area.width)).unwrap_or(u16::MAX);
+    let max_scroll_back = total.saturating_sub(area.height);
+    let scroll_back = inputs.chat.scroll_back.min(max_scroll_back);
+    let top = max_scroll_back - scroll_back;
+    f.render_widget(para.scroll((top, 0)), area);
+    max_scroll_back
 }
 
 fn user_line(text: &str, p: &Palette) -> Line<'static> {
@@ -357,6 +369,46 @@ mod tests {
 
     fn empty_tools() -> ToolTreeModel {
         ToolTreeModel::new()
+    }
+
+    #[test]
+    fn follows_tail_when_content_exceeds_viewport() {
+        // 20 user prompts, each one line, into a 5-row viewport. With
+        // scroll_back = 0 the newest (line19) must be visible and the
+        // oldest (line0) scrolled off the top.
+        let mut chat = ChatModel::new();
+        for i in 0..20 {
+            chat.push_user_prompt(format!("line{i}"));
+        }
+        let tools = empty_tools();
+        let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 5);
+        assert!(out.contains("line19"), "newest should be visible:\n{out}");
+        // "line0" is not a substring of line1..line19, so its absence means
+        // the oldest prompt scrolled off the top.
+        assert!(
+            !out.contains("line0"),
+            "oldest should be off-screen:\n{out}"
+        );
+    }
+
+    #[test]
+    fn scroll_back_reveals_older_history() {
+        let mut chat = ChatModel::new();
+        for i in 0..20 {
+            chat.push_user_prompt(format!("line{i}"));
+        }
+        // Scroll up past the newest content.
+        chat.scroll_back = 10;
+        let tools = empty_tools();
+        let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 5);
+        assert!(
+            out.contains("line9"),
+            "older line should be visible:\n{out}"
+        );
+        assert!(
+            !out.contains("line19"),
+            "newest should be scrolled away:\n{out}"
+        );
     }
 
     #[test]
