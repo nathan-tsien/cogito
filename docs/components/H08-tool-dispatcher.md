@@ -58,9 +58,23 @@ The full enum is defined in `cogito-protocol::hands::ToolResult`.
 ## v0.1 scope
 
 - Sequential dispatch only
-- Sync (`AlwaysSync`) and async (`AlwaysAsync`) coverage; `Adaptive` deferred
+- Sync, async, **and `Adaptive`** all work. Since Sprint 8 the dispatcher
+  routes purely by the **actual `InvokeOutcome` returned per call**
+  (`Sync` -> `SyncResult`, `Async` -> pause); it does not validate the
+  outcome against the descriptor's `ExecutionClass`, which is now only a
+  **surface advisory** (e.g. H05 filtering). An `Adaptive` tool that
+  returns `Sync` or `Async` per call therefore works with **no dispatcher
+  change**. `bash` (Sprint 10) is the first `Adaptive` tool. (An earlier
+  draft of this doc said "Adaptive deferred"; that was pre-Sprint-8 and is
+  no longer true.)
 - `pre_dispatch` hook supported; modify-args is a 0.x option
 - Async path: at most one outstanding async dispatch per turn (turn pauses immediately on `InvokeOutcome::Async`); multi-async-dispatch is a post-v0.1 option
+
+`bash`'s sync vs background dual path lives **inside the tool**: it decides
+per call whether to `executor.run(...).await` synchronously or to submit a
+background job, and returns the matching `InvokeOutcome`. The injected
+`CommandExecutor` is a tool-internal detail; H08 never sees it (see
+ADR-0027 §"Two-layer model").
 
 ## Open design questions
 
@@ -85,18 +99,20 @@ The full enum is defined in `cogito-protocol::hands::ToolResult`.
 
 ## Implementation note (v0.1)
 
-H08 branches on two signals:
+H08 branches on **one** signal: the `InvokeOutcome` returned by
+`ToolProvider::invoke` (`Sync(ToolResult)` -> `SyncResult`;
+`Async(JobId)` -> record `JobSubmitted`, register the completion sink,
+return `AsyncJob`). It does **not** consult `ToolDescriptor.execution_class`
+before invoking, nor does it validate the returned outcome against the
+declared class — `execution_class` is a surface advisory only. A future
+`InvokeOutcome` variant the dispatcher does not understand surfaces as a
+structured `ToolResult::Error { kind: InvocationFailed }`. Strategy
+filtering (e.g., `allow_async_tools: false`) is H05's responsibility, not
+H08's; H08 trusts the outcome it receives.
 
-1. `ToolDescriptor.execution_class`
-   (`AlwaysSync` / `AlwaysAsync` / `Adaptive`) — checked before invoke
-2. `InvokeOutcome` returned by `ToolProvider::invoke`
-   (`Sync(ToolResult)` / `Async(JobId)`)
-
-Contract violations (e.g., a tool descriptor declared `AlwaysSync`
-returning `Async`) are `debug_assert!`s in dev builds and a structured
-`ToolResult::Error { kind: InvocationFailed }` in release. Strategy
-filtering (e.g., `allow_async_tools: false`) is H05's responsibility,
-not H08's; H08 trusts the descriptor it receives.
+This is why `Adaptive` tools need no special handling: `bash` returns
+`Sync` for foreground commands and `Async` for `background:true`, and the
+dispatcher routes each call by what it actually got back.
 
 Cancellation: each `invoke()` call runs inside
 `tokio::select!(provider.invoke(...), ctx.cancel.cancelled())`. On

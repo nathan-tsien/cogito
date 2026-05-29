@@ -98,6 +98,7 @@ clear concern. Sections are loaded independently and composed into one
 | `runtime`     | Locked      | `cogito-config::RuntimeSection`   | Process-wide startup |
 | `providers`   | Locked      | `cogito-model::ProviderConfig`    | Named provider instances |
 | `strategies`  | Locked      | `cogito-protocol::HarnessStrategy` (loader: `cogito-config`) | YAML registry, dir-based |
+| `tools`       | Locked      | `cogito-config::ToolsConfig` (per-tool sub-tables owned by impl crates) | `bash` / `web_fetch` / `sandbox` tunables (Sprint 10) |
 | `plugins`     | Reserved    | TBD post-v0.3                     | Slot named; schema deferred |
 | `subagents`   | Reserved    | TBD v0.3                          | Slot named; schema deferred |
 
@@ -302,6 +303,52 @@ status; the agent continues with whatever tools came up. To make a
 missing server fatal, you currently need a wrapper script — a
 built-in `strict_mcp_startup` mode is on the v0.4 SaaS-ready roadmap.
 
+### `[tools]`
+
+Aggregates per-tool tunables for the builtin tools that take
+configuration. Each sub-table is owned by the crate that implements the
+tool; `cogito-config` only aggregates them. Whole-section replace on merge
+(like `[skills]`); an absent `[tools]` collapses straight to defaults.
+
+```toml
+[tools.bash]
+sync_timeout_secs        = 30      # foreground command timeout (seconds)
+background_deadline_secs = 600     # background:true command deadline (seconds)
+max_output_bytes         = 32768   # per-stream byte budget (head + tail kept)
+
+[tools.web_fetch]
+timeout_secs  = 30                 # per-request timeout (seconds)
+max_bytes     = 1048576            # response-body byte cap before truncation
+user_agent    = "cogito/0.1"       # User-Agent header
+max_redirects = 5                  # maximum redirects followed
+
+[tools.sandbox]
+kind        = "direct"             # selects the CommandExecutor (v0.1: only "direct")
+root        = "."                  # working-dir root (default = process cwd)
+inherit_env = true                 # child inherits the parent environment
+```
+
+| Field | Type | Default | Owner crate |
+|---|---|---|---|
+| `bash.sync_timeout_secs` | `u64` | `30` | `cogito-jobs::BashConfig` |
+| `bash.background_deadline_secs` | `u64` | `600` | `cogito-jobs::BashConfig` |
+| `bash.max_output_bytes` | `usize` | `32768` | `cogito-jobs::BashConfig` |
+| `web_fetch.timeout_secs` | `u64` | `30` | `cogito-tools::WebFetchConfig` |
+| `web_fetch.max_bytes` | `usize` | `1048576` | `cogito-tools::WebFetchConfig` |
+| `web_fetch.user_agent` | `String` | `"cogito/0.1"` | `cogito-tools::WebFetchConfig` |
+| `web_fetch.max_redirects` | `usize` | `5` | `cogito-tools::WebFetchConfig` |
+| `sandbox.kind` | tag | `"direct"` | `cogito-sandbox::SandboxConfig` |
+| `sandbox.root` | `PathBuf` | `"."` | `cogito-sandbox::DirectConfig` |
+| `sandbox.inherit_env` | `bool` | `true` | `cogito-sandbox::DirectConfig` |
+
+`[tools.sandbox]` selects the `CommandExecutor` that `bash` runs through. It
+is a tagged config (`kind`); v0.1 ships only `kind = "direct"`
+(`DirectExecutor`, **not a security boundary**). Surfaces call
+`cogito_sandbox::build_executor(&cfg.tools.sandbox)` once and inject the
+result into `bash`. Real isolation is a v0.4 concern. See
+[ADR-0027](../adr/0027-command-executor-seam-and-builtin-scope.md) and
+[`docs/components/cogito-sandbox.md`](../components/cogito-sandbox.md).
+
 ---
 
 ## 7. File search path
@@ -339,6 +386,7 @@ across projects, put it in `$XDG_CONFIG_HOME` and omit
 | `cogito-model::ProviderConfig::OpenAiResponses` | Sprint 6 | ROADMAP §"Sprint 6" |
 | `strategies/*.yaml` loader (H10 registry) | Sprint 6      | H10 doc        |
 | `--strategy <name>` CLI                   | Sprint 6      | H10 doc        |
+| `[tools]` (`bash` / `web_fetch` / `sandbox`) | Sprint 10  | ADR-0027       |
 | `[plugins]` schema                        | post-v0.3     | future ADR     |
 | `[[subagents]]` schema                    | v0.3          | ADR-0011 (reserved) |
 | Database `ConfigLoader` (consumer-impl)   | v0.4+         | consumer code  |
