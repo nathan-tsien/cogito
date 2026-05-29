@@ -149,6 +149,7 @@ impl WebFetch {
 
         // Read the body with a hard byte cap.
         let mut body: Vec<u8> = Vec::new();
+        let mut truncated = false;
         let mut stream = resp.bytes_stream();
         while let Some(chunk) = stream.next().await {
             match chunk {
@@ -156,6 +157,7 @@ impl WebFetch {
                     body.extend_from_slice(&bytes);
                     if body.len() >= self.cfg.max_bytes {
                         body.truncate(self.cfg.max_bytes);
+                        truncated = true;
                         break;
                     }
                 }
@@ -170,17 +172,32 @@ impl WebFetch {
         }
         let text = String::from_utf8_lossy(&body).to_string();
 
-        if is_html {
+        // Produce the final string for the matching content kind, then tell
+        // the model when the body was cut at the byte cap so it does not treat
+        // the output as complete.
+        let mut out = if is_html {
             match htmd::convert(&text) {
-                Ok(md) => ToolResult::text(md),
-                Err(e) => ToolResult::Error {
-                    kind: ToolErrorKind::InvocationFailed,
-                    message: format!("web_fetch: html->markdown failed: {e}"),
-                    retryable: false,
-                },
+                Ok(md) => md,
+                Err(e) => {
+                    return ToolResult::Error {
+                        kind: ToolErrorKind::InvocationFailed,
+                        message: format!("web_fetch: html->markdown failed: {e}"),
+                        retryable: false,
+                    };
+                }
             }
         } else {
-            ToolResult::text(text)
+            text
+        };
+        if truncated {
+            use std::fmt::Write as _;
+            // Ignore the formatting error: writing into a `String` never fails.
+            let _ = write!(
+                out,
+                "\n\n[web_fetch: output truncated at {} bytes]",
+                self.cfg.max_bytes
+            );
         }
+        ToolResult::text(out)
     }
 }

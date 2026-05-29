@@ -74,6 +74,23 @@ async fn plain_text_passes_through() {
 }
 
 #[tokio::test]
+async fn oversized_body_is_marked_truncated() {
+    // 100-char static body, capped at 16 bytes -> must be flagged truncated.
+    let body = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
+    let url = serve_once("text/plain", body).await;
+    let tool = WebFetch::new(WebFetchConfig {
+        max_bytes: 16,
+        ..Default::default()
+    });
+    let out = tool.invoke(serde_json::json!({ "url": url }), ctx()).await;
+    let text = text_of(&out);
+    assert!(
+        text.contains("truncated"),
+        "oversized body should carry the truncation marker: {text:?}"
+    );
+}
+
+#[tokio::test]
 async fn binary_content_type_is_rejected() {
     let url = serve_once("image/png", "PNG-binary-bytes").await;
     let tool = WebFetch::new(WebFetchConfig::default());

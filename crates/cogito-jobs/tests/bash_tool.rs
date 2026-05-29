@@ -13,7 +13,11 @@ use cogito_protocol::tool::{InvokeOutcome, ToolErrorKind, ToolProvider, ToolResu
 use cogito_sandbox::{DirectConfig, DirectExecutor};
 
 fn bash(cfg: BashConfig) -> (BashTool, Arc<LocalJobManager>) {
-    let executor: Arc<dyn CommandExecutor> = Arc::new(DirectExecutor::new(DirectConfig::default()));
+    bash_with_root(cfg, DirectConfig::default())
+}
+
+fn bash_with_root(cfg: BashConfig, dir_cfg: DirectConfig) -> (BashTool, Arc<LocalJobManager>) {
+    let executor: Arc<dyn CommandExecutor> = Arc::new(DirectExecutor::new(dir_cfg));
     let job_mgr = LocalJobManager::new();
     let tool = BashTool::new(
         executor,
@@ -87,6 +91,70 @@ async fn sync_timeout_surfaces_timeout_error() {
         panic!("expected Sync Error");
     };
     assert!(matches!(kind, ToolErrorKind::Timeout), "kind={kind:?}");
+}
+
+#[tokio::test]
+async fn cwd_is_honored() {
+    // Root the executor at a known tempdir and create a subdir under it; the
+    // `cwd` arg should make `pwd` report that subdir.
+    let root = tempfile::tempdir().unwrap();
+    let subdir = "work_subdir";
+    std::fs::create_dir(root.path().join(subdir)).unwrap();
+    let dir_cfg = DirectConfig {
+        root: root.path().to_path_buf(),
+        ..DirectConfig::default()
+    };
+    let (tool, _jm) = bash_with_root(BashConfig::default(), dir_cfg);
+
+    let out = tool
+        .invoke(
+            "bash",
+            serde_json::json!({ "command": "pwd", "cwd": subdir }),
+            ctx(),
+        )
+        .await;
+    let InvokeOutcome::Sync(ToolResult::Output(blocks)) = out else {
+        panic!("expected Sync Output");
+    };
+    let stdout = blocks[0]
+        .get("stdout")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    assert!(
+        stdout.contains(subdir),
+        "pwd should report the cwd subdir, got: {stdout:?}"
+    );
+}
+
+#[tokio::test]
+async fn cancel_surfaces_cancelled_error() {
+    // Build a ctx whose cancel token we hold, fire it while a long command
+    // runs, and assert the sync invoke maps to a Cancelled tool error.
+    let (tool, _jm) = bash(BashConfig::default());
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let run_ctx = ExecCtx {
+        cancel: cancel.clone(),
+        ..ExecCtx::open_ended(SessionId::new(), TurnId::new())
+    };
+
+    let handle = tokio::spawn(async move {
+        tool.invoke(
+            "bash",
+            serde_json::json!({ "command": "sleep 30" }),
+            run_ctx,
+        )
+        .await
+    });
+
+    // Give the child a moment to spawn, then cancel.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    cancel.cancel();
+
+    let out = handle.await.unwrap();
+    let InvokeOutcome::Sync(ToolResult::Error { kind, .. }) = out else {
+        panic!("expected Sync Error");
+    };
+    assert!(matches!(kind, ToolErrorKind::Cancelled), "kind={kind:?}");
 }
 
 #[tokio::test]
