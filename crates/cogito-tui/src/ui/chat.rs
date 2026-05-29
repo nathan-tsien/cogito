@@ -488,6 +488,23 @@ mod tests {
     }
 
     #[test]
+    fn assistant_composite_markdown_snapshot() {
+        let mut chat = ChatModel::new();
+        chat.on_event(&StreamEvent::TextDelta {
+            chunk: "Plan:\n\n- step **one**\n- step `two`\n\n```\ncode\n```".into(),
+        });
+        let tools = empty_tools();
+        let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 12);
+        // structural assertions (not a brittle full-buffer match)
+        assert!(out.contains("∴  Plan:"), "got:\n{out}");
+        assert!(out.contains("- step one"), "got:\n{out}");
+        assert!(out.contains("- step two"), "got:\n{out}");
+        assert!(out.contains("code"), "got:\n{out}");
+        assert!(!out.contains("```"), "got:\n{out}");
+        assert!(!out.contains("**"), "got:\n{out}");
+    }
+
+    #[test]
     fn expanded_completed_tool_renders_args_and_result_placeholder() {
         let (mut chat, mut tools) = build_tools_with_one("c1", "read_file");
         {
