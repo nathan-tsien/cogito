@@ -12,6 +12,9 @@ pub use local::LocalJobManager;
 mod run_tests;
 pub use run_tests::RunTestsTool;
 
+mod bash;
+pub use bash::{BashConfig, BashTool};
+
 #[cfg(any(test, feature = "test-tools"))]
 mod sleep_tool;
 #[cfg(any(test, feature = "test-tools"))]
