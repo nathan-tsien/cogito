@@ -486,6 +486,7 @@ dependencies = [
  "cogito-core",
  "cogito-mock-model",
  "cogito-protocol",
+ "cogito-sandbox",
  "cogito-store-jsonl",
  "cogito-test-fixtures",
  "cogito-tools",

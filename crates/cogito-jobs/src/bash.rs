@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cogito_protocol::ExecCtx;
-use cogito_protocol::command::{CommandExecutor, CommandSpec};
+use cogito_protocol::command::{CommandError, CommandExecutor, CommandSpec};
 use cogito_protocol::job::LocalJobSubmitter;
 use cogito_protocol::tool::{
     ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
@@ -55,19 +55,15 @@ struct BashArgs {
     #[serde(default)]
     cwd: Option<String>,
     /// Optional override of the synchronous timeout (ignored when background).
-    // Read by `invoke_sync` in Task 6; the skeleton parses but ignores it.
-    #[allow(dead_code)]
     #[serde(default)]
     timeout_secs: Option<u64>,
 }
 
 /// Adaptive shell tool bound to a `CommandExecutor` + job submitter.
 pub struct BashTool {
-    // `executor` and `job_mgr` are wired by `new` and consumed by
-    // `invoke_sync` / `invoke_background` in later tasks (6/7); the skeleton
-    // stubs do not read them yet.
-    #[allow(dead_code)]
     executor: Arc<dyn CommandExecutor>,
+    // Consumed by `invoke_background` in Task 7; the sync path does not
+    // submit jobs.
     #[allow(dead_code)]
     job_mgr: Arc<dyn LocalJobSubmitter>,
     cfg: BashConfig,
@@ -90,8 +86,6 @@ impl BashTool {
         }
     }
 
-    // Used by `invoke_sync` / `invoke_background` in later tasks (6/7).
-    #[allow(dead_code)]
     fn spec(&self, args: &BashArgs, timeout: Duration) -> CommandSpec {
         CommandSpec {
             command: args.command.clone(),
@@ -104,8 +98,6 @@ impl BashTool {
 
 /// Convert a `CommandOutcome` to the JSON tool payload shape shared with
 /// `run_tests`: `{ stdout, stderr, exit_code }`.
-// Used by `invoke_sync` / `invoke_background` in later tasks (6/7).
-#[allow(dead_code)]
 fn outcome_value(o: &cogito_protocol::command::CommandOutcome) -> serde_json::Value {
     serde_json::json!({
         "stdout": o.stdout,
@@ -167,11 +159,38 @@ impl ToolProvider for BashTool {
 }
 
 impl BashTool {
-    // Stubbed in this skeleton; real execution (which awaits the executor)
-    // lands in Task 6. The `async` is part of the eventual signature.
-    #[allow(clippy::unused_async)]
-    async fn invoke_sync(&self, _args: BashArgs, _ctx: ExecCtx) -> InvokeOutcome {
-        InvokeOutcome::Sync(ToolResult::text("todo"))
+    async fn invoke_sync(&self, args: BashArgs, ctx: ExecCtx) -> InvokeOutcome {
+        let timeout = Duration::from_secs(args.timeout_secs.unwrap_or(self.cfg.sync_timeout_secs));
+        let spec = self.spec(&args, timeout);
+        let result = match self.executor.run(spec, ctx).await {
+            Ok(o) if o.timed_out => ToolResult::Error {
+                kind: ToolErrorKind::Timeout,
+                message: format!(
+                    "command timed out after {}s; pass background:true for long-running commands",
+                    timeout.as_secs()
+                ),
+                retryable: true,
+            },
+            Ok(o) => ToolResult::Output(vec![outcome_value(&o)]),
+            Err(CommandError::Cancelled) => ToolResult::Error {
+                kind: ToolErrorKind::Cancelled,
+                message: "bash command cancelled".into(),
+                retryable: false,
+            },
+            Err(CommandError::Spawn(e)) => ToolResult::Error {
+                kind: ToolErrorKind::InvocationFailed,
+                message: format!("bash: {e}"),
+                retryable: false,
+            },
+            // `CommandError` is `#[non_exhaustive]`; treat any future variant
+            // as a generic invocation failure rather than panicking.
+            Err(e) => ToolResult::Error {
+                kind: ToolErrorKind::InvocationFailed,
+                message: format!("bash: {e}"),
+                retryable: false,
+            },
+        };
+        InvokeOutcome::Sync(result)
     }
     // Stubbed in this skeleton; real submission (which awaits the job
     // submitter) lands in Task 7. The `async` is part of the eventual signature.
