@@ -578,8 +578,8 @@ no new crate (it lives in `cogito-core::runtime::subagent`):
 
 See ADR-0011 (v0.2 minimal section) and the design spec
 `docs/superpowers/specs/2026-05-30-sprint-11-subagent-minimal-design.md`.
-The forthcoming `docs/components/cogito-subagent.md` will be the detailed
-component reference. The four-tool surface below describes the **v0.3 S1
+See [docs/components/cogito-subagent.md](docs/components/cogito-subagent.md)
+for the component design. The four-tool surface below describes the **v0.3 S1
 full** upgrade, which remains future work.
 
 ### Tools exposed to the LLM (v0.3 full surface — `cogito-subagent` or `cogito-core::runtime::subagent`)
