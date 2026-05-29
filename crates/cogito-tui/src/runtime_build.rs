@@ -123,8 +123,20 @@ pub async fn build(args: &TuiArgs) -> Result<Built> {
 
     let is_new = matches!(mode, OpenMode::New);
     let initial = load_initial_state(&store_for_app, &session_id, is_new).await?;
+
+    // Startup banner lines precede the MCP banner in the chat
+    // scrollback. The strategy-name selection mirrors the
+    // `strategy_name` literal used in the `App` construction below.
+    let startup = crate::ui::banner::startup_lines(
+        &strategy.model_params.model,
+        args.strategy
+            .as_deref()
+            .or(cfg.runtime.default_strategy.as_deref())
+            .unwrap_or("default"),
+        &session_id.to_string(),
+    );
     let (chat, tools, turn_count, turn_in_progress) =
-        replay_into_models(&mcp_banner_lines, initial);
+        replay_into_models(&startup, &mcp_banner_lines, initial);
 
     let registry_dyn: Arc<dyn StrategyRegistry> = registry;
     let app = App {
@@ -138,7 +150,6 @@ pub async fn build(args: &TuiArgs) -> Result<Built> {
         selected: None,
         expanded: HashSet::new(),
         input: InputWidget::new(),
-        show_tools: true,
         popup: None,
         strategy_name: args
             .strategy
@@ -148,6 +159,7 @@ pub async fn build(args: &TuiArgs) -> Result<Built> {
         model_id: strategy.model_params.model.clone(),
         turn_count,
         turn_in_progress,
+        current_turn_thinking: false,
         cancel_seen_at: None,
         should_quit: false,
     };
@@ -163,10 +175,14 @@ pub async fn build(args: &TuiArgs) -> Result<Built> {
 /// session log. Returns the populated models plus the lifecycle
 /// counters derived from the replayed turns.
 fn replay_into_models(
+    startup_lines: &[String],
     banner_lines: &[String],
     initial: InitialState,
 ) -> (ChatModel, ToolTreeModel, u32, bool) {
     let mut chat = ChatModel::new();
+    for line in startup_lines {
+        chat.push_notice(line.clone());
+    }
     for line in banner_lines {
         chat.push_notice(line.clone());
     }
