@@ -132,8 +132,11 @@ mod tests {
         let ctx = ExecCtx {
             session_id: SessionId::new(),
             turn_id: TurnId::new(),
+            call_id: None,
             deadline: None,
             cancel: CancellationToken::new(),
+            subagent_depth: 0,
+            brain_spawner: None,
         };
         let outcome = provider.invoke("mcp__nope__nope", Value::Null, ctx).await;
         let InvokeOutcome::Sync(ToolResult::Error { kind, .. }) = outcome else {
