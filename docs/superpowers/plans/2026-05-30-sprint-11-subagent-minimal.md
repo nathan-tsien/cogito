@@ -26,6 +26,7 @@
 - **Modify** `crates/cogito-core/src/runtime/builder.rs` — `impl BrainSpawner for Runtime`, `strategy_registry` field/setter, `open_inner` factoring.
 - **Modify** `crates/cogito-cli/src/chat.rs` — register `delegate`, pass strategy registry, read `max_subagent_depth`.
 - **Create** `crates/cogito-core/tests/subagent_delegate.rs` — acceptance + depth integration tests.
+- **Create** `docs/components/cogito-subagent.md` — formal component design doc for the subagent layer.
 - **Modify** docs: ADR done; `ARCHITECTURE.md`, `ROADMAP.md`, `CHANGELOG.md`, `docs/schemas/conversation-event-v1.json`.
 
 Convention reminder: all code comments in English; clippy denies `unwrap_used`/`expect_used`/`panic` (use `?`, `match`, `unwrap_or`); workspace deps via `{ workspace = true }`.
@@ -1404,7 +1405,50 @@ git commit -m "docs(sprint-11): reconcile ARCHITECTURE/ROADMAP/CHANGELOG/H08 wit
 
 ---
 
-## Task 13: Final gate
+## Task 13: Formal component design doc
+
+**Files:**
+- Create: `docs/components/cogito-subagent.md`
+
+The ADR records the *decision*; the component doc is the *standing design reference* that sits beside the H01–H11 docs and `cogito-sandbox.md` / `cogito-tui.md`. Match that house style: a `# <name> — <layer>` title, a lead paragraph, `Authoritative rationale:` + `Spec:` links, a `## Position` ASCII diagram, then sections. Like `cogito-sandbox.md`, the subagent is **not** an H-numbered Harness component — it is a Runtime-layer concern invisible to Brain except through the `ExecCtx.brain_spawner` protocol seam.
+
+- [ ] **Step 1: Write `docs/components/cogito-subagent.md`**
+
+Content (prose derived from ADR-0011 + the spec — write it out, do not link-and-stop):
+
+1. **Title + lead** — `# cogito-subagent — Hands / Runtime (v0.2 module in cogito-core::runtime::subagent)`. Lead: what `delegate(role, input) → output` is; that v0.2 ships it as a module (no crate), with a v0.3 potential crate extraction (ADR-0011 §"v0.3 amendment"). Include `Authoritative rationale: [ADR-0011](../adr/0011-subagent-execution-model.md).` and `Spec: docs/superpowers/specs/2026-05-30-sprint-11-subagent-minimal-design.md`. Add a one-line **Status: v0.2 minimal — shipped Sprint 11** banner (mirror the Status convention used in the H0X docs).
+
+2. **`## Position`** — an ASCII diagram showing: parent Brain → H08 dispatch → `DelegateToolProvider` (Hands) → `ExecCtx.brain_spawner: Arc<dyn BrainSpawner>` (the protocol seam) → `RuntimeSpawner` (Runtime) → child top-level session. Emphasize that Brain sees only `ToolProvider` + the `BrainSpawner` protocol type (ADR-0004 layer rule), never the Runtime.
+
+3. **`## The two valves` (mental model)** — initial context (fresh; only `input` crosses; `role` = strategy), sealed execution (parent model sees only the final text; the human sees live progress via the tagged broadcast bridge), result return (verbatim final assistant text → `ToolResult`). Keep the "pack everything into `input`" contract explicit.
+
+4. **`## The `BrainSpawner` seam`** — the trait (sync `run_to_completion`), why it lives in `cogito-protocol` (layer rule), and why it is injected via `ExecCtx` rather than at construction (breaks the Runtime⇄tools cycle). Show the `DelegateRequest` / `SpawnError` shapes.
+
+5. **`## Drive-to-completion`** — the open_session → subscribe → submit → terminal-event → replay-for-text → shutdown sequence; note that a child pausing on its own async tool is handled by looping until terminal.
+
+6. **`## Persistence & parent↔child linkage`** — child = independent top-level session with its own JSONL; linkage recorded child-side as typed `SessionMeta` fields (`parent_session_id` / `parent_call_id` / `subagent_depth`); nothing in the parent log (no event tree until v0.3). Include the SaaS/Postgres note: `ConversationStore` is unchanged; Postgres projects `parent_session_id` to an indexed column for cross-session queries (Inviolable #7 / ADR-0007) — a backend detail, never a trait method.
+
+7. **`## Depth, failure, and resume`** — `subagent_depth` guard (default max 3) on `ExecCtx`; child failure / panic → `ToolResult::Error`; the sync-in-process resume property (crash mid-delegate re-runs `delegate`, orphaning the partial child — documented, not a bug).
+
+8. **`## Not in v0.2 (v0.3 amendment)`** — async spawn/wait/send_input/cancel, parent-child event tree, per-role `spawnable_as_subagent` + `max_subagent_depth`, `handed_tools`, tenant propagation, crate extraction. Point at ADR-0011 §"v0.3 amendment".
+
+- [ ] **Step 2: Cross-link the doc.** In `ARCHITECTURE.md` §"Subagent layer", add a "See `docs/components/cogito-subagent.md`" pointer (alongside the ADR-0011 note added in Task 12 Step 1). If `docs/components/` has an index/README, add the new doc to it.
+
+- [ ] **Step 3: Verify links resolve**
+
+Run: `rg -n "cogito-subagent.md|0011-subagent" docs/ ARCHITECTURE.md`
+Expected: the component doc links to ADR-0011 + the spec, and ARCHITECTURE references the component doc.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add docs/components/cogito-subagent.md ARCHITECTURE.md
+git commit -m "docs(sprint-11): formal cogito-subagent component design doc"
+```
+
+---
+
+## Task 14: Final gate
 
 - [ ] **Step 1: Full local CI**
 
