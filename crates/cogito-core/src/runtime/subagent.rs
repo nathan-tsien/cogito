@@ -12,6 +12,9 @@ use cogito_protocol::tool::{
 /// Tool name exposed to the model.
 pub const DELEGATE_TOOL_NAME: &str = "delegate";
 
+/// Default maximum subagent (`delegate`) nesting depth when unconfigured.
+pub const DEFAULT_MAX_SUBAGENT_DEPTH: u32 = 3;
+
 /// The `delegate` tool. Construct with [`DelegateToolProvider::new`].
 pub struct DelegateToolProvider {
     /// Maximum subagent nesting depth (inclusive guard). Default 3.
@@ -28,7 +31,9 @@ impl DelegateToolProvider {
 
 impl Default for DelegateToolProvider {
     fn default() -> Self {
-        Self { max_depth: 3 }
+        Self {
+            max_depth: DEFAULT_MAX_SUBAGENT_DEPTH,
+        }
     }
 }
 
