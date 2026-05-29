@@ -399,9 +399,12 @@ name = "cogito-config"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "cogito-jobs",
  "cogito-mcp",
  "cogito-model",
  "cogito-protocol",
+ "cogito-sandbox",
+ "cogito-tools",
  "serde",
  "serde_json",
  "serde_yaml",

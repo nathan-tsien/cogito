@@ -16,6 +16,7 @@ fn partial_with_model(model: &str) -> RuntimeConfigPartial {
         providers: None,
         mcp_servers: None,
         skills: None,
+        tools: None,
     }
 }
 
@@ -56,12 +57,14 @@ fn providers_array_replaces_wholesale() {
         providers: Some(vec![anthropic_provider("a"), anthropic_provider("b")]),
         mcp_servers: None,
         skills: None,
+        tools: None,
     };
     let layer_b = RuntimeConfigPartial {
         runtime: None,
         providers: Some(vec![anthropic_provider("c")]),
         mcp_servers: None,
         skills: None,
+        tools: None,
     };
     let merged = merge_layers(vec![layer_a, layer_b]);
     assert_eq!(merged.providers.as_ref().unwrap().len(), 1);
@@ -75,6 +78,7 @@ fn finalize_fills_defaults() {
         providers: Some(vec![anthropic_provider("only")]),
         mcp_servers: None,
         skills: None,
+        tools: None,
     };
     let cfg = partial.finalize().expect("ok");
     assert_eq!(cfg.runtime.session_root, PathBuf::from("./sessions"));
@@ -97,6 +101,7 @@ fn finalize_preserves_explicit_default_provider() {
         providers: Some(vec![anthropic_provider("a"), anthropic_provider("b")]),
         mcp_servers: None,
         skills: None,
+        tools: None,
     };
     let cfg = partial.finalize().expect("ok");
     assert_eq!(cfg.runtime.default_provider.as_deref(), Some("a"));
@@ -109,6 +114,7 @@ fn finalize_ambiguous_provider_errors() {
         providers: Some(vec![anthropic_provider("a"), anthropic_provider("b")]),
         mcp_servers: None,
         skills: None,
+        tools: None,
     };
     let err = partial.finalize().unwrap_err();
     let msg = err.to_string();
