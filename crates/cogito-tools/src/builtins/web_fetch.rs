@@ -43,8 +43,6 @@ struct Args {
 /// HTML-to-markdown fetcher.
 #[derive(Debug, Clone)]
 pub struct WebFetch {
-    // read by fetch() in Task 9
-    #[allow(dead_code)]
     cfg: WebFetchConfig,
 }
 
@@ -100,9 +98,89 @@ impl BuiltinTool for WebFetch {
 }
 
 impl WebFetch {
-    // stub has no await; real fetch lands in Task 9
-    #[allow(clippy::unused_async)]
-    async fn fetch(&self, _url: &str) -> ToolResult {
-        ToolResult::text("todo")
+    async fn fetch(&self, url: &str) -> ToolResult {
+        use futures::StreamExt as _;
+
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(self.cfg.timeout_secs))
+            .user_agent(self.cfg.user_agent.clone())
+            .redirect(reqwest::redirect::Policy::limited(self.cfg.max_redirects))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                return ToolResult::Error {
+                    kind: ToolErrorKind::InvocationFailed,
+                    message: format!("web_fetch: client build failed: {e}"),
+                    retryable: false,
+                };
+            }
+        };
+
+        let resp = match client.get(url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                return ToolResult::Error {
+                    kind: ToolErrorKind::InvocationFailed,
+                    message: format!("web_fetch: request failed: {e}"),
+                    retryable: true,
+                };
+            }
+        };
+
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        let is_html = content_type.contains("text/html");
+        let is_text = content_type.starts_with("text/")
+            || content_type.contains("json")
+            || content_type.contains("xml");
+        if !is_html && !is_text {
+            return ToolResult::Error {
+                kind: ToolErrorKind::InvocationFailed,
+                message: format!("web_fetch: unsupported content-type: {content_type}"),
+                retryable: false,
+            };
+        }
+
+        // Read the body with a hard byte cap.
+        let mut body: Vec<u8> = Vec::new();
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    body.extend_from_slice(&bytes);
+                    if body.len() >= self.cfg.max_bytes {
+                        body.truncate(self.cfg.max_bytes);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    return ToolResult::Error {
+                        kind: ToolErrorKind::InvocationFailed,
+                        message: format!("web_fetch: body read failed: {e}"),
+                        retryable: true,
+                    };
+                }
+            }
+        }
+        let text = String::from_utf8_lossy(&body).to_string();
+
+        if is_html {
+            match htmd::convert(&text) {
+                Ok(md) => ToolResult::text(md),
+                Err(e) => ToolResult::Error {
+                    kind: ToolErrorKind::InvocationFailed,
+                    message: format!("web_fetch: html->markdown failed: {e}"),
+                    retryable: false,
+                },
+            }
+        } else {
+            ToolResult::text(text)
+        }
     }
 }
