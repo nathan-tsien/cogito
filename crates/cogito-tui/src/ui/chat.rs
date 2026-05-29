@@ -300,6 +300,9 @@ fn format_ms(ms: u128) -> String {
 mod tests {
     use super::*;
     use cogito_protocol::stream::StreamEvent;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use serde_json::json;
 
     #[test]
     fn banner_line_is_bold_and_green() {
@@ -309,9 +312,6 @@ mod tests {
         assert!(span.style.add_modifier.contains(Modifier::BOLD), "not bold");
         assert_eq!(span.style.fg, Some(Color::Green), "not green");
     }
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-    use serde_json::json;
 
     #[allow(clippy::too_many_arguments)]
     fn draw(
