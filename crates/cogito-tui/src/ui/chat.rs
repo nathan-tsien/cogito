@@ -127,7 +127,7 @@ fn md_styles(p: &Palette) -> MdStyles {
 }
 
 /// Render an assistant message as markdown body lines, prefixed with the
-/// `∴ ` marker on the first visual line and a 3-space gutter on the rest.
+/// `∴  ` marker on the first visual line and a 3-space gutter on the rest.
 fn assistant_lines(text: &str, p: &Palette) -> Vec<Line<'static>> {
     let mut body = markdown::render(text, &md_styles(p));
     if body.is_empty() {
