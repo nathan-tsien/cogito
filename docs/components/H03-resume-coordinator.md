@@ -1,6 +1,6 @@
 # H03 · Resume Coordinator
 
-> **Status**: ✅ Implemented · Sprint 3 · `crates/cogito-core/src/harness/resume.rs` (pure `replay()` + 6-variant `ResumePoint`); resume dispatch wired in `runtime::session_loop::run_session`; chaos test in `crates/cogito-core/tests/resume_chaos.rs`
+> **Status**: Implemented · Sprint 3 · `crates/cogito-core/src/harness/resume.rs` (pure `replay()` + 6-variant `ResumePoint`); resume dispatch wired in `runtime::session_loop::run_session`; chaos test in `crates/cogito-core/tests/resume_chaos.rs`
 
 ## Role in Harness
 

@@ -1,6 +1,6 @@
 # H04 · Prompt Composer
 
-> **Status**: 🚧 In progress · Sprint 2
+> **Status**: Implemented · core in Sprint 2 (system + history + tool schemas); honors `ContextCompacted` / `SystemPromptInjected` projection (Sprint 6) and injects the Available Skills block (Sprint 7). `crates/cogito-core/src/harness/prompt.rs`
 
 ## Role in Harness
 
@@ -57,11 +57,16 @@ produce the same `ModelInput`.
 
 - Single prompt template per strategy: `{system}` + flat conversation history + tool schemas verbatim
 - Truncation policy: oldest-first message drop until under `strategy.length_budget`
-- No summarization, no semantic compression (deferred to H11 Context Manage + ADR-0008)
+- No summarization, no semantic compression: v0.1 H11 ships only `TruncateCompactor`
+  (drop oldest-first) and `NoneCompactor` (no-op). A summarizing compactor is deferred
+  to v0.2 (ADR-0008).
 - No "context pin" mechanism (any pins are normal user / tool_result messages in the log)
-- H11 is implemented as a pass-through in Sprint 2; this means H04's behavior in v0.1
-  is identical to the pre-amendment design. The architectural slot is reserved without
-  changing v0.1 prompt-build behavior.
+- H11 Context Manage is live since Sprint 6 (ADR-0008 Accepted). H04 no longer fires
+  from `Init`; it fires from `ContextManaged` after H11 has finalized context decisions,
+  and projects history through any `ContextCompacted` / `SystemPromptInjected` event H11
+  wrote that turn (see invariant #5 and the projection table below). When H11 selects
+  `NoneCompactor`, no such events are written and H04's prompt-build behavior matches the
+  pre-amendment design.
 
 ## History projection
 
@@ -75,14 +80,14 @@ The function walks events in seq order and projects to `Message`s:
 | `ToolUseEmitted { call_id, name, args }` | appended as `ContentBlock::ToolUse { call_id, name, args }` to the current assistant message |
 | `ToolResultRecorded { call_id, result }` | emitted as a fresh `Message::User { content: [ContentBlock::ToolResult { call_id, content, is_error }] }` after the assistant message that requested it |
 | `HookModified { ... }` | (no projection — informational only) |
-| `ContextCompacted { replaced_seq_range, replacement, ... }` (pending ADR-0008) | skip events with seq in `replaced_seq_range`; project `replacement` blocks into messages |
-| `SystemPromptInjected { suffix }` (pending ADR-0008) | append `suffix` to the composed `system` field |
+| `ContextCompacted { replaced_seq_range, replacement, ... }` (ADR-0008) | skip events with seq in `replaced_seq_range`; project `replacement` blocks into messages |
+| `SystemPromptInjected { suffix }` (ADR-0008) | append `suffix` to the composed `system` field |
 | State transitions (`TurnStarted`, `PromptComposed`, ...) | (no projection) |
 
 Events that aren't part of the model-visible dialogue (control events,
 hook events, redaction markers) are skipped during projection.
 
-**Projection through compaction** (locked by this PR; details pending ADR-0008):
+**Projection through compaction** (ADR-0008; implemented in Sprint 6):
 when the walker encounters a `ContextCompacted` event with
 `replaced_seq_range = (lo, hi)`, it (1) skips all events whose seq is in
 `[lo, hi]`, (2) emits the events from `replacement` in their place, and

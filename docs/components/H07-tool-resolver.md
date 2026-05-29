@@ -1,6 +1,6 @@
 # H07 · Tool Call Resolver
 
-> **Status**: 🚧 In progress · Sprint 2
+> **Status**: Implemented · Sprint 2 (JSON Schema validation + structured `ToolResult::Error` on mismatch). `crates/cogito-core/src/harness/tool_resolver.rs`
 
 ## Role in Harness
 

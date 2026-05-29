@@ -16,9 +16,10 @@ I tell the model to do." Strategies reference providers from
 See [`ADR-0026`](../adr/0026-strategy-registry.md) for the full
 rationale.
 
-> **Status**: 🚧 Sprint 2 lands the `HarnessStrategy::default_with_model(model_id)` factory + Mid field set
-> (name / system_prompt / allowed_tools / tool_order / model_params / max_turns).
-> YAML loader + multi-strategy registry + per-task selection remain Sprint 6.
+> **Status**: Implemented · `HarnessStrategy::default_with_model(model_id)` factory + field set
+> (name / system_prompt / allowed_tools / tool_order / model_params / max_turns) in Sprint 2;
+> markdown+frontmatter `StrategyRegistry` via the `cogito-strategy` crate in Sprint 9a
+> (ADR-0026, which supersedes the originally-planned YAML loader). `crates/cogito-core/src/harness/strategy.rs`
 
 ## Role in Harness
 

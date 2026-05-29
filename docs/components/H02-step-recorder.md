@@ -1,6 +1,6 @@
 # H02 · Step Recorder
 
-> **Status**: ✅ Implemented · Sprint 1 (text-block lifecycle, JSONL backend) · `crates/cogito-core/src/harness/step_recorder.rs`
+> **Status**: Implemented · Sprint 1 (text-block lifecycle, JSONL backend) · `crates/cogito-core/src/harness/step_recorder.rs`
 
 ## Role in Harness
 
@@ -21,13 +21,11 @@ events through H02 — H02 is the **only** path into the event log from Brain.
   writes a single `AssistantMessageAppended` event. Triggered by H06
   when the model emits `content_block_stop` for a text block.
 
-All `record_*` methods currently return `Result<(), StoreError>`. Sprint 3
-P2.5 will unify all `record_*` method signatures to return
-`Result<EventId, StoreError>`. Until then, only `record_turn_failed`
-effectively surfaces the event identity indirectly via `TurnOutcome::Failed
-{ recorded_event_id }` (Sprint 3 P2.5 will generalize this so any caller
-that needs to reference a recorded event can do so, replacing the Sprint 2
-`"unknown"` stub).
+All `record_*` methods return `Result<EventId, StoreError>` so any caller
+that needs to reference a recorded event can do so — e.g. `record_turn_failed`
+surfaces the event identity via `TurnOutcome::Failed { recorded_event_id }`.
+The `on_*_block_complete` methods return `Result<Option<EventId>, StoreError>`
+because they are no-ops when no deltas have been buffered.
 
 H02 batches assistant text by **wire-protocol content_block boundary**
 (matches Codex / Claude Code) — there is no timer and no character
@@ -81,42 +79,42 @@ Each `record_*` call appends exactly one `ConversationEvent` variant to the stor
 
 - **`SessionStarted { meta }`** — Recorded by H01 when a new session is created. Session-level event; `turn_id` is `None` on the envelope.
 - **`TurnStarted { user_input }`** — Recorded by H01 when a new user turn begins. `user_input` is `Vec<ContentBlock>`.
-- **`ContextManageEntered {}`** — Recorded at the start of the `Init → ContextManaged` transition. v0.1 H11 is a pass-through; ADR-0008 will replace the body with real context decisions.
-- **`ContextManageCompleted {}`** — Recorded at the end of the `ContextManaged → PromptBuilt` transition. v0.1 pass-through carries no decision body.
+- **`ContextManageEntered {}`** — Recorded at the start of the `Init → ContextManaged` transition. The body is empty; the real H11 decisions (ADR-0008) are carried by the dedicated events written during the transition (`ContextCompacted`, `SystemPromptInjected`, `ToolFilterOverridden`, `ContextDecisionRecorded`).
+- **`ContextManageCompleted {}`** — Recorded at the end of the `ContextManaged → PromptBuilt` transition. The body is empty; it marks the H11 pass done, with the decision detail in the dedicated events above.
 - **`PromptComposed { model, surface_size }`** — Recorded after H04 composes the prompt and H05 builds the tool surface. Carries metadata only — the full prompt is NOT persisted (event log is a state-recovery source, not a prompt cache; see ADR-0007).
 - **`ModelCallStarted { model }`** — Recorded by H01 at the `PromptBuilt → ModelCalling` transition boundary, right before the gateway stream opens.
 - **`AssistantMessageAppended { text }`** — Written by H02 when `on_text_block_complete` is called (text-block boundary, not per-delta).
 - **`ToolUseRecorded { call_id, tool_name, args }`** — Recorded by H06 when the model emits a complete `tool_use` block.
-- **`ModelCallCompleted { stop_reason, usage }`** *(Sprint 3 P2.2 — not yet shipped)* — Recorded by H06 Stream Demultiplexer when the model response stream emits `ModelEvent::MessageCompleted` (Anthropic `message_delta` with stop_reason / OpenAI `finish_reason`). Sealing event for one model call. Enables H03 to distinguish "model call done" from "model call in flight" without re-issuing the gateway request. See spec §4 Q1.
+- **`ModelCallCompleted { stop_reason, usage }`** — Recorded by H06 Stream Demultiplexer when the model response stream emits `ModelEvent::MessageCompleted` (Anthropic `message_delta` with stop_reason / OpenAI `finish_reason`). Sealing event for one model call. Enables H03 to distinguish "model call done" from "model call in flight" without re-issuing the gateway request. See spec §4 Q1.
 - **`ToolResultRecorded { call_id, result }`** — Recorded by H08 after a tool call completes (success or structured error).
 - **`TurnCompleted { outcome }`** — Recorded by H01 on successful turn completion.
-- **`TurnFailed { reason }`** — Recorded by H01 when the turn FSM transitions to `Failed`. `reason` is a `TurnFailureReason`; `turn_id` is on the event envelope, not in the payload. The Sprint 2 `TurnOutcome::Failed { recorded_event_id: "unknown" }` stub will be unified in Sprint 3 P2.5 (recorders to return `Result<EventId, StoreError>`).
+- **`TurnFailed { reason }`** — Recorded by H01 when the turn FSM transitions to `Failed`. `reason` is a `TurnFailureReason`; `turn_id` is on the event envelope, not in the payload. The recorded event id is threaded into `TurnOutcome::Failed { recorded_event_id }` (recorders return `Result<EventId, StoreError>`).
 - **`TurnPaused { job_id }`** — Recorded by H01 when the turn pauses on an async job. Precedes `JobCompletedRecorded` on resume.
 - **`JobCompletedRecorded { job_id, outcome }`** — Recorded by H01 when a previously-awaited async job has finished. Triggers the resume path.
 
 ## Recorder API
 
-All `record_*` methods currently return `Result<(), StoreError>`. Sprint 3 P2.5 will unify all `record_*` method signatures to return `Result<EventId, StoreError>`. Until then, only `record_turn_failed` returns a result that callers need to thread into `TurnOutcome::Failed { recorded_event_id }` (replacing the Sprint 2 `"unknown"` stub). Sprint 3 P2.5 generalizes this so any caller that needs to reference a recorded event can do so.
+All `record_*` methods return `Result<EventId, StoreError>` so any caller that needs to reference a recorded event can do so — e.g. `record_turn_failed` returns the id that callers thread into `TurnOutcome::Failed { recorded_event_id }`. The `on_*_block_complete` methods return `Result<Option<EventId>, StoreError>` (no-op when no deltas have been buffered).
 
 | Method | Parameters | Return type | Called by |
 |---|---|---|---|
-| `record_session_started` | `meta: SessionMeta` | `Result<(), StoreError>` | H01 on session creation. |
-| `record_turn_started` | `turn_id, user_input: Vec<ContentBlock>` | `Result<(), StoreError>` | H01 on new user turn. |
-| `record_context_manage_entered` | `turn_id` | `Result<(), StoreError>` | H01 at `Init → ContextManaged` transition start. |
-| `record_context_manage_completed` | `turn_id` | `Result<(), StoreError>` | H01 at `ContextManaged → PromptBuilt` transition end. |
-| `record_prompt_composed` | `turn_id, model: String, surface_size: u32` | `Result<(), StoreError>` | H01 after H04/H05 produce the `ModelInput`. |
-| `record_model_call_started` | `turn_id, model: String` | `Result<(), StoreError>` | H01 at `PromptBuilt → ModelCalling` transition boundary. |
+| `record_session_started` | `meta: SessionMeta` | `Result<EventId, StoreError>` | H01 on session creation. |
+| `record_turn_started` | `turn_id, user_input: Vec<ContentBlock>` | `Result<EventId, StoreError>` | H01 on new user turn. |
+| `record_context_manage_entered` | `turn_id` | `Result<EventId, StoreError>` | H01 at `Init → ContextManaged` transition start. |
+| `record_context_manage_completed` | `turn_id` | `Result<EventId, StoreError>` | H01 at `ContextManaged → PromptBuilt` transition end. |
+| `record_prompt_composed` | `turn_id, model: String, surface_size: u32` | `Result<EventId, StoreError>` | H01 after H04/H05 produce the `ModelInput`. |
+| `record_model_call_started` | `turn_id, model: String` | `Result<EventId, StoreError>` | H01 at `PromptBuilt → ModelCalling` transition boundary. |
 | `on_text_delta` | `turn_id, chunk: String` | `()` | H06 per text-delta chunk; accumulates buffer + broadcasts. Does not write to store. |
-| `on_text_block_complete` | — | `Result<(), StoreError>` | H06 on `content_block_stop` for a text block; drains buffer to `AssistantMessageAppended`. |
+| `on_text_block_complete` | — | `Result<Option<EventId>, StoreError>` | H06 on `content_block_stop` for a text block; drains buffer to `AssistantMessageAppended`. No-op (returns `None`) when no deltas have been buffered. |
 | `on_thinking_delta` | `turn_id, chunk: String` | `()` | H06 per `ThinkingDelta` chunk; accumulates a per-block thinking buffer and broadcasts `StreamEvent::ThinkingDelta`. Does not write to store. (ADR-0019 §3.) |
 | `on_thinking_block_complete` | `provider_opaque: Option<serde_json::Value>` | `Result<Option<EventId>, StoreError>` | H06 on `content_block_stop` for a thinking block; drains buffer to `ThinkingBlockRecorded` with the provider-opaque payload from the gateway (signature for Anthropic, encrypted_content for OpenAI Responses, `None` for OpenAI-compat). No-op when no deltas have been buffered. (ADR-0019 §2-3.) |
-| `record_tool_use` | `turn_id, call_id: String, tool_name: String, args: serde_json::Value` | `Result<(), StoreError>` | H06 when model emits a complete `tool_use` block. |
-| `record_model_call_completed` *(P2.2 — not yet shipped)* | `turn_id, stop_reason, usage` | `Result<EventId, StoreError>` | H06 demux loop when `MessageCompleted` model event observed. |
-| `record_tool_result` | `turn_id, call_id: String, result: ToolResult` | `Result<(), StoreError>` | H08 after tool dispatch completes. |
-| `record_turn_paused` | `turn_id, job_id: JobId` | `Result<(), StoreError>` | H01 when turn pauses on async job. |
-| `record_job_completed` | `turn_id, job_id: JobId, outcome: JobOutcome` | `Result<(), StoreError>` | H01 when previously-awaited job finishes. |
-| `record_turn_completed` | `turn_id, outcome: TurnOutcome` | `Result<(), StoreError>` | H01 on successful turn completion. |
-| `record_turn_failed` | `turn_id, reason: TurnFailureReason` | `Result<(), StoreError>` | H01 on FSM transition to `Failed`. |
+| `record_tool_use` | `turn_id, call_id: String, tool_name: String, args: serde_json::Value` | `Result<EventId, StoreError>` | H06 when model emits a complete `tool_use` block. |
+| `record_model_call_completed` | `turn_id, stop_reason, usage` | `Result<EventId, StoreError>` | H06 demux loop when `MessageCompleted` model event observed. |
+| `record_tool_result` | `turn_id, call_id: String, result: ToolResult` | `Result<EventId, StoreError>` | H08 after tool dispatch completes. |
+| `record_turn_paused` | `turn_id, job_id: JobId` | `Result<EventId, StoreError>` | H01 when turn pauses on async job. |
+| `record_job_completed` | `turn_id, job_id: JobId, outcome: JobOutcome` | `Result<EventId, StoreError>` | H01 when previously-awaited job finishes. |
+| `record_turn_completed` | `turn_id, outcome: TurnOutcome` | `Result<EventId, StoreError>` | H01 on successful turn completion. |
+| `record_turn_failed` | `turn_id, reason: TurnFailureReason` | `Result<EventId, StoreError>` | H01 on FSM transition to `Failed`. |
 
 ## Open design questions
 

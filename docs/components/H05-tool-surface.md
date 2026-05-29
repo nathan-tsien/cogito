@@ -1,6 +1,6 @@
 # H05 · Tool Surface Builder
 
-> **Status**: 🚧 In progress · Sprint 2
+> **Status**: Implemented · Sprint 2 (strategy-filtered list); honors per-turn `ToolFilterOverridden` (Sprint 6). `crates/cogito-core/src/harness/tool_surface.rs`
 
 ## Role in Harness
 
@@ -49,7 +49,7 @@ to be a fast in-memory operation) and **deterministic**.
 - H05 returns `provider.list()` filtered by the allow-list and sorted per the rule above
 - No dynamic per-turn filtering by H05 itself. Dynamic narrowing is H11's responsibility (writes a `ToolFilterOverridden` event; H05 intersects with its strategy filter). A `pre_prompt` hook may also `Reject` an entire turn whose tool surface is unsafe.
 - No tool synthesis (we don't make up new tools per turn).
-- H11 itself is a Sprint-2-pass-through in v0.1, so dynamic narrowing is **not** observable yet; the architectural slot is reserved.
+- Dynamic narrowing is live since Sprint 6 (ADR-0008 Accepted): H11's `ToolFilterOverrider` writes a `ToolFilterOverridden` event during `ContextManaged`, and H05 honors it (see "Sprint 6: ToolFilterOverridden integration" below). When H11 uses the default `NoneOverrider`, the event carries `Inherit` (a no-op), so H05's surface matches strategy alone.
 
 ## Composite providers
 

@@ -6,11 +6,12 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 + 4 + 4.5 + 4.7 + 5 + 6 + 7 + 8 + 9a + 9b
-> code-complete. Sprint 4 (MCP sync tools) landed (PR #14) with one deferred
-> item — the live-server happy-path integration test (see the Sprint 4
-> closure note). Sprint 9 split into 9a (done) and 9b (done).
-> **Current sprint: Sprint 10 (v0.1 hardening).**
+> **v0.1 · Foundation — complete; tagged `v0.1.0` (2026-05-29).** All
+> sprints 0–10 done. One tracked deferral carried forward: the Sprint 4
+> live-server MCP happy-path integration test (see the Sprint 4 closure
+> note); candidate for a v0.2 task once an in-process MCP test-server
+> fixture exists.
+> **Next: v0.2 · Extensibility (Sprint 11 — Subagent S2 minimal).**
 
 ## Version plan
 
@@ -230,11 +231,11 @@ helper landed in 9a.
 **Renumbered from old Sprint 8.** Includes the standalone
 `cogito-store-jsonl` → `cogito-store` rename PR (see ADR-0024).
 
-- [ ] All component design docs cross-referenced and current
+- [x] All component design docs cross-referenced and current (H01–H11 reconciled with shipped reality; Status banners refreshed; decorative glyphs removed)
 - [x] `cogito-store-jsonl` → `cogito-store` rename PR landed (see ADR-0024); JSONL becomes the default Cargo feature
 - [x] **明示追加(非原排期)**: 核心工具 `bash` + `web_fetch`,以及 `cogito-sandbox` 的 `CommandExecutor` 接缝(`DirectExecutor` + `build_executor`)与 `[tools]` 配置段。详见 ADR-0027 / `docs/components/cogito-sandbox.md`
-- [ ] CHANGELOG.md initial entry
-- [ ] Tag `v0.1.0`
+- [x] CHANGELOG.md initial `[0.1.0]` release entry
+- [x] Tag `v0.1.0`
 
 ### v0.2 · Extensibility
 

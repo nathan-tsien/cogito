@@ -155,14 +155,18 @@ pub enum EventPayload {
     },
 
     /// Recorded at the start of the `Init -> ContextManaged` transition.
-    /// v0.1 ships an immediate companion `ContextManageCompleted` because
-    /// H11 is a pass-through; ADR-0008 will replace the body with real
-    /// context decisions. `turn_id` is on the envelope.
+    /// An empty bracket marker for the transition boundary: the real
+    /// context decisions H11 makes (per ADR-0008, implemented in Sprint 6)
+    /// are carried by the dedicated `ContextCompacted` /
+    /// `SystemPromptInjected` / `ToolFilterOverridden` /
+    /// `ContextDecisionRecorded` events, not by this body. `turn_id` is on
+    /// the envelope.
     ContextManageEntered {},
 
     /// Recorded at the end of the `ContextManaged -> PromptBuilt`
-    /// transition. v0.1 pass-through carries no decision body. `turn_id`
-    /// is on the envelope.
+    /// transition. Empty bracket marker for the transition boundary; the
+    /// decisions are carried by the dedicated context events above.
+    /// `turn_id` is on the envelope.
     ContextManageCompleted {},
 
     /// Recorded after H04 composes the prompt and H05 builds the tool

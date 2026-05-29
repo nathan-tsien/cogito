@@ -1,6 +1,6 @@
 # H06 · Stream Demultiplexer
 
-> **Status**: ✅ Implemented · Sprint 2 (Anthropic + OpenAI streams; recorder wiring) · Sprint 3 added the `ModelCallCompleted` recorder call. `crates/cogito-core/src/harness/stream_demux.rs`
+> **Status**: Implemented · Sprint 2 (Anthropic + OpenAI streams; recorder wiring) · Sprint 3 added the `ModelCallCompleted` recorder call. `crates/cogito-core/src/harness/stream_demux.rs`
 
 ## Role in Harness
 

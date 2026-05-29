@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.1.0] - 2026-05-29
+
+First tagged release — **v0.1 Foundation**. A production-grade, embeddable
+Agent Runtime core (the "Harness") that drives a full event-sourced turn
+against Anthropic / OpenAI Responses / OpenAI-compatible backends with an
+FSM Turn Driver (H01), immediate-write Step Recorder (H02), chaos-tested
+crash resume (H03), context management (H11 / ADR-0008), a hook pipeline
+(H09), skills, async jobs, MCP sync tools, multi-model strategies, and
+CLI + TUI surfaces. Brain / Hands / Session layering per ADR-0004;
+`ConversationEvent` schema_version = 1. See the per-sprint entries below
+for detail.
+
 ### Sprint 10 · v0.1 hardening (2026-05-29)
 
 **Changed**
@@ -20,6 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sqlite` later) land as additional feature-gated modules instead of new
   workspace crates — the planned v0.4 `cogito-store-postgres` crate is now
   `cogito-store --features postgres`. No on-disk format or schema change.
+
+**Docs**
+
+- Reconciled the component design docs (H01–H11) with shipped reality:
+  removed stale "Sprint 2 pass-through" / "not yet shipped" / "Sprint 3
+  P2.5 will unify" framing for work that is now complete (real H11
+  context orchestration in Sprint 6, the `ModelCallCompleted` recorder
+  and `Result<EventId, StoreError>` signatures in Sprint 3, tool-filter
+  override in Sprint 6). Refreshed the per-component Status banners and
+  removed decorative status glyphs.
+- Reconciled ROADMAP Sprint 4 (MCP) status with the merged code: the
+  five completed items are marked done; the live-server happy-path
+  integration test is documented as a tracked deferral (failure-path /
+  soft-skip coverage shipped instead).
 
 ### Sprint 9b · TUI (2026-05-28)
 

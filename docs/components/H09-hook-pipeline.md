@@ -172,7 +172,7 @@ TurnStarted
    │   └─ H08 Dispatch + H02 Record
    │
    ├─ Completed terminal       → [post_turn]          ← observation
-   ├─ Paused terminal          → [post_turn] (TODO sprint-6, see Open design questions)
+   ├─ Paused terminal          → (no post_turn yet — TODO, see Open design questions)
    └─ Failed terminal (5 sites) → [on_error]          ← observation
 ```
 
@@ -263,8 +263,8 @@ Adding them is additive (no SCHEMA_VERSION bump, no breaking
 
 | Point(s) | Sprint | Trigger |
 |---|---|---|
-| `pre_compact` / `post_compact` | Sprint 6 (Context C2) | wraps the Compactor decision step in H11 |
-| `post_turn` on `Paused` terminal | Sprint 6 (async jobs) | new code path; `TurnState::Paused` becomes reachable |
+| `pre_compact` / `post_compact` | unscheduled | wraps the Compactor decision step in H11 (the Compactor shipped in Sprint 6 Context Management, but these hook points were not added) |
+| `post_turn` on `Paused` terminal | unscheduled | `TurnState::Paused` is already reachable (Sprint 8 async jobs); `post_turn` is simply not fired for it yet |
 | `subagent_start` / `subagent_stop` | Sprint 11 (Subagent S2) | wraps `BrainSpawner::spawn(...)` invocations |
 
 ### Considered but not scoped
@@ -321,11 +321,16 @@ mutation.
 
 - **`post_turn` on `Paused` terminal**: `post_turn` is currently wired
   only for the `Completed` terminal (fired inside `model_completed.rs`
-  before the FSM returns `TurnState::Completed`). The `Paused` terminal
-  will be wired in Sprint 6 alongside the JobManager / async job path
-  (Context Management, C2). Until that wiring lands, the `Paused` match
-  arm in `turn_driver/mod.rs` carries a `TODO(sprint-6)` comment as a
-  reminder. Cross-reference Sprint 6 (Context Management) and
+  before the FSM returns `TurnState::Completed`). As of the Sprint 8
+  async-jobs work the `Paused` terminal is reachable (the
+  `ToolDispatching` loop returns `TurnState::Paused { job_id }` when a
+  tool enqueues an async job), but `post_turn` is still **not** fired for
+  it — `Paused` shares the terminal match arm with `Completed` / `Failed`
+  in `turn_driver/mod.rs`, which only returns the outcome. That arm
+  carries a `TODO` comment as a reminder to fire `post_turn()` for
+  `TurnState::Paused`. Whether a paused turn should observe `post_turn`
+  at all (vs. only on the eventual resume-to-`Completed`) is still an
+  open question. Cross-reference
   `docs/superpowers/plans/2026-05-22-sprint-5-hook-pipeline.md`.
 
 - **`HookDecision::Modify`**: originally proposed to allow a hook to

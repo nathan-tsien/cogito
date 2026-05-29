@@ -1,6 +1,6 @@
 # H01 · Turn Driver
 
-> **Status**: 🚧 In progress · Sprint 2 (FSM body + sync tool loop) · resume logic Sprint 3 · chaos test Sprint 3
+> **Status**: Implemented · FSM body + sync tool loop (Sprint 2) · resume logic + chaos test (Sprint 3) · H11 context orchestration (Sprint 6)
 
 ## Role in Harness
 
@@ -73,9 +73,10 @@ Init → ContextManaged → PromptBuilt → ModelCalling → ModelCompleted
 
 > **`ContextManaged` was added 2026-05-19 by PR #6** as an ADR-0006 amendment.
 > Rationale and the full H10/H11/H04/H05/H09 collaboration walkthrough are
-> below in §"Init → ContextManaged → PromptBuilt sequence". v0.1 Sprint 2 ships
-> `ContextManaged` as a pass-through (no work); the real H11 work lands with
-> the Context Management initiative (ADR-0008, pending).
+> below in §"Init → ContextManaged → PromptBuilt sequence". Sprint 6 implements
+> the real H11 work at this transition per the Context Management initiative
+> (ADR-0008, Accepted); `cogito-context` ships the compactor/injector/overrider
+> pipeline and `ContextManaged` is real orchestration, not a pass-through.
 
 ## Resume entry path
 
@@ -105,7 +106,7 @@ pub(crate) enum TurnEntry {
 
 `TurnEntry` lives inside `cogito-core::harness::turn_driver` and is **harness-internal** — it never crosses the protocol boundary. The protocol-visible recovery interface is `ResumePoint` (in `cogito-core::harness::resume`).
 
-**Status: Sprint 3 P3.4 will introduce `TurnEntry` and rewrite `enter_turn`.** Until then, `enter_turn` only handles fresh turns.
+**Status: Sprint 3 P3.4 introduced `TurnEntry` and rewrote `enter_turn`**, which now translates every non-actor-level `ResumePoint` into its starting `TurnState`.
 
 → Sprint 3 decision: spec `2026-05-20-sprint-3-resume-coordinator-design.md` §5.3.
 
@@ -143,9 +144,10 @@ H01 transitions: Init → ContextManaged   (H02 records the transition)
   │               but H04/H05 read the equivalent information from the
   │               event log (not from the in-memory value) — this matches
   │               AGENTS.md §3 "State lives in Conversation Service".
-  │             ─ v0.1 Sprint 2: pass-through (no H11 implementation; H01
-  │               immediately transitions to PromptBuilt with an empty
-  │               ContextDecision and no events written).
+  │             ─ Sprint 6: implemented per ADR-0008. The transition runs
+  │               the compactor/injector/overrider pipeline (cogito-context),
+  │               writes its events via H02, and any trait failure is captured
+  │               in ContextDecisionErrors so the turn continues (never fatal).
   │
 H01 transitions: ContextManaged → PromptBuilt   (H02 records the transition)
   │
@@ -230,7 +232,7 @@ H01 transitions: PromptBuilt → ModelCalling   (H02 records; ModelGateway::stre
 
 - Pause semantics for the consumer: does the consumer see `Paused { job_id }` and decide whether to await/cancel, or does the Runtime auto-resume on `JobCompleted`? Initial answer: Runtime auto-resumes via a subscription to `JobManager`; consumer just polls turn state.
 - Multiple tool calls in one model response: dispatch order = order emitted by model. If one fails, do remaining tools still run? Initial answer: yes (all dispatched, each gets its own `ToolResult`); the model decides next turn based on full result set.
-- **Context management mechanism** — deferred to ADR-0008 (Context Management initiative). The architectural slot is locked by this PR: H11 lives at the `Init → ContextManaged` transition, is allowed to do I/O, and writes its own events via H02. What's open: trigger policy (token-threshold vs strategy-flag), summarization model choice, exact `EventPayload` variants needed (at minimum `ContextCompacted`), `ContextManager` trait placement (cogito-protocol vs cogito-core internal), and whether `pre_context`/`post_context` hook lifecycle points should exist. See `docs/components/H11-context-manage.md` for the placeholder.
+- **Context management mechanism** — resolved by ADR-0008 (Context Management initiative, Accepted) and implemented in Sprint 6. H11 lives at the `Init → ContextManaged` transition, is allowed to do I/O, and writes its own events via H02 (`ContextCompacted`, `SystemPromptInjected`, `ToolFilterOverridden`, `ContextDecisionRecorded`, `ContextManageCompleted`). The compactor/injector/overrider traits live in `cogito-protocol::context` with reference implementations in `cogito-context`. See `docs/components/H11-context-manage.md`.
 
 ## Testing strategy
 
@@ -273,7 +275,7 @@ crates/cogito-core/src/harness/turn_driver/
 └── transitions/
     ├── mod.rs
     ├── init.rs                  # transit_init_to_context_managed
-    ├── context_managed.rs       # transit_context_managed_to_prompt_built (Sprint 2: pass-through)
+    ├── context_managed.rs       # transit_context_managed_to_prompt_built (Sprint 6: H11 pipeline)
     ├── prompt_built.rs          # transit_prompt_built_to_model_calling (calls H04 + H05 + H09 pre_prompt)
     ├── model_calling.rs         # transit_model_calling_to_model_completed (drives stream via H06)
     ├── model_completed.rs       # transit_model_completed_to_dispatching_or_completed (calls H07)
@@ -303,7 +305,7 @@ session_loop::handle_command(Input { text })     [runtime/session_loop.rs]
   │
   ├── ctx     = TurnCtx { session_id, turn_id, exec_ctx, strategy }
   ├── deps    = TurnDeps { step, model, tools, broadcast, ... }
-  ├── decision = h03::replay(&events_so_far)?    // Sprint 2 stub: always FreshTurn
+  ├── decision = h03::replay(&events_so_far)?    // Sprint 3: full decision table
   └── tokio::spawn( turn_driver::enter_turn(decision, ctx, deps) )
         │                              ↓
         │                      JoinHandle<TurnOutcome>
