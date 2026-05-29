@@ -99,7 +99,6 @@ mod tests {
             parent_call_id: Some("c0".into()),
             subagent_depth: 2,
             extra,
-            ..Default::default()
         };
         let json = serde_json::to_string(&meta)?;
         let back: SessionMeta = serde_json::from_str(&json)?;

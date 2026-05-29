@@ -255,9 +255,15 @@ impl Runtime {
             model: Arc::clone(&self.model),
             tools: Arc::clone(&self.tools),
             job_mgr: Arc::clone(&self.job_mgr),
-            // Every session (top-level and child) carries a spawner so a
-            // child can itself delegate up to the depth limit (enforced by
-            // the `delegate` tool, not here).
+            // Every session (top-level and child) carries a spawner so a child
+            // can itself delegate up to the depth limit (enforced by the
+            // `delegate` tool, not here). NOTE: the spawned actor task owns this
+            // Arc<Runtime> clone, so the Runtime stays alive until each
+            // session's actor exits (mailbox close / shutdown) - dropping
+            // external Arc<Runtime> handles alone does not tear it down. This is
+            // intentional: a child mid-delegate must keep the Runtime alive.
+            // There is no Arc cycle (SessionHandle holds no back-reference to
+            // Runtime).
             brain_spawner: Some(Arc::new(RuntimeSpawner(Arc::clone(self)))
                 as Arc<dyn cogito_protocol::subagent::BrainSpawner>),
         };
@@ -482,6 +488,15 @@ pub enum RuntimeError {
     StoreError(String),
 }
 
+/// Backstop deadline for driving a subagent child to a terminal turn.
+/// A child that neither completes nor fails within this budget (e.g. a
+/// wedged tool) must not hang the parent turn forever. Generous on purpose;
+/// per-role configurability is a v0.3 item (ADR-0011).
+const CHILD_DRIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Grace period for tearing the child actor down after its turn is terminal.
+const CHILD_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Owns an `Arc<Runtime>` so `run_to_completion` has the Arc that
 /// `open_inner` needs (and so a spawned child can itself delegate).
 pub(crate) struct RuntimeSpawner(pub(crate) Arc<Runtime>);
@@ -538,7 +553,10 @@ impl cogito_protocol::subagent::BrainSpawner for RuntimeSpawner {
                 reason: e.to_string(),
             })?;
 
-        // 4. Drive to a terminal turn via the broadcast stream.
+        // 4. Drive to a terminal turn via the broadcast stream, bounded by a
+        //    backstop deadline so a wedged child can't hang the parent turn.
+        //    The child does not inherit the parent cancel token in v0.2, so
+        //    this timeout is the only guard against an unbounded child turn.
         let mut rx = child.subscribe();
         child
             .submit_user_text(req.input)
@@ -546,24 +564,28 @@ impl cogito_protocol::subagent::BrainSpawner for RuntimeSpawner {
             .map_err(|e| SpawnError::OpenFailed {
                 reason: e.to_string(),
             })?;
-        let mut failure: Option<String> = None;
-        loop {
-            match rx.recv().await {
-                Ok(StreamEvent::TurnFailed { reason, .. }) => {
-                    failure = Some(reason);
-                    break;
+        let drive = tokio::time::timeout(CHILD_DRIVE_TIMEOUT, async {
+            loop {
+                match rx.recv().await {
+                    Ok(StreamEvent::TurnFailed { reason, .. }) => return Some(reason),
+                    // Terminal completion, or a lagged/closed broadcast: in both
+                    // cases stop waiting and fall through to the log replay, which
+                    // is the source of truth for the child's final assistant text.
+                    Ok(StreamEvent::TurnCompleted { .. }) | Err(_) => return None,
+                    // Intermediate events (paused/resumed/deltas) - keep waiting.
+                    Ok(_) => {}
                 }
-                // Terminal completion, or a lagged/closed broadcast: in both
-                // cases stop waiting and fall through to the log replay, which
-                // is the source of truth for the child's final assistant text.
-                Ok(StreamEvent::TurnCompleted { .. }) | Err(_) => break,
-                // Intermediate events (paused/resumed/deltas) - keep waiting.
-                Ok(_) => {}
             }
-        }
+        })
+        .await;
 
-        // 5. Tear the child actor down.
-        let _ = child.shutdown(std::time::Duration::from_secs(5)).await;
+        // 5. Tear the child actor down regardless of how the drive ended.
+        let _ = child.shutdown(CHILD_SHUTDOWN_GRACE).await;
+        let Ok(failure) = drive else {
+            return Err(SpawnError::Timeout {
+                seconds: CHILD_DRIVE_TIMEOUT.as_secs(),
+            });
+        };
         if let Some(reason) = failure {
             return Err(SpawnError::ChildFailed { reason });
         }
@@ -577,6 +599,9 @@ impl cogito_protocol::subagent::BrainSpawner for RuntimeSpawner {
             .map_err(|e| SpawnError::OpenFailed {
                 reason: e.to_string(),
             })?;
+        // A child that completed with no assistant message yields an empty
+        // string for v0.2. Distinguishing "completed-empty" from real output
+        // (so the parent can surface a clearer signal) is a v0.3 item.
         Ok(last_assistant_text(&events).unwrap_or_default())
     }
 }

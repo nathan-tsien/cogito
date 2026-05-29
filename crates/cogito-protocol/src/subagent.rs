@@ -4,7 +4,7 @@
 //! Runtime, so the ability to spawn a child Brain is a Protocol trait that
 //! `cogito-core::runtime` implements and injects into every tool via
 //! [`crate::ExecCtx::brain_spawner`]. v0.2 ships a single `run_to_completion`
-//! that the caller awaits to completion inline (no background job / JobId);
+//! that the caller awaits to completion inline (no background job / `JobId`);
 //! v0.3 grows the spawn/wait/cancel lifecycle additively.
 
 use crate::ids::SessionId;
@@ -69,6 +69,12 @@ pub enum SpawnError {
         /// Human-readable rendering of the child `TurnFailureReason`.
         reason: String,
     },
+    /// The child did not reach a terminal turn within the drive deadline.
+    #[error("subagent did not complete within {seconds}s")]
+    Timeout {
+        /// The elapsed-deadline budget, in seconds.
+        seconds: u64,
+    },
 }
 
 /// The layer-rule seam that lets a tool spawn a child Brain. Implemented by
@@ -77,13 +83,14 @@ pub enum SpawnError {
 #[async_trait::async_trait]
 pub trait BrainSpawner: Send + Sync {
     /// Run a child agent to completion inline — the caller awaits; no
-    /// background job or JobId is involved — and return its final assistant
+    /// background job or `JobId` is involved — and return its final assistant
     /// text. The child is an independent top-level session; only the returned
     /// string crosses back to the caller.
     async fn run_to_completion(&self, req: DelegateRequest) -> Result<String, SpawnError>;
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use std::sync::Arc;
