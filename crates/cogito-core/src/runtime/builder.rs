@@ -564,16 +564,38 @@ impl cogito_protocol::subagent::BrainSpawner for RuntimeSpawner {
             .map_err(|e| SpawnError::OpenFailed {
                 reason: e.to_string(),
             })?;
+
+        // Observability bridge: if the parent session is still registered,
+        // forward the child's stream onto the parent's broadcast tagged with
+        // the delegate call id, so a UI watching the parent shows subagent
+        // progress live. Broadcast-only - never persisted.
+        let parent_tx = rt
+            .sessions
+            .get(&req.parent_session_id)
+            .map(|h| h.shared.events_tx.clone());
+        let bridge_call_id = req.parent_call_id.clone();
+
         let drive = tokio::time::timeout(CHILD_DRIVE_TIMEOUT, async {
             loop {
                 match rx.recv().await {
-                    Ok(StreamEvent::TurnFailed { reason, .. }) => return Some(reason),
-                    // Terminal completion, or a lagged/closed broadcast: in both
-                    // cases stop waiting and fall through to the log replay, which
-                    // is the source of truth for the child's final assistant text.
-                    Ok(StreamEvent::TurnCompleted { .. }) | Err(_) => return None,
-                    // Intermediate events (paused/resumed/deltas) - keep waiting.
-                    Ok(_) => {}
+                    Ok(ev) => {
+                        if let Some(tx) = &parent_tx {
+                            // Ignore send errors: no receivers is fine.
+                            let _ = tx.send(tag_subagent(ev.clone(), &bridge_call_id));
+                        }
+                        match ev {
+                            StreamEvent::TurnFailed { reason, .. } => return Some(reason),
+                            // Terminal completion: stop waiting and fall through to
+                            // the log replay, which is the source of truth for the
+                            // child's final assistant text.
+                            StreamEvent::TurnCompleted { .. } => return None,
+                            // Intermediate events (paused/resumed/deltas) - keep waiting.
+                            _ => {}
+                        }
+                    }
+                    // Lagged/closed broadcast: stop waiting and fall through to
+                    // the log replay.
+                    Err(_) => return None,
                 }
             }
         })
@@ -615,4 +637,30 @@ fn last_assistant_text(events: &[cogito_protocol::ConversationEvent]) -> Option<
         EventPayload::AssistantMessageAppended { text } if !text.is_empty() => Some(text.clone()),
         _ => None,
     })
+}
+
+/// Stamp `subagent_call_id` onto the forwarded events that carry it; pass
+/// other variants through unchanged. Broadcast-only - never persisted.
+fn tag_subagent(
+    ev: cogito_protocol::stream::StreamEvent,
+    call_id: &str,
+) -> cogito_protocol::stream::StreamEvent {
+    use cogito_protocol::stream::StreamEvent as S;
+    match ev {
+        S::TextDelta { chunk, .. } => S::TextDelta {
+            chunk,
+            subagent_call_id: Some(call_id.to_string()),
+        },
+        S::TurnStarted { .. } => S::TurnStarted {
+            subagent_call_id: Some(call_id.to_string()),
+        },
+        S::TurnCompleted { .. } => S::TurnCompleted {
+            subagent_call_id: Some(call_id.to_string()),
+        },
+        S::TurnFailed { reason, .. } => S::TurnFailed {
+            reason,
+            subagent_call_id: Some(call_id.to_string()),
+        },
+        other => other,
+    }
 }
