@@ -14,7 +14,6 @@ use cogito_tui::app::App;
 use cogito_tui::keymap::dispatch;
 use cogito_tui::render_model::{ChatModel, ToolTreeModel};
 use cogito_tui::ui::input::InputWidget;
-use cogito_tui::ui::status::StatusData;
 use cogito_tui::ui::{RenderInputs, render};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -44,12 +43,12 @@ fn fresh_app() -> (App, TempDir) {
         selected: None,
         expanded: HashSet::new(),
         input: InputWidget::new(),
-        show_tools: true,
         popup: None,
         strategy_name: "x".into(),
         model_id: "m".into(),
         turn_count: 0,
         turn_in_progress: false,
+        current_turn_thinking: false,
         cancel_seen_at: None,
         should_quit: false,
     };
@@ -74,14 +73,8 @@ fn draw(app: &App, w: u16, h: u16) -> String {
                     selected: app.selected,
                     expanded: &app.expanded,
                     input: &app.input,
-                    show_tools: app.show_tools,
-                    status: &StatusData {
-                        strategy: app.strategy_name.clone(),
-                        model: app.model_id.clone(),
-                        session_id: app.session_id_str.clone(),
-                        turn_count: app.turn_count,
-                        tools_visible: app.show_tools,
-                    },
+                    turn_thinking: app.current_turn_thinking,
+                    spinner_tick: 0,
                     popup_prefix: None,
                 },
             );
@@ -110,12 +103,9 @@ fn resize_mid_stream_does_not_lose_content() {
     });
     // Render at one size, then another. Content must appear in both.
     let small = draw(&app, 40, 10);
-    assert!(
-        small.contains("agent: before resize"),
-        "small render:\n{small}"
-    );
+    assert!(small.contains("∴  before resize"), "small render:\n{small}");
     let big = draw(&app, 120, 30);
-    assert!(big.contains("agent: before resize"), "big render:\n{big}");
+    assert!(big.contains("∴  before resize"), "big render:\n{big}");
 }
 
 #[test]
@@ -146,6 +136,15 @@ fn unicode_in_tool_args_renders_without_corruption() {
         tool_name: "q".into(),
         args: serde_json::json!({"keyword": "深圳 🌟"}),
     });
+    app.apply_stream_event(&StreamEvent::ToolDispatchEnded {
+        call_id: "c1".into(),
+        ok: true,
+        error_message: None,
+    });
+    app.apply_stream_event(&StreamEvent::TurnCompleted);
+    // Tools render inline now; the args are only shown when the tool
+    // block is expanded. Expand the (only) tool block via Alt+1.
+    dispatch(&mut app, KeyEvent::new(KeyCode::Char('1'), KeyModifiers::ALT));
     let out = draw(&app, 80, 24);
     // Wide characters (CJK, emoji) each occupy two terminal cells. The
     // cell-symbol collector puts a space in the trailing placeholder
@@ -175,8 +174,31 @@ fn deep_tool_tree_renders_without_panic() {
     }
     assert_eq!(app.tools.total_nodes(), 60);
     let out = draw(&app, 80, 24);
-    // Even at a 24-row terminal, the first few nodes must be visible
-    // and the render must not have panicked.
-    assert!(out.contains("turn 1"), "first turn header missing:\n{out}");
+    // 60 inline tool blocks render as 60 chat lines. Even at a 24-row
+    // terminal, the first node must be visible and the render must not
+    // have panicked. No turn header any more (single-column layout).
     assert!(out.contains("t0"), "first node missing:\n{out}");
+}
+
+#[test]
+fn quick_expand_via_digit_one_works_after_tool_completes() {
+    let (mut app, _td) = fresh_app();
+    app.apply_stream_event(&StreamEvent::TurnStarted);
+    app.apply_stream_event(&StreamEvent::ToolDispatchStarted {
+        call_id: "c".into(),
+        tool_name: "read_file".into(),
+        args: serde_json::json!({"path": "x.rs"}),
+    });
+    app.apply_stream_event(&StreamEvent::ToolDispatchEnded {
+        call_id: "c".into(),
+        ok: true,
+        error_message: None,
+    });
+    // Quick-expand the most recent tool block. Bare digits now route to
+    // the input as text; quick-expand is Alt+1..9.
+    dispatch(&mut app, KeyEvent::new(KeyCode::Char('1'), KeyModifiers::ALT));
+    let out = draw(&app, 80, 24);
+    assert!(out.contains('▾'), "expansion glyph missing:\n{out}");
+    assert!(out.contains("args"), "args row missing:\n{out}");
+    assert!(out.contains("path"), "args content missing:\n{out}");
 }
