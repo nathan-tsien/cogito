@@ -40,13 +40,13 @@ struct Builder<'s> {
     styles: &'s MdStyles,
     lines: Vec<Line<'static>>,
     /// Spans for the line currently under construction.
-    cur: Vec<Span<'static>>,
+    pending_spans: Vec<Span<'static>>,
     /// Nesting depth of `**bold**` we are inside.
     bold: u32,
     /// Nesting depth of `*italic*` we are inside.
     italic: u32,
-    /// `true` once any block has been emitted (drives paragraph spacing).
-    emitted_block: bool,
+    /// Whether a previous block has been fully emitted (drives inter-block spacing).
+    prev_block_emitted: bool,
 }
 
 impl<'s> Builder<'s> {
@@ -54,10 +54,10 @@ impl<'s> Builder<'s> {
         Self {
             styles,
             lines: Vec::new(),
-            cur: Vec::new(),
+            pending_spans: Vec::new(),
             bold: 0,
             italic: 0,
-            emitted_block: false,
+            prev_block_emitted: false,
         }
     }
 
@@ -75,34 +75,42 @@ impl<'s> Builder<'s> {
 
     /// Append text to the current line in the active inline style.
     fn push_text(&mut self, text: &str) {
-        self.cur
+        self.pending_spans
             .push(Span::styled(text.to_string(), self.inline_style()));
     }
 
     /// Flush the current spans as a finished line (even if empty).
     fn flush_line(&mut self) {
-        let spans = std::mem::take(&mut self.cur);
+        let spans = std::mem::take(&mut self.pending_spans);
         self.lines.push(Line::from(spans));
     }
 
+    /// Emit a blank separator line before a block when a previous block
+    /// has already been emitted. Block-start arms call this so paragraphs,
+    /// code blocks, and lists are spaced apart consistently.
+    fn emit_block_separator(&mut self) {
+        if self.prev_block_emitted {
+            self.lines.push(Line::from(Vec::new()));
+        }
+    }
+
+    /// Dispatch one pulldown-cmark event: update inline/block state or
+    /// accumulate spans onto the current line.
     fn handle(&mut self, event: Event<'_>) {
         match event {
-            Event::Start(Tag::Paragraph) => {
-                // Blank separator between consecutive blocks.
-                if self.emitted_block {
-                    self.lines.push(Line::from(Vec::new()));
-                }
-            }
+            Event::Start(Tag::Paragraph) => self.emit_block_separator(),
             Event::End(TagEnd::Paragraph) => {
                 self.flush_line();
-                self.emitted_block = true;
+                self.prev_block_emitted = true;
             }
             Event::Start(Tag::Strong) => self.bold += 1,
             Event::End(TagEnd::Strong) => self.bold = self.bold.saturating_sub(1),
             Event::Start(Tag::Emphasis) => self.italic += 1,
             Event::End(TagEnd::Emphasis) => self.italic = self.italic.saturating_sub(1),
             Event::Code(text) => {
-                self.cur
+                // Inline code uses its own style standalone; surrounding
+                // bold/italic does not compose onto it (code color wins).
+                self.pending_spans
                     .push(Span::styled(text.to_string(), self.styles.code_inline));
             }
             Event::Text(text) => self.push_text(&text),
@@ -112,7 +120,7 @@ impl<'s> Builder<'s> {
 
     /// Flush any trailing partial line and return all lines.
     fn finish(mut self) -> Vec<Line<'static>> {
-        if !self.cur.is_empty() {
+        if !self.pending_spans.is_empty() {
             self.flush_line();
         }
         self.lines
@@ -201,5 +209,28 @@ mod tests {
         assert_eq!(text_of(&out[0]), "one");
         assert_eq!(text_of(&out[1]), "");
         assert_eq!(text_of(&out[2]), "two");
+    }
+
+    #[test]
+    fn text_around_bold_run_is_not_bold() {
+        let out = render("a **b** c", &styles());
+        let pairs = spans(&out[0]);
+        for (t, st) in &pairs {
+            if t != "b" {
+                assert!(
+                    !st.add_modifier.contains(Modifier::BOLD),
+                    "span {t:?} should not be bold"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inline_code_inside_bold_keeps_only_code_style() {
+        let out = render("**a `c` b**", &styles());
+        let pairs = spans(&out[0]);
+        let code = pairs.iter().find(|(t, _)| t == "c").unwrap();
+        assert_eq!(code.1.fg, Some(Color::Yellow));
+        assert!(!code.1.add_modifier.contains(Modifier::BOLD));
     }
 }
