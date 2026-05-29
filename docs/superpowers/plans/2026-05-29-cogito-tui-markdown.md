@@ -434,12 +434,14 @@ And change the `Event::Text` arm to special-case code blocks:
 ```rust
 Event::Text(text) => {
     if self.in_code_block {
-        // pulldown emits code-block text with trailing newlines;
-        // render each source line as its own indented, styled line.
-        for raw in text.lines() {
-            let indent = " ".repeat(NEST_INDENT);
+        // pulldown emits code-block content as one Text with a trailing
+        // newline. Strip only the trailing newline(s) and split on '\n'
+        // so blank lines in the MIDDLE of the block are preserved
+        // (`str::lines()` would drop them).
+        let indent = " ".repeat(NEST_INDENT);
+        for raw in text.trim_end_matches('\n').split('\n') {
             self.lines.push(Line::from(vec![
-                Span::raw(indent),
+                Span::raw(indent.clone()),
                 Span::styled(raw.to_string(), self.styles.code_block),
             ]));
         }
