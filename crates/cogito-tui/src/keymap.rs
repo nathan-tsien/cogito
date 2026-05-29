@@ -6,9 +6,9 @@
 //! - PgUp/PgDn -> chat scrollback (no focus required)
 //! - Ctrl-Up/Down -> tool-tree selection cursor
 //! - Ctrl-Enter -> toggle expansion of selected node
-//! - 1-9 -> quick-expand N-th most recent tool block
-//! - e -> expand all in latest message
-//! - c -> collapse all in latest message
+//! - Alt-1..9 -> quick-expand N-th most recent tool block
+//! - Ctrl-E -> expand all in latest message
+//! - Ctrl-L -> collapse all in latest message
 //! - Ctrl-C -> cancel turn (with double-tap exit)
 //! - Ctrl-D on empty input -> exit
 //! - Esc -> dismiss popup (if shown); otherwise no-op
@@ -44,13 +44,6 @@ pub enum Action {
         /// `true` if this transitions to expanded; `false` if
         /// transitioning back to collapsed.
         now_expanded: bool,
-    },
-    /// Quick-expand the N-th most recent tool block in the entire
-    /// session (N = 1..=9). Pushes the `(path, true)` analogue of
-    /// `ExpandNode` but separate to make it explicit at the action layer.
-    ExpandRecent {
-        /// 1-based recency index (1 = most recent).
-        n: u8,
     },
     /// Expand all tool blocks in the most recent cogito message.
     ExpandAllInLatestMessage,
@@ -106,19 +99,21 @@ pub fn dispatch(app: &mut App, key: KeyEvent) -> Action {
         return expand_selected(app);
     }
 
-    // 1-9: quick-expand N-th most recent tool block (session-wide).
+    // Alt-1..9: quick-expand N-th most recent tool block (session-wide).
+    // Exact-modifier match (==, not .contains) so Ctrl+Alt etc. don't fire.
     if let KeyCode::Char(ch) = key.code
-        && key.modifiers.is_empty()
+        && key.modifiers == KeyModifiers::ALT
         && let Some(n) = digit_index(ch)
     {
         return quick_expand(app, n);
     }
 
-    // 'e' / 'c': expand-all / collapse-all in latest cogito message.
-    if key.modifiers.is_empty() {
+    // Ctrl-E / Ctrl-L: expand-all / collapse-all in latest cogito message.
+    // Ctrl-C is taken by cancel/exit, so collapse uses Ctrl-L.
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
             KeyCode::Char('e') => return expand_all_latest(app),
-            KeyCode::Char('c') => return collapse_all_latest(app),
+            KeyCode::Char('l') => return collapse_all_latest(app),
             _ => {}
         }
     }
@@ -437,7 +432,7 @@ mod tests {
             ok: true,
             error_message: None,
         });
-        let a = dispatch(&mut app, k(KeyCode::Char('1'), KeyModifiers::NONE));
+        let a = dispatch(&mut app, k(KeyCode::Char('1'), KeyModifiers::ALT));
         assert!(matches!(
             a,
             Action::ExpandNode {
@@ -452,7 +447,7 @@ mod tests {
     #[test]
     fn digit_for_n_greater_than_available_is_noop() {
         let (mut app, _td) = fresh_app();
-        let a = dispatch(&mut app, k(KeyCode::Char('5'), KeyModifiers::NONE));
+        let a = dispatch(&mut app, k(KeyCode::Char('5'), KeyModifiers::ALT));
         assert_eq!(a, Action::None);
     }
 
@@ -465,7 +460,7 @@ mod tests {
             tool_name: "t".into(),
             args: json!({}),
         });
-        let a = dispatch(&mut app, k(KeyCode::Char('1'), KeyModifiers::NONE));
+        let a = dispatch(&mut app, k(KeyCode::Char('1'), KeyModifiers::ALT));
         assert_eq!(a, Action::None);
         assert!(app.expanded.is_empty());
     }
@@ -486,14 +481,14 @@ mod tests {
                 error_message: None,
             });
         }
-        let a = dispatch(&mut app, k(KeyCode::Char('e'), KeyModifiers::NONE));
+        let a = dispatch(&mut app, k(KeyCode::Char('e'), KeyModifiers::CONTROL));
         assert_eq!(a, Action::ExpandAllInLatestMessage);
         assert!(app.expanded.contains(&(0, 0)));
         assert!(app.expanded.contains(&(0, 1)));
     }
 
     #[test]
-    fn c_collapses_all_in_latest_message() {
+    fn ctrl_l_collapses_all_in_latest_message() {
         let (mut app, _td) = fresh_app();
         app.tools.on_event(&StreamEvent::TurnStarted);
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
@@ -507,8 +502,28 @@ mod tests {
             error_message: None,
         });
         app.expanded.insert((0, 0));
-        let a = dispatch(&mut app, k(KeyCode::Char('c'), KeyModifiers::NONE));
+        let a = dispatch(&mut app, k(KeyCode::Char('l'), KeyModifiers::CONTROL));
         assert_eq!(a, Action::CollapseAllInLatestMessage);
         assert!(!app.expanded.contains(&(0, 0)));
+    }
+
+    #[test]
+    fn bare_letter_keys_route_to_input_not_commands() {
+        // Bare e / c / digit must reach the input widget as typed text,
+        // not be intercepted as expand/collapse/quick-expand commands.
+        let (mut app, _td) = fresh_app();
+        let a = dispatch(&mut app, k(KeyCode::Char('e'), KeyModifiers::NONE));
+        assert_eq!(a, Action::None);
+        assert_eq!(app.input.first_char(), Some('e'));
+
+        let (mut app, _td) = fresh_app();
+        let a = dispatch(&mut app, k(KeyCode::Char('c'), KeyModifiers::NONE));
+        assert_eq!(a, Action::None);
+        assert_eq!(app.input.first_char(), Some('c'));
+
+        let (mut app, _td) = fresh_app();
+        let a = dispatch(&mut app, k(KeyCode::Char('1'), KeyModifiers::NONE));
+        assert_eq!(a, Action::None);
+        assert_eq!(app.input.first_char(), Some('1'));
     }
 }

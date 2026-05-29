@@ -138,11 +138,11 @@ fn notice_line(text: &str, p: &Palette) -> Line<'static> {
 }
 
 /// Resolve `call_id` to a `(TreePath, &ToolNode)` if present.
-fn lookup(tools: &ToolTreeModel, call_id: &str) -> Option<(TreePath, ToolNode)> {
+fn lookup<'a>(tools: &'a ToolTreeModel, call_id: &str) -> Option<(TreePath, &'a ToolNode)> {
     for (t_idx, group) in tools.turns.iter().enumerate() {
         for (n_idx, node) in group.nodes.iter().enumerate() {
             if node.call_id == call_id {
-                return Some(((t_idx, n_idx), node.clone()));
+                return Some(((t_idx, n_idx), node));
             }
         }
     }
@@ -166,7 +166,7 @@ fn render_tool_block(
     };
     let is_selected = inputs.selected == Some(path);
     let is_expanded = inputs.expanded.contains(&path);
-    out.push(tool_header_line(&node, is_selected, is_expanded, inputs, p));
+    out.push(tool_header_line(node, is_selected, is_expanded, inputs, p));
     if matches!(node.status, ToolStatus::Err { .. }) {
         // Error message always shown inline under failed tools.
         if let ToolStatus::Err { message, .. } = &node.status {
@@ -419,7 +419,16 @@ mod tests {
     #[test]
     fn selected_tool_renders_cyan_arrow_marker_overriding_state() {
         let (chat, tools) = build_tools_with_one("c1", "read_file");
-        let out = draw(&chat, &tools, Some((0, 0)), &HashSet::new(), false, 0, 60, 8);
+        let out = draw(
+            &chat,
+            &tools,
+            Some((0, 0)),
+            &HashSet::new(),
+            false,
+            0,
+            60,
+            8,
+        );
         assert!(out.contains("▸ read_file"), "got:\n{out}");
     }
 

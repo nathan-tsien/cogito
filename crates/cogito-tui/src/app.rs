@@ -277,6 +277,59 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn turn_started_sets_thinking_and_content_clears_it() {
+        let (mut app, _td) = app_for_pure_test();
+        app.apply_stream_event(&StreamEvent::TurnStarted);
+        assert!(app.current_turn_thinking);
+        app.apply_stream_event(&StreamEvent::TextDelta { chunk: "hi".into() });
+        assert!(!app.current_turn_thinking);
+    }
+
+    #[test]
+    fn tool_dispatch_ended_rearms_thinking_until_next_content() {
+        let (mut app, _td) = app_for_pure_test();
+        app.apply_stream_event(&StreamEvent::TurnStarted);
+        // First content clears the spinner.
+        app.apply_stream_event(&StreamEvent::TextDelta {
+            chunk: "calling a tool".into(),
+        });
+        assert!(!app.current_turn_thinking);
+        app.apply_stream_event(&StreamEvent::ToolDispatchStarted {
+            call_id: "c1".into(),
+            tool_name: "t".into(),
+            args: serde_json::json!({}),
+        });
+        assert!(!app.current_turn_thinking);
+        // Tool end while the turn is still running re-arms the spinner.
+        app.apply_stream_event(&StreamEvent::ToolDispatchEnded {
+            call_id: "c1".into(),
+            ok: true,
+            error_message: None,
+        });
+        assert!(app.current_turn_thinking);
+        // Next content event clears it again.
+        app.apply_stream_event(&StreamEvent::TextDelta {
+            chunk: "done".into(),
+        });
+        assert!(!app.current_turn_thinking);
+    }
+
+    #[test]
+    fn turn_terminal_events_clear_thinking() {
+        let (mut app, _td) = app_for_pure_test();
+        app.apply_stream_event(&StreamEvent::TurnStarted);
+        assert!(app.current_turn_thinking);
+        app.apply_stream_event(&StreamEvent::TurnCompleted);
+        assert!(!app.current_turn_thinking);
+
+        // TurnCancelled also clears it.
+        app.apply_stream_event(&StreamEvent::TurnStarted);
+        assert!(app.current_turn_thinking);
+        app.apply_stream_event(&StreamEvent::TurnCancelled);
+        assert!(!app.current_turn_thinking);
+    }
+
+    #[test]
     fn refresh_popup_shows_slash_menu_when_slash_typed() {
         let (mut app, _td) = app_for_pure_test();
         app.input

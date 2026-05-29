@@ -123,7 +123,6 @@ async fn handle_action(app: &mut App, action: Action) -> Result<()> {
             now_expanded: false,
             ..
         }
-        | Action::ExpandRecent { .. }
         | Action::ExpandAllInLatestMessage
         | Action::CollapseAllInLatestMessage => Ok(()),
         Action::Quit => {
