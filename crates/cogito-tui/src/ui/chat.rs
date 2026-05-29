@@ -91,6 +91,7 @@ pub fn render(f: &mut Frame, area: Rect, inputs: &ChatRenderInputs<'_>) {
             ChatLine::AssistantText(text) => out.extend(assistant_lines(text, &p)),
             ChatLine::AssistantThinking(text) => out.push(thinking_line(text, &p)),
             ChatLine::SystemNotice(text) => out.push(notice_line(text, &p)),
+            ChatLine::Banner(text) => out.push(banner_line(text, &p)),
             ChatLine::ToolBlock { call_id } => {
                 render_tool_block(&mut out, call_id, inputs, &p);
             }
@@ -150,6 +151,14 @@ fn thinking_line(text: &str, p: &Palette) -> Line<'static> {
         Span::styled("∴  ", p.thinking),
         Span::styled(text.to_string(), p.thinking),
     ])
+}
+
+/// Startup banner accent line: the cogito accent color, bold.
+fn banner_line(text: &str, p: &Palette) -> Line<'static> {
+    Line::from(Span::styled(
+        text.to_string(),
+        p.cogito.add_modifier(Modifier::BOLD),
+    ))
 }
 
 fn notice_line(text: &str, p: &Palette) -> Line<'static> {
@@ -291,6 +300,15 @@ fn format_ms(ms: u128) -> String {
 mod tests {
     use super::*;
     use cogito_protocol::stream::StreamEvent;
+
+    #[test]
+    fn banner_line_is_bold_and_green() {
+        let p = Palette::default_dark();
+        let line = banner_line("   \u{2234}\u{2234}\u{2234}  cogito", &p);
+        let span = &line.spans[0];
+        assert!(span.style.add_modifier.contains(Modifier::BOLD), "not bold");
+        assert_eq!(span.style.fg, Some(Color::Green), "not green");
+    }
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use serde_json::json;

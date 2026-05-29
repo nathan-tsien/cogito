@@ -34,6 +34,10 @@ pub enum ChatLine {
     /// System-emitted notice line — `[paused]`, `[cancelled]`,
     /// `[error] ...`, MCP banner, slash command echoes.
     SystemNotice(String),
+    /// Startup banner accent line (sigil / wordmark / tagline). Painted
+    /// in the cogito accent color, bold, by the chat widget. Produced
+    /// only via `push_banner`, never from a `StreamEvent`.
+    Banner(String),
 }
 
 /// Maximum chars to preview from a tool's error message.
@@ -86,6 +90,13 @@ impl ChatModel {
     /// `[hint]` lines.
     pub fn push_notice(&mut self, msg: impl Into<String>) {
         self.lines.push(ChatLine::SystemNotice(msg.into()));
+        self.in_text = false;
+        self.in_thinking = false;
+    }
+
+    /// Push a `Banner` accent line (startup sigil / wordmark / tagline).
+    pub fn push_banner(&mut self, text: impl Into<String>) {
+        self.lines.push(ChatLine::Banner(text.into()));
         self.in_text = false;
         self.in_thinking = false;
     }
@@ -406,6 +417,18 @@ mod tests {
                 ChatLine::SystemNotice("[cancelled]".into()),
                 ChatLine::SystemNotice("[error] boom".into()),
             ]
+        );
+    }
+
+    #[test]
+    fn push_banner_appends_banner_line() {
+        let mut m = ChatModel::new();
+        m.push_banner("   \u{2234}\u{2234}\u{2234}  cogito");
+        assert_eq!(
+            m.lines,
+            vec![ChatLine::Banner(
+                "   \u{2234}\u{2234}\u{2234}  cogito".into()
+            )]
         );
     }
 
