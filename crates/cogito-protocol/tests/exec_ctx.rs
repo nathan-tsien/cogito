@@ -17,3 +17,14 @@ fn clone_shares_cancel_token() {
     ctx.cancel.cancel();
     assert!(ctx2.cancel.is_cancelled());
 }
+
+#[test]
+fn open_ended_defaults_new_fields() {
+    let ctx = ExecCtx::open_ended(SessionId::new(), TurnId::new());
+    assert_eq!(ctx.subagent_depth, 0);
+    assert!(ctx.call_id.is_none());
+    assert!(ctx.brain_spawner.is_none());
+    // Debug must not panic and must not try to print the spawner internals.
+    let s = format!("{ctx:?}");
+    assert!(s.contains("ExecCtx"));
+}
