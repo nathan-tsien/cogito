@@ -30,6 +30,7 @@ use crate::app::App;
 use crate::cli::{TuiArgs, TuiMode};
 use crate::render_model::{ChatModel, ToolTreeModel};
 use crate::resume::{InitialState, load_initial_state};
+use crate::ui::banner::BannerLine;
 use crate::ui::input::InputWidget;
 
 /// Output of the build: an App ready to enter the event loop and
@@ -175,13 +176,16 @@ pub async fn build(args: &TuiArgs) -> Result<Built> {
 /// session log. Returns the populated models plus the lifecycle
 /// counters derived from the replayed turns.
 fn replay_into_models(
-    startup_lines: &[String],
+    startup_lines: &[BannerLine],
     banner_lines: &[String],
     initial: InitialState,
 ) -> (ChatModel, ToolTreeModel, u32, bool) {
     let mut chat = ChatModel::new();
     for line in startup_lines {
-        chat.push_notice(line.clone());
+        match line {
+            BannerLine::Art(s) => chat.push_banner(s.clone()),
+            BannerLine::Meta(s) => chat.push_notice(s.clone()),
+        }
     }
     for line in banner_lines {
         chat.push_notice(line.clone());

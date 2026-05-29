@@ -332,7 +332,9 @@ redesign:
 
 1. **Markdown rendering in chat.** Code blocks, bold/italic, inline
    code, lists. Needs `tui-markdown` or a custom span builder. Own
-   sprint.
+   sprint. *(Shipped — see
+   `docs/superpowers/specs/2026-05-29-cogito-tui-markdown-design.md`
+   and `docs/superpowers/plans/2026-05-29-cogito-tui-markdown.md`.)*
 2. **Incremental ChatModel projection.** Current `Vec<ChatLine>` is
    reprojected from the event log every frame; long sessions cause
    frame drops. Cursor-based incremental projection. Needs a
@@ -344,7 +346,8 @@ redesign:
 5. **Mouse support.** `hover` + click-to-expand on tool blocks.
    Future polish.
 6. **Markdown for tool args / results inside expansion blocks.**
-   Covered by item 1.
+   Covered by item 1. *(Still pending — item 1 shipped markdown for
+   assistant text only; tool args / results remain raw text.)*
 
 ---
 

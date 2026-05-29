@@ -151,12 +151,18 @@ fn mcp_banner_lines_render_at_top_of_chat() {
 #[test]
 fn startup_banner_renders_three_lines_with_sigil_and_identity() {
     let (mut app, _td) = app();
-    // Mimic what runtime_build does at build time.
+    // Mimic what runtime_build does at build time: Art -> push_banner, Meta -> push_notice.
     for line in cogito_tui::ui::banner::startup_lines("opus-4.7", "coder", "01abcdefghij") {
-        app.chat.push_notice(line);
+        match line {
+            cogito_tui::ui::banner::BannerLine::Art(s) => app.chat.push_banner(s),
+            cogito_tui::ui::banner::BannerLine::Meta(s) => app.chat.push_notice(s),
+        }
     }
     let out = draw(&app, None);
-    assert!(out.contains("∴∴∴"), "sigil missing:\n{out}");
+    assert!(
+        out.contains("\u{2234}\u{2234}\u{2234}"),
+        "sigil missing:\n{out}"
+    );
     assert!(out.contains("cogito"));
     assert!(out.contains("opus-4.7"));
     assert!(out.contains("coder"));

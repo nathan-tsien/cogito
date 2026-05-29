@@ -36,7 +36,10 @@ divider). `▸` marks user prompts, `∴` marks cogito replies. Tool calls
 render inline as `⠋` (running) / `✓` (ok) / `✗` (error); `▸` when
 selected, `▾` when expanded. A `∴ ⠋` spinner shows between turn
 dispatch and the first content. The startup banner and any MCP banner
-scroll away with history.
+scroll away with history. Assistant replies are rendered as markdown:
+bold, italic, inline code (yellow), code blocks (dim), and bullet /
+numbered lists (markers in green) are all styled; headings, block
+quotes, and links degrade gracefully to plain text.
 
 ## Keymap
 

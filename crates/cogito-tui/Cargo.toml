@@ -31,6 +31,7 @@ cogito-sandbox.workspace = true
 cogito-cli = { path = "../cogito-cli" }
 
 # UI
+pulldown-cmark.workspace = true
 ratatui.workspace = true
 crossterm = { workspace = true, features = ["event-stream"] }
 tui-textarea.workspace = true

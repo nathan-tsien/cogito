@@ -38,6 +38,46 @@ required to add cogito-tui.
 - `terminal.rs` — `TerminalGuard` (RAII + panic hook + signals)
 - `logs.rs` — gated `RUST_LOG`-driven file logger
 
+## Markdown rendering
+
+Assistant replies (`ChatLine::AssistantText`) are parsed with
+`pulldown-cmark` at draw time and rendered into styled ratatui `Line`
+spans by the `ui::markdown` module.
+
+Supported inline and block elements:
+
+- Bold and italic via ratatui `Modifier::BOLD` / `Modifier::ITALIC`.
+- Inline code in yellow.
+- Fenced and indented code blocks rendered dim.
+- Bullet and numbered lists, including one level of nesting. List
+  markers (`-` / `N.`) are rendered in the cogito green.
+
+Elements that degrade to plain text:
+
+- Headings — rendered as unstyled text (no `#` prefix).
+- Block quotes — content kept, `>` marker dropped.
+- Links — label kept, URL dropped.
+
+Module responsibilities:
+
+- `ui::markdown` is pure: it knows nothing about role markers or
+  gutter indentation.
+- `ui::chat` prepends the `∴` marker on the first rendered line and a
+  3-space gutter on all continuation lines, exactly as it does for
+  plain text.
+
+Per-frame re-parse is intentional. `ChatModel` is reprojected from the
+event log on every frame; adding an incremental projection layer is a
+separate deferred sprint. Parsing overhead is negligible for typical
+reply lengths.
+
+Only assistant text is markdown-rendered. Thinking output, user
+prompts, system notices, and tool args / result previews remain raw
+text (markdown rendering for those is deferred).
+
+Spec: `docs/superpowers/specs/2026-05-29-cogito-tui-markdown-design.md`
+Plan: `docs/superpowers/plans/2026-05-29-cogito-tui-markdown.md`
+
 ## Key contracts
 
 - **Lazy palette**: `ChatLine` stores raw text + structural variant;
