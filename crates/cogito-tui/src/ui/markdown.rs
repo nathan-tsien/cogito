@@ -192,7 +192,14 @@ impl<'s> Builder<'s> {
                     .push(Span::styled(marker, self.styles.list_marker));
             }
             Event::End(TagEnd::Item) => {
-                self.flush_line();
+                // Flush the completed item line. End(Paragraph) is suppressed
+                // inside lists, so this is the authoritative flush point. Guard
+                // against an empty flush: when an item wraps only a nested list,
+                // its line was already flushed at the nested List start, leaving
+                // pending_spans empty.
+                if !self.pending_spans.is_empty() {
+                    self.flush_line();
+                }
             }
             _ => {}
         }
@@ -404,5 +411,15 @@ mod tests {
         // nested item starts with more leading whitespace than the top item
         let lead = |l: &Line<'static>| text_of(l).len() - text_of(l).trim_start().len();
         assert!(lead(nested) > lead(top));
+    }
+
+    #[test]
+    fn nested_list_has_no_stray_blank_between_siblings() {
+        let out = render("- a\n  - b\n- c", &styles());
+        let texts: Vec<String> = out.iter().map(text_of).collect();
+        let pos_b = texts.iter().position(|t| t.contains("- b")).unwrap();
+        let pos_c = texts.iter().position(|t| t.contains("- c")).unwrap();
+        // sibling "- c" immediately follows nested "- b": no blank between them.
+        assert_eq!(pos_c, pos_b + 1, "stray blank line in: {texts:?}");
     }
 }
