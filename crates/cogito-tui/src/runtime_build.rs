@@ -17,14 +17,14 @@ use cogito_cli::chat_config::{
     ChatConfigInputs, build_runtime_config_and_registry, build_skill_provider, patch_base_url,
 };
 use cogito_core::runtime::{OpenMode, Runtime, SessionHandle};
-use cogito_jobs::{LocalJobManager, RunTestsTool};
+use cogito_jobs::{BashTool, LocalJobManager, RunTestsTool};
 use cogito_protocol::ConversationStore;
 use cogito_protocol::ids::SessionId;
-use cogito_protocol::job::JobManager;
+use cogito_protocol::job::{JobManager, LocalJobSubmitter};
 use cogito_protocol::strategy_registry::StrategyRegistry;
 use cogito_protocol::tool::ToolProvider;
 use cogito_store_jsonl::JsonlStore;
-use cogito_tools::{BuiltinToolProvider, CompositeToolProvider, NamingPolicy, ReadFile};
+use cogito_tools::{BuiltinToolProvider, CompositeToolProvider, NamingPolicy, ReadFile, WebFetch};
 
 use crate::app::App;
 use crate::cli::{TuiArgs, TuiMode};
@@ -274,15 +274,26 @@ async fn build_tools_with_banner(
     cfg: &cogito_config::RuntimeConfig,
     job_mgr: Arc<LocalJobManager>,
 ) -> Result<(Arc<dyn ToolProvider>, Vec<String>)> {
+    let executor = cogito_sandbox::build_executor(&cfg.tools.sandbox)
+        .map_err(|e| anyhow!("build command executor: {e}"))?;
+
     let builtin: Arc<dyn ToolProvider> = Arc::new(
         BuiltinToolProvider::builder()
             .with_tool(Arc::new(ReadFile))
+            .with_tool(Arc::new(WebFetch::new(cfg.tools.web_fetch.clone())))
             .build(),
     );
-    let run_tests: Arc<dyn ToolProvider> = Arc::new(RunTestsTool::new(job_mgr));
+    let run_tests: Arc<dyn ToolProvider> = Arc::new(RunTestsTool::new(
+        Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>
+    ));
+    let bash: Arc<dyn ToolProvider> = Arc::new(BashTool::new(
+        executor,
+        Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>,
+        cfg.tools.bash.clone(),
+    ));
     let local: Arc<dyn ToolProvider> = Arc::new(
-        CompositeToolProvider::new(vec![builtin, run_tests], NamingPolicy::Strict)
-            .map_err(|e| anyhow!("compose builtin + run_tests: {e}"))?,
+        CompositeToolProvider::new(vec![builtin, run_tests, bash], NamingPolicy::Strict)
+            .map_err(|e| anyhow!("compose builtin + run_tests + bash: {e}"))?,
     );
 
     let mcp_build = cogito_mcp::build_mcp_provider(&cfg.mcp_servers).await;
