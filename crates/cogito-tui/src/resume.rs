@@ -93,11 +93,10 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
             }
             EventPayload::ToolResultRecorded { call_id, result } => {
                 // Re-emit a corrective end event whose ok bit reflects whether
-                // the result is an error. Since the prior synthetic end was
-                // ok=true, when the tool returned an error we push another end
-                // to flip the status in the ToolTreeModel. ChatModel's
-                // ToolEndLine is append-only — the cosmetic effect is one extra
-                // line, which is acceptable for replay parity.
+                // the result is an error. The first synthetic end was ok=true;
+                // for an errored result we push a second end to flip the status
+                // in ToolTreeModel. ChatModel ignores ToolDispatchEnded
+                // entirely, so this adds no chat line.
                 if matches!(result, cogito_protocol::ToolResult::Error { .. }) {
                     out.push(StreamEvent::ToolDispatchEnded {
                         call_id: call_id.clone(),

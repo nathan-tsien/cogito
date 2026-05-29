@@ -227,9 +227,9 @@ navigation is keyboard-only via `Ctrl`-modified keys.
 | `Enter` | Submit non-empty input OR expand/collapse selected tool block | Selection takes precedence when active |
 | `Shift+Enter` | Newline in input buffer | |
 | `Ctrl-↑` / `Ctrl-↓` | Move tool-block selection across ALL tool blocks (including running) | Wraps within current visible chat, or across the full session — see "Open questions" |
-| `1` … `9` | Quick-expand the N-th most recent tool block in the entire session | `1` = most recent globally, `9` = 9th most recent. If fewer than N tool blocks exist, no-op. |
-| `e` | Expand all tool blocks within the most recent cogito message | |
-| `c` | Collapse all tool blocks within the most recent cogito message | |
+| `Alt-1` … `Alt-9` | Quick-expand the N-th most recent tool block in the entire session | `Alt-1` = most recent globally, `Alt-9` = 9th most recent. If fewer than N tool blocks exist, no-op. (`Ctrl`+digit is not reliably reported by terminals, hence `Alt`.) |
+| `Ctrl-E` | Expand all tool blocks within the most recent cogito message | |
+| `Ctrl-L` | Collapse all tool blocks within the most recent cogito message | `Ctrl-C` is taken by cancel/exit, so collapse uses `Ctrl-L`. |
 | `PgUp` / `PgDn` | Scroll chat by 5 rows | Selection survives scroll |
 | `Esc` | Clear tool selection (return focus to input) OR dismiss slash popup | |
 | `/` | Open slash command popup when typed at start of empty input | Behavior unchanged from v0.1 |
@@ -241,7 +241,7 @@ navigation is keyboard-only via `Ctrl`-modified keys.
 ### Selection rules
 
 - Default state at startup: no selection; focus is the input.
-- Selection set by: `Ctrl-↑/↓` (creates if none, moves if some) or `1-9` (creates pointing at the N-th most recent).
+- Selection set by: `Ctrl-↑/↓` (creates if none, moves if some) or `Alt-1`-`Alt-9` (creates pointing at the N-th most recent).
 - Selection cleared by: explicit `Esc`, any printable key typed
   into the input, or quit.
 - Selection survives chat scrolling (`PgUp` / `PgDn`). If the selected
