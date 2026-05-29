@@ -15,7 +15,9 @@
 
 pub mod types;
 
-pub use types::{RuntimeConfig, RuntimeConfigPartial, RuntimeSection, RuntimeSectionPartial};
+pub use types::{
+    RuntimeConfig, RuntimeConfigPartial, RuntimeSection, RuntimeSectionPartial, SkillsConfig,
+};
 
 pub mod loader;
 

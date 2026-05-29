@@ -39,6 +39,7 @@ pub fn all() -> Vec<ChaosScenario> {
         tool_returns_error(),
         paused_async_job(),
         thinking_then_text_then_tool(),
+        text_then_skill_then_tool(),
     ]
 }
 
@@ -285,6 +286,81 @@ pub fn thinking_then_text_then_tool() -> ChaosScenario {
                 ModelEvent::TextBlockCompleted {
                     block_index: 0,
                     text: "The hostname is foo.".into(),
+                },
+                ModelEvent::MessageCompleted {
+                    stop_reason: StopReason::EndTurn,
+                    usage: Usage {
+                        input_tokens: 75,
+                        output_tokens: 10,
+                    },
+                },
+            ],
+        ],
+        uses_async_job: false,
+    }
+}
+
+/// Scenario 6: assistant turn 1 emits text containing a model-channel sigil
+/// `$foo`, then a tool call; the tool returns; the assistant emits a final
+/// reply. A separate turn 2 (driven by the chaos runner) then re-derives
+/// activation of `foo` from turn 1's text. Added for ADR-0020 / Sprint 7.
+///
+/// The chaos runner that drives this scenario lives inline in
+/// `cogito-core/tests/resume_chaos.rs` (it needs a `SkillProvider` and the
+/// `SystemPromptInjectorConfig::Skill` strategy, which `cogito-test-fixtures`
+/// cannot wire without crossing the `cogito-protocol`-only dep boundary).
+///
+/// The runner uses this scenario's `model_scripts[0]` for turn 1 call 1
+/// (text-then-tool) and `model_scripts[1]` for turn 1 call 2 (after the
+/// tool result). Turn 2's single model call is scripted inline in the test.
+#[must_use]
+pub fn text_then_skill_then_tool() -> ChaosScenario {
+    ChaosScenario {
+        name: "text_then_skill_then_tool",
+        user_input: vec![ContentBlock::Text {
+            text: "please use $foo".into(),
+        }],
+        model_scripts: vec![
+            // Call 1: assistant emits a sigil-containing text block, then a
+            // tool_use, stop_reason=tool_use.
+            vec![
+                ModelEvent::TextDelta {
+                    block_index: 0,
+                    chunk: "Sure, $foo please. ".into(),
+                },
+                ModelEvent::TextBlockCompleted {
+                    block_index: 0,
+                    text: "Sure, $foo please. ".into(),
+                },
+                ModelEvent::ToolUseStarted {
+                    block_index: 1,
+                    call_id: "c1".into(),
+                    tool_name: "read_file".into(),
+                },
+                ModelEvent::ToolUseCompleted {
+                    block_index: 1,
+                    call_id: "c1".into(),
+                    tool_name: "read_file".into(),
+                    args: serde_json::json!({"path": "/etc/hostname"}),
+                },
+                ModelEvent::MessageCompleted {
+                    stop_reason: StopReason::ToolUse,
+                    usage: Usage {
+                        input_tokens: 50,
+                        output_tokens: 20,
+                    },
+                },
+            ],
+            // Call 2 (post-tool): assistant emits the final turn 1 reply,
+            // EndTurn.
+            vec![
+                ModelEvent::TextDelta {
+                    block_index: 0,
+                    chunk: "Done reading.".into(),
+                },
+                ModelEvent::TextBlockCompleted {
+                    block_index: 0,
+                    text: "Done reading.".into(),
                 },
                 ModelEvent::MessageCompleted {
                     stop_reason: StopReason::EndTurn,

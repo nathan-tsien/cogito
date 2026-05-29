@@ -3,6 +3,7 @@
 //! the boundary without going through the full Runtime.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use cogito_config::{
@@ -10,6 +11,8 @@ use cogito_config::{
     RuntimeSectionPartial, merge_layers,
 };
 use cogito_model::ProviderConfig;
+use cogito_protocol::skill::SkillProvider;
+use cogito_strategy::FsStrategyRegistry;
 
 /// Subset of `ChatArgs` needed by the config helpers. The CLI build
 /// passes a real `ChatArgs`; tests pass a `ChatConfigInputs` directly.
@@ -48,6 +51,27 @@ pub async fn load_layered_config(inputs: &ChatConfigInputs) -> Result<RuntimeCon
         .map_err(|e| anyhow!("finalizing config: {e}"))
 }
 
+/// Load + finalize the layered config and build the matching FS-backed
+/// strategy registry. Scopes are resolved with
+/// [`FsStrategyRegistry::from_conventional_scopes_with_repo_override`]
+/// so `runtime.strategies_dir` (from `cogito.toml` or CLI override)
+/// takes the Repo slot and `~/.config/cogito/strategies/` takes User.
+///
+/// Returned together because the chat command threads the registry into
+/// `resolve_strategy` immediately after constructing the config; pairing
+/// the two prevents callers from forgetting to refresh one when the
+/// other changes.
+pub async fn build_runtime_config_and_registry(
+    inputs: &ChatConfigInputs,
+) -> Result<(RuntimeConfig, Arc<FsStrategyRegistry>)> {
+    let cfg = load_layered_config(inputs).await?;
+    let registry = FsStrategyRegistry::from_conventional_scopes_with_repo_override(
+        cfg.runtime.strategies_dir.clone(),
+    )
+    .map_err(|e| anyhow!("scanning strategies dir: {e}"))?;
+    Ok((cfg, Arc::new(registry)))
+}
+
 /// Convert CLI-style inputs into a `RuntimeConfigPartial` for use as
 /// the highest-precedence merge layer. Only the inputs that
 /// correspond to `[runtime]` table fields are forwarded; `config_path`
@@ -60,10 +84,13 @@ fn cli_inputs_to_partial(inputs: &ChatConfigInputs) -> RuntimeConfigPartial {
             session_root: inputs.session_root.clone(),
             default_provider: inputs.provider.clone(),
             default_model: inputs.model.clone(),
+            default_strategy: None,
             strategies_dir: None,
         }),
         providers: None,
         mcp_servers: None,
+        skills: None,
+        tools: None,
     }
 }
 
@@ -111,6 +138,7 @@ pub fn synthesize_legacy_provider(
             auth_scheme: "Bearer".into(),
             timeout_secs: None,
             include_prior_thinking: false,
+            context_window_tokens: None,
         })
     }
 }
@@ -153,6 +181,48 @@ pub fn select_provider(cfg: &RuntimeConfig, inputs: &ChatConfigInputs) -> Result
     Ok(chosen)
 }
 
+/// Build the `Arc<dyn SkillProvider>` for this CLI run from the
+/// finalized `[skills]` section. Returns `Ok(None)` when the section
+/// exists but is `enabled = false`, or when scanning succeeded but no
+/// skills were discovered would still produce an empty registry — we
+/// inject that as well so model-sigil activation still flows through
+/// H06 (an empty registry simply matches nothing).
+///
+/// The default when the section is absent is "enabled": Sprint 7's
+/// philosophy is that skills are a passive, opt-out feature.
+///
+/// # Errors
+///
+/// Returns the `SkillRegistryError` surfaced by the registry scan,
+/// wrapped in `anyhow` for the CLI's error chain.
+pub fn build_skill_provider(cfg: &RuntimeConfig) -> Result<Option<Arc<dyn SkillProvider>>> {
+    let enabled = cfg.skills.as_ref().is_none_or(|s| s.enabled);
+    if !enabled {
+        return Ok(None);
+    }
+    let section = cfg.skills.clone().unwrap_or_default();
+    let scan = cogito_skills::discovery::ScanConfig {
+        workspace_root: Some(
+            std::env::current_dir().context("reading current dir for skill scan")?,
+        ),
+        user_dir: section
+            .user_dir
+            .map(PathBuf::from)
+            .or_else(default_user_skills_dir),
+        include_system: section.include_system,
+    };
+    let registry =
+        cogito_skills::SkillRegistry::scan(scan).map_err(|e| anyhow!("scanning skills: {e}"))?;
+    Ok(Some(Arc::new(registry) as Arc<dyn SkillProvider>))
+}
+
+/// Resolve the conventional user-scope skills directory
+/// (`~/.cogito/skills`). Returns `None` when `$HOME` is unset — that
+/// disables user-scope scanning without failing the run.
+fn default_user_skills_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cogito").join("skills"))
+}
+
 /// Replace the `base_url` field on the chosen provider, preserving
 /// every other field.
 #[must_use]
@@ -178,6 +248,7 @@ pub fn patch_base_url(cfg: ProviderConfig, new_base_url: String) -> ProviderConf
             auth_scheme,
             timeout_secs,
             include_prior_thinking,
+            context_window_tokens,
             ..
         } => ProviderConfig::OpenAiCompat {
             name,
@@ -187,6 +258,22 @@ pub fn patch_base_url(cfg: ProviderConfig, new_base_url: String) -> ProviderConf
             auth_scheme,
             timeout_secs,
             include_prior_thinking,
+            context_window_tokens,
+        },
+        ProviderConfig::OpenAiResponses {
+            name,
+            api_key,
+            timeout_secs,
+            reasoning_effort,
+            context_window_tokens,
+            ..
+        } => ProviderConfig::OpenAiResponses {
+            name,
+            api_key,
+            base_url: new_base_url,
+            timeout_secs,
+            reasoning_effort,
+            context_window_tokens,
         },
     }
 }

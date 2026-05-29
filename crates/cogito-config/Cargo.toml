@@ -18,6 +18,9 @@ file = ["dep:serde_yaml"]
 cogito-protocol = { workspace = true }
 cogito-model    = { workspace = true }
 cogito-mcp      = { workspace = true }
+cogito-sandbox  = { workspace = true }
+cogito-jobs     = { workspace = true }
+cogito-tools    = { workspace = true }
 
 serde       = { workspace = true, features = ["derive"] }
 serde_json  = { workspace = true }

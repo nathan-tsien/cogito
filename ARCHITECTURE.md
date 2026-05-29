@@ -374,6 +374,7 @@ Design notes:
 - **`Sandbox`** is Hands-internal. Brain never holds a `dyn Sandbox`. Tool implementations that need subprocess isolation inject one.
 - **`StorageSystem`** and **`BrainSpawner`** are Brain-adjacent: in `cogito-protocol`, but Brain does not call them directly. Tools receive `StorageSystem` via `ExecCtx`; `SubagentToolProvider` receives `BrainSpawner` via DI from Runtime.
 - Multiple providers are composed by `CompositeToolProvider` (utility in `cogito-tools`); the consumer constructs the composite and hands it to Runtime as a single `Arc<dyn ToolProvider>`.
+- **Hands sub-layer boundary (ADR-0025):** the internal classification (JobManager impl / ToolProvider impl / internal primitive / Surface composition) is canonical in ADR-0025. The crate inventory may shift as tools migrate; the ADR is the rule.
 
 ## Content blocks
 
@@ -656,8 +657,9 @@ for a strategy by name.
 | `cogito-storage-local` | Hands (Storage) | v0.5 | First `StorageSystem` backend: local FS + HTTP fetch with cache + `blob://` mapped to local cache dir. **Moved from v0.2 to v0.5** by 2026-05-22 rebalance. |
 | `cogito-storage-s3` | Hands (Storage) | v0.4 | S3-compatible object storage backend. |
 | `cogito-storage-http` | Hands (Storage) | v0.6 | Generic HTTP-backed storage adapter. |
+| `cogito-strategy` | Hands sub-layer | v0.1 (Sprint 9a) | FS-backed `StrategyRegistry` impl. Markdown+frontmatter strategy files under `.cogito/strategies/`. See ADR-0026. |
 | `cogito-cli` | Surface | v0.1 | CLI binary; wires runtime + store + gateway. |
-| `cogito-tui` | Surface | v0.1 (Sprint 9) | TUI. **Pulled forward from v0.2 to v0.1** (merged into Sprint 9 with multi-model strategy). |
+| `cogito-tui` | Surface | v0.1 | TUI. Multi-pane ratatui surface replicating `cogito chat`; see `docs/components/cogito-tui.md`. |
 | `cogito-observability-otel` | Surface (optional) | v0.4 | OpenTelemetry adapter that ships `MetricsRecorder` impl + trace exporter. |
 | `crates/testing/cogito-test-fixtures` | Testing | v0.1 | Shared fixtures, tmp JSONL store helper. |
 | `crates/testing/cogito-mock-model` | Testing | v0.1 | `ModelGateway` mock with scripted responses. |
@@ -748,7 +750,7 @@ adds a specific capability without breaking prior protocol guarantees
 | [ADR-0021](docs/adr/0021-plugin-manifest-and-loader.md) | Plugin manifest + loader (`cogito-plugin`, TOML primary + Claude-plugin JSON compat read, namespace, local-path-only v0.2) | Proposed — finalized in v0.2 Sprint 12 |
 | [ADR-0022](docs/adr/0022-plugin-distribution.md) | Plugin distribution (git fetch + lock file + `cogito plugin sync`) | Proposed — finalized in v0.3 |
 | [ADR-0023](docs/adr/0023-bundled-script-execution.md) | Bundled-script execution in Skills | **Deliberately deferred** — records design space, revisit when concrete use case surfaces or Subagent v0.3 lands |
-| [ADR-0024](docs/adr/0024-crate-naming-consolidation.md) | Crate naming consolidation (`cogito-store-jsonl` → `cogito-store` rename, name-by-layer/role principle) | Proposed — finalized in rename PR pre-v0.1.0 tag |
+| [ADR-0024](docs/adr/0024-crate-naming-consolidation.md) | Crate naming consolidation (`cogito-store-jsonl` → `cogito-store` rename, name-by-layer/role principle) | Accepted (2026-05-29) |
 
 ## v0.1 scope (IN / OUT)
 

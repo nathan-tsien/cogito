@@ -29,7 +29,7 @@ use cogito_protocol::store::ConversationStore as _;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
 use cogito_protocol::{ConversationEvent, EventPayload, SCHEMA_VERSION, SessionMeta};
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use cogito_test_fixtures::canonical_sample_session;
 use cogito_tools::{BuiltinToolProvider, ReadFile};
 
@@ -86,6 +86,7 @@ async fn resume_from_model_completed_fast_paths_to_turn_completed()
             Some(turn_id),
             EventPayload::TurnStarted {
                 user_input: vec![cogito_protocol::ContentBlock::Text { text: "hi".into() }],
+                activate_skills: vec![],
             },
         ),
         evt(

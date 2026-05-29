@@ -83,6 +83,18 @@ came from multiple sources.
 - ARCHITECTURE.md §"Hands layer internal structure"
 - §"Tool execution classes" (H05 doesn't care about class — it's per-tool metadata, surfaced via `ToolDescriptor`)
 
+## Sprint 6: ToolFilterOverridden integration
+
+H05 reads the latest `ToolFilterOverridden` event for the current turn from the event log (written by H11's `ToolFilterOverrider` during the preceding `ContextManaged` state). It applies the mode on top of `strategy.allowed_tools`:
+
+- `Inherit` — use `strategy.allowed_tools` unchanged (no-op; what `NoneOverrider` writes every turn).
+- `Intersect { tools }` — keep only tools that appear in both `strategy.allowed_tools` and `tools`.
+- `Replace { tools }` — use `tools` as the full surface, ignoring `strategy.allowed_tools`.
+
+Override only **narrows or replaces**; H05 never expands beyond what the strategy authorizes unless `Replace` is used explicitly by a plugin or subagent. If no `ToolFilterOverridden` event exists for the current turn, H05 falls back to strategy alone (backward-compatible with pre-Sprint-6 sessions).
+
+See ADR-0008 §"Event surface" for the `ToolFilterOverridden` event shape and field semantics.
+
 ### Observability fields (Sprint 4)
 
 Each surface build emits `tracing::info!` on target `h05.tool_surface`

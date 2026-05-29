@@ -3,18 +3,28 @@ resolver = "2"
 members = [
     "crates/cogito-core",
     "crates/cogito-protocol",
-    "crates/cogito-store-jsonl",
+    "crates/cogito-store",
     "crates/cogito-model",
     "crates/cogito-tools",
     "crates/cogito-sandbox",
+    "crates/cogito-skills",
+    "crates/cogito-strategy",
     "crates/cogito-jobs",
     "crates/cogito-mcp",
     "crates/cogito-config",
+    "crates/cogito-context",
     "crates/cogito-cli",
     "crates/cogito-tui",
     "crates/testing/cogito-test-fixtures",
     "crates/testing/cogito-mock-model",
     "tools/cogito-gen-schema",
+]
+# Per-test fixture crates that exist only to be consumed by integration
+# tests. They are NOT part of the workspace; cargo would otherwise try to
+# attach any nested `Cargo.toml` under a workspace member as a sibling
+# package and fail. Sprint 8 added `echo_crate` for the run_tests E2E test.
+exclude = [
+    "crates/cogito-jobs/tests/fixtures",
 ]
 
 [workspace.package]
@@ -31,12 +41,15 @@ publish = false
 [workspace.dependencies]
 # Internal crates
 cogito-config = { path = "crates/cogito-config" }
+cogito-context = { path = "crates/cogito-context" }
 cogito-core = { path = "crates/cogito-core" }
 cogito-protocol = { path = "crates/cogito-protocol" }
-cogito-store-jsonl = { path = "crates/cogito-store-jsonl" }
+cogito-store = { path = "crates/cogito-store" }
 cogito-model = { path = "crates/cogito-model" }
 cogito-tools = { path = "crates/cogito-tools" }
 cogito-sandbox = { path = "crates/cogito-sandbox" }
+cogito-skills = { path = "crates/cogito-skills", version = "0.1.0" }
+cogito-strategy = { path = "crates/cogito-strategy" }
 cogito-jobs = { path = "crates/cogito-jobs" }
 cogito-mcp = { path = "crates/cogito-mcp" }
 cogito-test-fixtures = { path = "crates/testing/cogito-test-fixtures" }
@@ -60,7 +73,10 @@ serde_yaml = "0.9"
 toml = "0.8"
 
 # Text processing
+htmd = "0.5"
+pulldown-cmark = { version = "0.13", default-features = false }
 regex = "1.10"
+walkdir = "2"
 
 # Error handling
 thiserror = "1.0"
@@ -103,8 +119,12 @@ ulid = { version = "1.1", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
 
 # TUI (Sprint 6+)
-ratatui = "0.28"
+ratatui = "0.29"
 crossterm = "0.28"
+# TUI input widget — multi-line buffer used by cogito-tui
+tui-textarea = "0.7"
+# File-rotating log writer for TUI debug mode
+tracing-appender = "0.2"
 
 # Testing
 tokio-test = "0.4"
@@ -115,6 +135,8 @@ criterion = { version = "0.5", features = ["html_reports"] }
 rstest = "0.22"
 tempfile = "3.10"
 temp-env = "0.3"
+# CLI integration testing (already used in cogito-cli tests, promote to workspace)
+assert_cmd = "2.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

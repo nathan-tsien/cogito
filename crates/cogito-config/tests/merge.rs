@@ -15,6 +15,8 @@ fn partial_with_model(model: &str) -> RuntimeConfigPartial {
         }),
         providers: None,
         mcp_servers: None,
+        skills: None,
+        tools: None,
     }
 }
 
@@ -54,11 +56,15 @@ fn providers_array_replaces_wholesale() {
         runtime: None,
         providers: Some(vec![anthropic_provider("a"), anthropic_provider("b")]),
         mcp_servers: None,
+        skills: None,
+        tools: None,
     };
     let layer_b = RuntimeConfigPartial {
         runtime: None,
         providers: Some(vec![anthropic_provider("c")]),
         mcp_servers: None,
+        skills: None,
+        tools: None,
     };
     let merged = merge_layers(vec![layer_a, layer_b]);
     assert_eq!(merged.providers.as_ref().unwrap().len(), 1);
@@ -71,10 +77,15 @@ fn finalize_fills_defaults() {
         runtime: None,
         providers: Some(vec![anthropic_provider("only")]),
         mcp_servers: None,
+        skills: None,
+        tools: None,
     };
     let cfg = partial.finalize().expect("ok");
     assert_eq!(cfg.runtime.session_root, PathBuf::from("./sessions"));
-    assert_eq!(cfg.runtime.strategies_dir, PathBuf::from("./strategies"));
+    assert_eq!(
+        cfg.runtime.strategies_dir,
+        PathBuf::from(".cogito/strategies")
+    );
     // Auto-select rule: one provider, no explicit default_provider.
     assert_eq!(cfg.runtime.default_provider.as_deref(), Some("only"));
     assert!(cfg.runtime.default_model.is_none());
@@ -89,6 +100,8 @@ fn finalize_preserves_explicit_default_provider() {
         }),
         providers: Some(vec![anthropic_provider("a"), anthropic_provider("b")]),
         mcp_servers: None,
+        skills: None,
+        tools: None,
     };
     let cfg = partial.finalize().expect("ok");
     assert_eq!(cfg.runtime.default_provider.as_deref(), Some("a"));
@@ -100,6 +113,8 @@ fn finalize_ambiguous_provider_errors() {
         runtime: None,
         providers: Some(vec![anthropic_provider("a"), anthropic_provider("b")]),
         mcp_servers: None,
+        skills: None,
+        tools: None,
     };
     let err = partial.finalize().unwrap_err();
     let msg = err.to_string();
@@ -118,4 +133,51 @@ fn finalize_empty_providers_yields_empty_runtime() {
     let cfg = partial.finalize().expect("ok");
     assert!(cfg.providers.is_empty());
     assert!(cfg.runtime.default_provider.is_none());
+}
+
+#[test]
+fn openai_compat_with_context_window_tokens() {
+    // Verify that `context_window_tokens` is accepted in [[providers]] and
+    // survives deserialization into ProviderConfig::OpenAiCompat.
+    let toml_str = r#"
+        [[providers]]
+        kind = "openai-compat"
+        name = "local"
+        base_url = "http://localhost:8000/v1"
+        context_window_tokens = 32768
+    "#;
+    let partial: RuntimeConfigPartial = toml::from_str(toml_str).expect("parse ok");
+    let providers = partial.providers.expect("providers present");
+    assert_eq!(providers.len(), 1);
+    let ProviderConfig::OpenAiCompat {
+        name,
+        context_window_tokens,
+        ..
+    } = &providers[0]
+    else {
+        panic!("expected OpenAiCompat variant");
+    };
+    assert_eq!(name, "local");
+    assert_eq!(*context_window_tokens, Some(32_768));
+}
+
+#[test]
+fn openai_compat_without_context_window_tokens_defaults_to_none() {
+    // Existing configs without the field must still parse correctly.
+    let toml_str = r#"
+        [[providers]]
+        kind = "openai-compat"
+        name = "local"
+        base_url = "http://localhost:8000/v1"
+    "#;
+    let partial: RuntimeConfigPartial = toml::from_str(toml_str).expect("parse ok");
+    let providers = partial.providers.expect("providers present");
+    let ProviderConfig::OpenAiCompat {
+        context_window_tokens,
+        ..
+    } = &providers[0]
+    else {
+        panic!("expected OpenAiCompat variant");
+    };
+    assert_eq!(*context_window_tokens, None);
 }

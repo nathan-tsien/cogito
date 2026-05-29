@@ -27,20 +27,25 @@ use std::time::{Duration, Instant};
 use cogito_protocol::ExecCtx;
 use cogito_protocol::MetricsRecorder;
 use cogito_protocol::content::ContentBlock;
+use cogito_protocol::context::ContextPipeline;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::{SessionId, TurnId};
-use cogito_protocol::job::{JobCompletionEvent, JobId};
+use cogito_protocol::job::{JobCompletionEvent, JobError, JobId, JobManager, JobOutcome};
 use cogito_protocol::session::SessionMeta;
+use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
-use cogito_protocol::tool::ToolProvider;
+use cogito_protocol::tool::{ToolErrorKind, ToolProvider, ToolResult};
 use cogito_protocol::turn::{TurnFailureReason, TurnOutcome};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::types::{SessionCommand, ShutdownOutcome, TurnTrigger};
 use crate::harness::hooks::CompositeHookPipeline;
+// cogito-context is wired by the Runtime layer (not the Brain/harness layer),
+// consistent with ADR-0004: the runtime composes the pipeline from config and
+// injects it as a protocol trait object into TurnDeps.
 use crate::harness::resume::{ResumePoint, replay};
 use crate::harness::step_recorder::StepRecorder;
 use crate::harness::turn_driver::{TurnCtx, TurnDeps, TurnEntry, enter_turn};
@@ -56,15 +61,22 @@ pub(super) enum InFlight {
         #[allow(dead_code)] // reserved for metrics / tracing in later sprints
         started_at: Instant,
     },
-    /// Turn paused awaiting a background job (Sprint 4).
-    #[allow(dead_code)] // Sprint 4 will construct this variant
+    /// Turn paused awaiting a background job. Constructed by
+    /// `on_turn_complete` when a turn returns `TurnOutcome::Paused` and
+    /// consumed by `handle_command` on the subsequent `JobCompleted`
+    /// mailbox command to rebuild a `TurnEntry::FromToolDispatching`.
     PausedOnJob {
         /// The turn that was paused.
-        #[allow(dead_code)]
         turn_id: TurnId,
         /// The background job this session is waiting on.
-        #[allow(dead_code)]
         job_id: JobId,
+        /// `call_id` of the originating `ToolUseRecorded` — required to
+        /// stitch the completed job back into the resumed turn's
+        /// `completed_before_pause` tail. Derived from the in-memory
+        /// recorder cache at pause time via `lookup_call_id_in_recorder`,
+        /// so the live path matches the resume-from-log path
+        /// (`harness::resume::lookup_call_id_in_events`).
+        call_id: String,
     },
 }
 
@@ -80,6 +92,12 @@ pub(super) struct SessionState {
     pub(super) current_cancel_token: Arc<parking_lot::Mutex<CancellationToken>>,
     /// Receives job-completion notifications from a `JobManager` (Sprint 4).
     pub(super) job_completion_rx: mpsc::Receiver<JobCompletionEvent>,
+    /// Sender half of the job-completion channel, cloned into every
+    /// per-turn `TurnDeps` so H08's async dispatcher (Task 12) can register
+    /// it as the `on_complete` sink against `JobManager`. Retained on the
+    /// session so the channel stays open across turns even when no
+    /// `TurnDeps` is alive.
+    pub(super) job_completion_tx: mpsc::Sender<JobCompletionEvent>,
     /// Receives `(TurnId, TurnOutcome)` from the spawned `TurnDriver` task.
     pub(super) turn_result_rx: mpsc::Receiver<(TurnId, TurnOutcome)>,
     /// Sender half kept alive so the channel stays open even between turns.
@@ -97,6 +115,19 @@ pub(super) struct SessionState {
     pub(super) hooks: Arc<CompositeHookPipeline>,
     /// Metrics sink for this session (defaults to `NoOpMetricsRecorder` until v0.4 wires a real adapter).
     pub(super) metrics: Arc<dyn MetricsRecorder>,
+    /// Context pipeline built once at session open from `strategy.context`.
+    /// All turns in this session share the same pipeline via `Arc::clone`.
+    pub(super) context_pipeline: Arc<ContextPipeline>,
+    /// Optional Skill loader provider — injected at Runtime build time and
+    /// cloned into every turn's `TurnDeps`. `None` for sessions that do not
+    /// use the Skill injector.
+    pub(super) skills: Option<Arc<dyn SkillProvider>>,
+    /// Single-slot queue for user input received while a turn is in
+    /// flight or paused. Latest-wins: a second arrival overwrites the
+    /// first and logs a `tracing::warn!`. Drained in `on_turn_complete`
+    /// once the turn is fully terminal (not on `Paused`, which leaves
+    /// `in_flight = Some(PausedOnJob)`).
+    pub(super) pending_user_input: Option<TurnTrigger>,
 }
 
 /// External dependencies injected at spawn time.
@@ -105,12 +136,26 @@ pub(super) struct SessionDeps {
     pub model: Arc<dyn ModelGateway>,
     /// Tool provider.
     pub tools: Arc<dyn ToolProvider>,
+    /// Job manager. Used by `SessionCommand::CancelJob` to abort a
+    /// background job when the caller cancels a turn that is paused on
+    /// one. Task 11 will additionally plumb this into `TurnDeps` so the
+    /// async dispatcher path (Task 12) can submit and register jobs.
+    pub job_mgr: Arc<dyn JobManager>,
 }
 
 impl SessionState {
     /// True iff a `TurnDriver` task is currently executing.
     pub(super) fn has_active_turn(&self) -> bool {
         matches!(self.in_flight, Some(InFlight::Active { .. }))
+    }
+
+    /// True iff the session is parked waiting on a background job — i.e. a
+    /// turn returned `TurnOutcome::Paused` and `on_turn_complete` left
+    /// `in_flight = Some(InFlight::PausedOnJob { .. })`. The actor cannot
+    /// start a new turn in this state because the paused turn must drain
+    /// first via `JobCompleted`.
+    pub(super) fn is_paused(&self) -> bool {
+        matches!(self.in_flight, Some(InFlight::PausedOnJob { .. }))
     }
 }
 
@@ -179,7 +224,9 @@ pub(super) async fn run_session(
     // 4. SessionStarted: already gated in builder.rs::open_session.
 
     // 5. Dispatch the resume point. Errors here are startup-fatal.
-    if let Err(outcome) = apply_resume_point(&mut state, decision.point, &deps) {
+    if let Err(outcome) =
+        apply_resume_point(&mut state, &initial_events, decision.point, &deps).await
+    {
         return outcome;
     }
 
@@ -190,7 +237,7 @@ pub(super) async fn run_session(
 
             // Arm 1: turn completion (highest priority).
             Some((turn_id, outcome)) = state.turn_result_rx.recv() => {
-                on_turn_complete(&mut state, turn_id, outcome).await;
+                on_turn_complete(&mut state, turn_id, outcome, &deps).await;
             }
 
             // Arm 2: caller commands.
@@ -226,11 +273,23 @@ pub(super) async fn run_session(
 ///   `TurnEntry::FromModelCompleted`.
 /// - `ResumeFromToolDispatching` — spawn `TurnDriver` with
 ///   `TurnEntry::FromToolDispatching`.
-/// - `ResumePausedJob` / `ResumeAfterJobCompletion` — v0.1 returns
-///   `ShutdownOutcome::JobManagerUnavailable`; `JobManager` injection is a
-///   Sprint 4 deliverable.
-fn apply_resume_point(
+/// - `ResumePausedJob` — restore `InFlight::PausedOnJob` and register
+///   `on_complete` with the current `JobManager`. If the manager returns
+///   `UnknownJob` (the in-memory map was lost across the restart),
+///   synthesize a `Failed { message: "lost across process restart" }`
+///   completion on the session's own Arm 3 channel so the same FIFO path
+///   carries it as if a live job had just failed.
+/// - `ResumeAfterJobCompletion` — translate the already-persisted outcome
+///   to a `ToolResult` and spawn `TurnDriver` with
+///   `TurnEntry::FromToolDispatching` carrying the resolved completion.
+///
+/// The line count is structural (one arm per `ResumePoint` variant); each
+/// per-arm body is small and splitting the dispatch would only force the
+/// reader to chase helpers for what is already a flat match.
+#[allow(clippy::too_many_lines)]
+async fn apply_resume_point(
     state: &mut SessionState,
+    initial_events: &[cogito_protocol::ConversationEvent],
     point: ResumePoint,
     deps: &SessionDeps,
 ) -> Result<(), ShutdownOutcome> {
@@ -282,10 +341,100 @@ fn apply_resume_point(
             Ok(())
         }
 
-        ResumePoint::ResumePausedJob { .. } | ResumePoint::ResumeAfterJobCompletion { .. } => {
-            Err(ShutdownOutcome::JobManagerUnavailable(
-                "Sprint 4 deliverable - v0.1 has no JobManager injection".into(),
-            ))
+        ResumePoint::ResumePausedJob { turn_id, job_id } => {
+            // Resolve the originating `call_id` from the persisted log so
+            // the eventual `JobCompleted` mailbox command (live or
+            // synthetic) can stitch the result back into the resumed
+            // turn's `completed_before_pause` via
+            // `TurnEntry::FromToolDispatching`.
+            let call_id = crate::harness::resume::lookup_call_id_in_events(initial_events, job_id)
+                .ok_or_else(|| {
+                    ShutdownOutcome::ResumeFailed(format!(
+                        "ResumePausedJob: no JobSubmitted for job {job_id}"
+                    ))
+                })?;
+            state.in_flight = Some(InFlight::PausedOnJob {
+                turn_id,
+                job_id,
+                call_id,
+            });
+
+            match deps
+                .job_mgr
+                .on_complete(job_id, state.job_completion_tx.clone())
+                .await
+            {
+                Ok(()) => {
+                    // Sink registered; will fire when the job terminates.
+                    Ok(())
+                }
+                Err(JobError::UnknownJob(_)) => {
+                    // Lost across process restart. Synthesize a Failed
+                    // completion by posting on the session's own Arm 3
+                    // channel so it flows through the same FIFO path as a
+                    // live completion (`handle_command` consumes the
+                    // `JobCompleted` mailbox command, records
+                    // `JobCompletedRecorded`, then re-spawns the
+                    // TurnDriver with the AsyncFailed `ToolResult`).
+                    let synth = JobCompletionEvent {
+                        job_id,
+                        outcome: JobOutcome::Failed {
+                            message: "lost across process restart".into(),
+                        },
+                    };
+                    if let Err(e) = state.job_completion_tx.send(synth).await {
+                        return Err(ShutdownOutcome::ResumeFailed(format!(
+                            "could not post synthetic JobCompletion: {e}"
+                        )));
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(ShutdownOutcome::ResumeFailed(e.to_string())),
+            }
+        }
+
+        ResumePoint::ResumeAfterJobCompletion {
+            turn_id,
+            call_id,
+            outcome,
+            ..
+        } => {
+            // The `JobCompletedRecorded` event is already persisted; no
+            // need to re-record it. Per spec §5.1, the canonical ordering
+            // is `JobCompletedRecorded < ToolResultRecorded`; the live
+            // path writes both under the same recorder lock, but if the
+            // actor crashed BETWEEN those two appends, only the former
+            // is in the log and we must synthesize the latter here so
+            // every `ToolUseRecorded` keeps its matching
+            // `ToolResultRecorded`. Skip if the log already has it
+            // (crash happened AFTER both appends) to avoid a duplicate.
+            let tool_result = outcome_to_tool_result(outcome);
+            let already_recorded = initial_events.iter().any(|e| {
+                matches!(
+                    &e.payload,
+                    cogito_protocol::event::EventPayload::ToolResultRecorded { call_id: c, .. }
+                        if *c == call_id
+                )
+            });
+            if !already_recorded {
+                let mut rec = state.recorder.lock().await;
+                if let Err(e) = rec
+                    .record_tool_result(turn_id, call_id.clone(), tool_result.clone())
+                    .await
+                {
+                    return Err(ShutdownOutcome::ResumeFailed(e.to_string()));
+                }
+            }
+            spawn_turn_driver(
+                state,
+                turn_id,
+                TurnEntry::FromToolDispatching {
+                    pending: vec![],
+                    completed: vec![(call_id, tool_result)],
+                },
+                deps,
+            );
+            Ok(())
         }
     }
 }
@@ -303,14 +452,11 @@ fn spawn_turn_driver(
     entry: TurnEntry,
     deps: &SessionDeps,
 ) {
-    // TODO(cancel-token-disconnect): SessionShared.current_cancel_token holds
-    // a sibling token cloned from the *initial* token at session-open time,
-    // not a shared Arc<Mutex<...>> with SessionState. Replacing the inner token
-    // here means SessionHandle::cancel_turn() fires the original sibling and
-    // does not reach this newly minted token. Fix by sharing one
-    // Arc<Mutex<CancellationToken>> across SessionState and SessionShared so
-    // mutations are visible to both. Tracked separately; current chaos tests
-    // do not exercise mid-turn cancellation past the first turn.
+    // Swap a fresh CancellationToken into the per-session slot. The slot is
+    // an Arc<Mutex<...>> shared with every SessionHandle (built in
+    // runtime::builder::open_session), so this swap is immediately visible
+    // to `SessionHandle::cancel_turn`. See the `cancel_after_first_turn`
+    // regression test for why the Arc must be shared (not sibling-cloned).
     let new_token = CancellationToken::new();
     *state.current_cancel_token.lock() = new_token.clone();
 
@@ -327,6 +473,10 @@ fn spawn_turn_driver(
         strategy: state.strategy.clone(),
         consecutive_tool_errors: 0,
     };
+    // Pipeline was built once at session open in `Runtime::open_session` and
+    // stored in `SessionState`. Clone the Arc here so each turn shares the
+    // same pipeline without rebuilding it.
+    let context_pipeline = Arc::clone(&state.context_pipeline);
     let turn_deps = TurnDeps {
         step: Arc::clone(&state.recorder),
         store: Arc::clone(&state.store),
@@ -334,6 +484,10 @@ fn spawn_turn_driver(
         tools: Arc::clone(&deps.tools),
         hooks: Arc::clone(&state.hooks),
         metrics: Arc::clone(&state.metrics),
+        context_pipeline,
+        skills: state.skills.clone(),
+        job_mgr: Arc::clone(&deps.job_mgr),
+        job_completion_tx: state.job_completion_tx.clone(),
     };
     let result_tx = state.turn_result_tx.clone();
     tokio::spawn(async move {
@@ -358,6 +512,11 @@ fn spawn_turn_driver(
 /// `mailbox_tx` is retained for `JobCompleted` re-injection on Arm 3 of the
 /// mailbox loop (which still owns the sender directly) and for future
 /// commands that need to enqueue follow-ups; it is not used here today.
+///
+/// The line count is structural (one arm per `SessionCommand` variant) and
+/// breaking it up would only force the reader to hop between helpers; the
+/// per-arm bodies are independently small.
+#[allow(clippy::too_many_lines)]
 async fn handle_command(
     state: &mut SessionState,
     cmd: SessionCommand,
@@ -367,11 +526,108 @@ async fn handle_command(
     let _ = mailbox_tx; // reserved for future enqueue-follow-up commands
     match cmd {
         SessionCommand::Trigger(trigger) => {
-            try_start_turn(state, trigger, deps).await;
+            // Single-slot mid-pause queue (spec §8.4): if a turn is either
+            // running or paused on a job, hold the new trigger in the slot
+            // rather than starting a turn. A second arrival overwrites the
+            // first (latest-wins) and logs a warn so operators can detect
+            // dropped input. Drained in `on_turn_complete` when the turn
+            // outcome is terminal.
+            if state.has_active_turn() || state.is_paused() {
+                if state.pending_user_input.is_some() {
+                    tracing::warn!(
+                        session_id = %state.session_id,
+                        "overwriting queued user input (single-slot semantics)"
+                    );
+                }
+                state.pending_user_input = Some(trigger);
+            } else {
+                try_start_turn(state, trigger, deps).await;
+            }
             None
         }
-        SessionCommand::JobCompleted { .. } => {
-            // Sprint 4: resume a paused turn.
+        SessionCommand::JobCompleted { event } => {
+            let JobCompletionEvent { job_id, outcome } = event;
+
+            // Verify the session is paused on this exact job. Mismatch /
+            // wrong state is logged and dropped — the only safe action when
+            // an unexpected completion arrives is to refuse to resume.
+            let Some(InFlight::PausedOnJob {
+                turn_id,
+                job_id: expected,
+                call_id,
+            }) = std::mem::take(&mut state.in_flight)
+            else {
+                tracing::error!(
+                    session_id = %state.session_id,
+                    %job_id,
+                    "JobCompleted received but session is not PausedOnJob; dropping"
+                );
+                return None;
+            };
+
+            if expected != job_id {
+                tracing::error!(
+                    session_id = %state.session_id,
+                    expected = %expected,
+                    received = %job_id,
+                    "JobCompleted job_id mismatch; restoring in_flight and dropping event"
+                );
+                // Restore the paused state so the legitimate completion
+                // can still resume the turn when it eventually arrives.
+                state.in_flight = Some(InFlight::PausedOnJob {
+                    turn_id,
+                    job_id: expected,
+                    call_id,
+                });
+                return None;
+            }
+
+            // Write-before-transition: record JobCompleted before re-spawning
+            // the TurnDriver so the persisted log reflects the completion
+            // even if the actor dies between the record and the spawn.
+            let tool_result = outcome_to_tool_result(outcome.clone());
+            {
+                let mut rec = state.recorder.lock().await;
+                if let Err(e) = rec.record_job_completed(turn_id, job_id, outcome).await {
+                    tracing::error!(
+                        session_id = %state.session_id,
+                        %turn_id,
+                        error = %e,
+                        "failed to record JobCompleted; aborting session"
+                    );
+                    return Some(ShutdownOutcome::ResumeFailed(e.to_string()));
+                }
+                // Spec §5.1 ordering invariant:
+                // JobCompletedRecorded < ToolResultRecorded. The resumed
+                // TurnDriver enters at `ToolDispatching` with an empty
+                // `pending` and the already-resolved completion in
+                // `completed`, so `tool_dispatching::transit`'s
+                // pending-pop loop never records the result. We must do
+                // it here so every `ToolUseRecorded` keeps its matching
+                // `ToolResultRecorded` in the persisted log.
+                if let Err(e) = rec
+                    .record_tool_result(turn_id, call_id.clone(), tool_result.clone())
+                    .await
+                {
+                    tracing::error!(
+                        session_id = %state.session_id,
+                        %turn_id,
+                        error = %e,
+                        "failed to record ToolResult for async completion; aborting session"
+                    );
+                    return Some(ShutdownOutcome::ResumeFailed(e.to_string()));
+                }
+            }
+
+            spawn_turn_driver(
+                state,
+                turn_id,
+                TurnEntry::FromToolDispatching {
+                    pending: vec![],
+                    completed: vec![(call_id, tool_result)],
+                },
+                deps,
+            );
             None
         }
         SessionCommand::InternalCancel { ack } => {
@@ -381,7 +637,7 @@ async fn handle_command(
             None
         }
         SessionCommand::Shutdown { deadline, ack } => {
-            let outcome = drain_shutdown(state, deadline).await;
+            let outcome = drain_shutdown(state, deadline, deps).await;
             let _ = ack.send(outcome);
             // Caller-requested shutdown is always a "clean" actor exit from
             // the spawn site's perspective; the detailed `ShutdownOutcome`
@@ -390,6 +646,65 @@ async fn handle_command(
                 in_flight_cancelled: None,
             })
         }
+        SessionCommand::CancelJob { job_id } => {
+            // Best-effort cancel of the background job. The `JobManager`
+            // implementation flips the job to `Cancelled` and fires the
+            // already-registered completion sink, which the actor
+            // dequeues on Arm 3 and re-injects as a `JobCompleted`
+            // mailbox command. That command unwinds the paused turn via
+            // the normal Arm-2 path, surfacing `ToolResult::Error {
+            // kind: Cancelled }` to the next model call.
+            if let Err(e) = deps.job_mgr.cancel(job_id).await {
+                tracing::warn!(
+                    session_id = %state.session_id,
+                    %job_id,
+                    error = %e,
+                    "JobManager::cancel failed; turn may remain paused"
+                );
+            }
+            None
+        }
+        SessionCommand::SnapshotInFlight { reply } => {
+            // Mailbox-probe pattern: the handle asks the actor to look
+            // at `state.in_flight` rather than holding a shared mutex,
+            // which keeps `SessionState` single-owner per ADR-0006 §"Actor
+            // model — why and how". A dropped receiver is harmless.
+            let job_id = match &state.in_flight {
+                Some(InFlight::PausedOnJob { job_id, .. }) => Some(*job_id),
+                _ => None,
+            };
+            let _ = reply.send(job_id);
+            None
+        }
+    }
+}
+
+/// Translate a terminal `JobOutcome` into the `ToolResult` that the resumed
+/// turn sees in its `completed` list. `JobOutcome` is `#[non_exhaustive]`,
+/// so unknown future variants surface as an `AsyncFailed` error rather than
+/// a panic — the model still gets a well-formed `ToolResult` and the turn
+/// can continue.
+fn outcome_to_tool_result(outcome: JobOutcome) -> ToolResult {
+    match outcome {
+        JobOutcome::Success { result } => result,
+        JobOutcome::Failed { message } => ToolResult::Error {
+            kind: ToolErrorKind::AsyncFailed,
+            message,
+            retryable: false,
+        },
+        JobOutcome::Cancelled => ToolResult::Error {
+            kind: ToolErrorKind::Cancelled,
+            message: "job cancelled".into(),
+            retryable: false,
+        },
+        // `JobOutcome` is `#[non_exhaustive]`; future variants land as a
+        // generic AsyncFailed so the model still gets a structured error
+        // rather than a panicking Brain.
+        _ => ToolResult::Error {
+            kind: ToolErrorKind::AsyncFailed,
+            message: "unknown job outcome variant".into(),
+            retryable: false,
+        },
     }
 }
 
@@ -398,27 +713,38 @@ async fn handle_command(
 /// `TurnEntry::FreshLikeInit` — resume dispatch happens once at actor
 /// startup via `apply_resume_point`, not here.
 ///
-/// `TurnTrigger` projection (v0.1 single-variant; ADR-0016):
-/// - `UserText(text)` -> `user_input = vec![ContentBlock::Text { text }]`
+/// `TurnTrigger` projection (ADR-0016):
+/// - `UserText(text)` -> `user_input = vec![ContentBlock::Text { text }]`,
+///   `activate_skills = []`.
+/// - `SkillActivation { names, user_text }` -> `user_input` is the
+///   single-Text-block wrapping of `user_text` (empty when `user_text` is
+///   `None` or empty), `activate_skills = names`.
 ///
-/// Future variants (`UserContent` / `SkillInvocation` / `HookFired`) extend
-/// this match. `#[non_exhaustive]` forces the `_ =>` arm; we log loudly
-/// and drop the trigger rather than panic — a missed variant is a
-/// runtime bug, not a turn failure.
+/// Future variants (`UserContent` / `HookFired`) extend this match.
+/// `#[non_exhaustive]` forces the `_ =>` arm; we log loudly and drop the
+/// trigger rather than panic — a missed variant is a runtime bug, not a
+/// turn failure.
 async fn try_start_turn(state: &mut SessionState, trigger: TurnTrigger, deps: &SessionDeps) {
     if state.has_active_turn() {
         return;
     }
 
-    // match_wildcard_for_single_variants: required — TurnTrigger is
-    //   #[non_exhaustive], so omitting `_` would be a compile error.
-    // single_match_else: optional — let-else would silence the lint, but
-    //   `match` is preferred because future ADR-0016 §6 variants extend
-    //   this arm list and the match-shape signals "list will grow".
+    // match_wildcard_for_single_variants: required while `TurnTrigger`
+    //   is `#[non_exhaustive]` — omitting `_` would be a compile error
+    //   even after future variants are added.
     #[allow(clippy::match_wildcard_for_single_variants)]
-    #[allow(clippy::single_match_else)]
-    let user_input: Vec<ContentBlock> = match trigger {
-        TurnTrigger::UserText(text) => vec![ContentBlock::Text { text }],
+    let (user_input, activate_skills): (Vec<ContentBlock>, Vec<String>) = match trigger {
+        TurnTrigger::UserText(text) => (vec![ContentBlock::Text { text }], Vec::new()),
+        TurnTrigger::SkillActivation { names, user_text } => {
+            // Empty / missing user_text yields empty user_input; the
+            // SkillInjector's suffix is the only user-visible content
+            // for the turn in that case.
+            let user_input = match user_text {
+                Some(t) if !t.is_empty() => vec![ContentBlock::Text { text: t }],
+                _ => Vec::new(),
+            };
+            (user_input, names)
+        }
         // `#[non_exhaustive]` guard: when a future TurnTrigger variant
         // lands (ADR-0016 §6 migration table) the consumer crate that
         // adds the variant must also extend this match. Until then,
@@ -437,7 +763,10 @@ async fn try_start_turn(state: &mut SessionState, trigger: TurnTrigger, deps: &S
     // Write-before-transition: record TurnStarted before spawning the task.
     {
         let mut rec = state.recorder.lock().await;
-        if let Err(e) = rec.record_turn_started(turn_id, user_input).await {
+        if let Err(e) = rec
+            .record_turn_started(turn_id, user_input, activate_skills)
+            .await
+        {
             tracing::error!(
                 session_id = %state.session_id,
                 turn_id = %turn_id,
@@ -452,15 +781,88 @@ async fn try_start_turn(state: &mut SessionState, trigger: TurnTrigger, deps: &S
 }
 
 /// Record the terminal event after a turn finishes.
-async fn on_turn_complete(state: &mut SessionState, turn_id: TurnId, outcome: TurnOutcome) {
+///
+/// `deps` is threaded in so the pending-user-input single-slot queue can
+/// be drained via `try_start_turn` once the turn is fully terminal. Drain
+/// only fires when `state.in_flight == None` after outcome processing: the
+/// `Paused` arm sets `in_flight = Some(PausedOnJob)` and therefore correctly
+/// keeps the queued input parked until `JobCompleted` resumes (and later
+/// terminates) the turn.
+async fn on_turn_complete(
+    state: &mut SessionState,
+    turn_id: TurnId,
+    outcome: TurnOutcome,
+    deps: &SessionDeps,
+) {
+    // For the Paused outcome, resolve the `call_id` from the recorder cache
+    // BEFORE acquiring the recorder lock below — `lookup_call_id_in_recorder`
+    // takes the same `tokio::sync::Mutex` and we must not double-lock.
+    let pause_call_id = match &outcome {
+        TurnOutcome::Paused { job_id } => {
+            Some(lookup_call_id_in_recorder(&state.recorder, *job_id).await)
+        }
+        _ => None,
+    };
+
+    // Default to clearing in_flight; the Paused arm overrides this below
+    // *before* the persisted TurnPaused event is written so that an actor
+    // crash between record + assignment can be reconstructed from the log.
     state.in_flight = None;
+
     let mut rec = state.recorder.lock().await;
     let result: Result<(), _> = match outcome {
+        // TODO(double-turn-completed): the TurnDriver's model_completed::transit
+        // already writes TurnCompleted via record_turn_completed before returning
+        // TurnOutcome::Completed. Calling record_turn_completed again here
+        // produces a duplicate persisted event AND a duplicate broadcast.
+        // Fix in a separate change; tests/cancel_after_first_turn.rs currently
+        // drains 2x TurnCompleted to tolerate this — that workaround must drop
+        // to 1 when this is corrected.
         TurnOutcome::Completed => rec
             .record_turn_completed(turn_id, TurnOutcome::Completed)
             .await
             .map(|_| ()),
-        TurnOutcome::Paused { job_id } => rec.record_turn_paused(turn_id, job_id).await.map(|_| ()),
+        // JobSubmitted must precede TurnPaused per H08's
+        // write-before-transition contract. If the cache lookup misses, this
+        // is an internal-invariant violation — fail the turn loudly rather
+        // than store a sentinel `call_id` that would break Task 8's
+        // `TurnEntry::FromToolDispatching` (an empty `tool_use_id` would
+        // silently reach the model on resume). The persisted `TurnFailed`
+        // lets resume-from-log recover cleanly on next restart, where
+        // `harness::resume::lookup_call_id_in_events` walks the full log
+        // and can succeed where the in-memory cache could not.
+        TurnOutcome::Paused { job_id } => {
+            if let Some(call_id) = pause_call_id.flatten() {
+                state.in_flight = Some(InFlight::PausedOnJob {
+                    turn_id,
+                    job_id,
+                    call_id,
+                });
+                rec.record_turn_paused(turn_id, job_id).await.map(|_| ())
+            } else {
+                tracing::error!(
+                    session_id = %state.session_id,
+                    %turn_id,
+                    %job_id,
+                    "TurnPaused without a preceding JobSubmitted in recorder cache; \
+                     fatal: missing JobSubmitted; failing turn"
+                );
+                // Leave in_flight = None (already cleared above): the turn
+                // is over from the actor's perspective. Resume-from-log
+                // on the next session restart will re-derive the correct
+                // state from the persisted event sequence.
+                rec.record_turn_failed(
+                    turn_id,
+                    TurnFailureReason::TurnPanicked {
+                        location:
+                            "session_loop::on_turn_complete: TurnPaused without preceding JobSubmitted"
+                                .into(),
+                    },
+                )
+                .await
+                .map(|_| ())
+            }
+        }
         TurnOutcome::Cancelled => rec
             .record_turn_failed(turn_id, TurnFailureReason::TurnTimedOut)
             .await
@@ -486,10 +888,57 @@ async fn on_turn_complete(state: &mut SessionState, turn_id: TurnId, outcome: Tu
             "failed to record terminal turn event"
         );
     }
+
+    // Release the recorder lock before re-entering `try_start_turn`, which
+    // re-acquires it to record `TurnStarted`. Without this scope guard the
+    // drain would deadlock on the same `tokio::sync::Mutex`.
+    drop(rec);
+
+    // Drain the single-slot queue if a user message arrived mid-turn — but
+    // ONLY when the outcome was fully terminal. A `Paused` outcome leaves
+    // `in_flight = Some(PausedOnJob)` and `is_paused()` will be true; the
+    // queued trigger stays parked until `JobCompleted` resumes the turn and
+    // the next `on_turn_complete` runs with a terminal outcome. Likewise,
+    // the `JobSubmitted`-missing failure path clears `in_flight = None`
+    // above, so the drain correctly fires and the user is not stranded.
+    if state.in_flight.is_none()
+        && let Some(pending) = state.pending_user_input.take()
+    {
+        try_start_turn(state, pending, deps).await;
+    }
+}
+
+/// Live-path counterpart to [`crate::harness::resume::lookup_call_id_in_events`].
+///
+/// Reads the [`StepRecorder`]'s in-memory history cache for the most recent
+/// `JobSubmitted { job_id, .. }` whose `job_id` matches and returns its
+/// `call_id`. Returns `None` when no matching event is present in the cache
+/// (structurally impossible if H08 honored its write-before-transition
+/// contract, but treated as a soft failure here — the caller logs and
+/// falls back rather than panicking).
+async fn lookup_call_id_in_recorder(
+    recorder: &Arc<Mutex<StepRecorder>>,
+    job_id: JobId,
+) -> Option<String> {
+    let rec = recorder.lock().await;
+    rec.history_cache_iter()
+        .rev()
+        .find_map(|e| match &e.payload {
+            cogito_protocol::event::EventPayload::JobSubmitted {
+                call_id,
+                job_id: jid,
+                ..
+            } if *jid == job_id => Some(call_id.clone()),
+            _ => None,
+        })
 }
 
 /// Cancel the running turn and wait (up to `deadline`) for it to finish.
-async fn drain_shutdown(state: &mut SessionState, deadline: Duration) -> ShutdownOutcome {
+async fn drain_shutdown(
+    state: &mut SessionState,
+    deadline: Duration,
+    deps: &SessionDeps,
+) -> ShutdownOutcome {
     let started = Instant::now();
     // Signal the TurnDriver to stop cooperatively.
     state.current_cancel_token.lock().cancel();
@@ -500,7 +949,7 @@ async fn drain_shutdown(state: &mut SessionState, deadline: Duration) -> Shutdow
         let remaining = deadline.saturating_sub(started.elapsed());
         match tokio::time::timeout(remaining, state.turn_result_rx.recv()).await {
             Ok(Some((turn_id, outcome))) => {
-                on_turn_complete(state, turn_id, outcome).await;
+                on_turn_complete(state, turn_id, outcome, deps).await;
             }
             Ok(None) | Err(_) => {
                 // Channel closed or timeout — stop waiting.

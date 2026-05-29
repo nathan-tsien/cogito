@@ -11,7 +11,7 @@ This spec covers everything Sprint 1 must deliver to satisfy ROADMAP §"Sprint 1
 
 1. `ConversationEvent` data model in `cogito-protocol` (Q1 outcome).
 2. `ConversationStore` trait in `cogito-protocol` (Q2 outcome).
-3. `cogito-store-jsonl` minimal backend, scoped to dev/debug use only (Q3 outcome).
+3. `cogito-store` minimal backend, scoped to dev/debug use only (Q3 outcome).
 4. `cogito-core::harness::step_recorder` skeleton + text-block lifecycle handling (Q4 outcome).
 5. A **cross-language storage contract** commitment (ADR-0007) that frames the
    JSONL line format / future Postgres DDL as the cogito public API for non-Rust
@@ -20,7 +20,7 @@ This spec covers everything Sprint 1 must deliver to satisfy ROADMAP §"Sprint 1
    into the repo and verified by CI.
 7. A fixture file `testing/cogito-test-fixtures/fixtures/sessions/sample-v1.jsonl`
    covering all 9 `EventPayload` variants.
-8. Sprint 1 benchmark: `append_throughput` against `cogito-store-jsonl`,
+8. Sprint 1 benchmark: `append_throughput` against `cogito-store`,
    producing `docs/quality/v0.1-jsonl-baseline.md` as an **informational
    baseline** (not a locked production SLO — see §7).
 
@@ -359,7 +359,7 @@ pub trait ConversationStore: Send + Sync + 'static {
     /// Each backend MUST document its durability guarantee in its crate
     /// docs. As of v0.1:
     ///
-    /// - `cogito-store-jsonl` (dev/debug): userspace-flushed via
+    /// - `cogito-store` (dev/debug): userspace-flushed via
     ///   `tokio::fs::File::flush`, **not fsynced**. Process crash is
     ///   recoverable; power loss may lose recent events.
     /// - `cogito-store-postgres` (v0.4): per-transaction durable.
@@ -481,7 +481,7 @@ where
 
 Each backend crate has a `tests/contract.rs` integration test that calls
 `run_store_contract` with its own factory closure. Sprint 1 ships only
-`cogito-store-jsonl` running this suite; Sprint 4 / v0.4 add Postgres.
+`cogito-store` running this suite; Sprint 4 / v0.4 add Postgres.
 
 ## 4. Cross-language storage contract (Q2 SaaS reframe — ADR-0007)
 
@@ -615,7 +615,7 @@ Add to `AGENTS.md` §"Inviolable design principles":
 > Postgres tables in v0.4). See ADR-0007 for the principle and ADR-0014
 > (v0.4) for the `TenantContext` model.
 
-## 5. `cogito-store-jsonl` implementation (Q3 outcome — simplified)
+## 5. `cogito-store` implementation (Q3 outcome — simplified)
 
 ### 5.1 Scope reset (per user direction 2026-05-18)
 
@@ -639,7 +639,7 @@ is not a production target. Therefore:
 ### 5.3 Implementation skeleton
 
 ```rust
-// crates/cogito-store-jsonl/src/lib.rs
+// crates/cogito-store/src/lib.rs
 
 #![warn(clippy::pedantic)]
 #![forbid(unsafe_code)]
@@ -955,7 +955,7 @@ benchmark, but with revised positioning:
 
 ### 7.1 Benchmark contents
 
-`crates/cogito-store-jsonl/benches/append_throughput.rs` (criterion):
+`crates/cogito-store/benches/append_throughput.rs` (criterion):
 
 - **Setup**: temp dir, fresh `JsonlStore`, one session, pre-built
   `ConversationEvent` (a `ToolUseRecorded` with ~200 bytes args).
@@ -970,7 +970,7 @@ benchmark, but with revised positioning:
 ```markdown
 # v0.1 JSONL Append Baseline (informational)
 
-> Measured against `cogito-store-jsonl` on $(uname -a) at $(date).
+> Measured against `cogito-store` on $(uname -a) at $(date).
 > This is a **dev-grade backend baseline**, not a production SLO. The
 > ADR-0005 §3 P99 < 5 ms target is locked at v0.4 against
 > `cogito-store-postgres` under production-realistic load.

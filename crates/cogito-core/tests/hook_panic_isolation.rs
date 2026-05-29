@@ -10,6 +10,7 @@ use cogito_core::harness::step_recorder::StepRecorder;
 use cogito_core::harness::turn_driver::deps::TurnDeps;
 use cogito_core::harness::turn_driver::state::TurnCtx;
 use cogito_core::harness::turn_driver::{TurnEntry, enter_turn};
+use cogito_jobs::LocalJobManager;
 use cogito_mock_model::MockModelGateway;
 use cogito_protocol::ExecCtx;
 use cogito_protocol::NoOpMetricsRecorder;
@@ -18,9 +19,9 @@ use cogito_protocol::hook::{HookDecision, HookHandler};
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::turn::{TurnFailureReason, TurnOutcome};
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use cogito_tools::provider::BuiltinToolProvider;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, mpsc};
 
 struct PanicInPrePrompt;
 impl HookHandler for PanicInPrePrompt {
@@ -63,6 +64,7 @@ async fn hook_panic_in_pre_prompt_yields_turn_failed() -> Result<(), Box<dyn std
         Arc::new(PanicInPrePrompt) as Arc<dyn HookHandler>,
     ]));
 
+    let (job_completion_tx, _job_completion_rx) = mpsc::channel(32);
     let deps = TurnDeps {
         step: Arc::clone(&recorder),
         store: Arc::clone(&store),
@@ -70,6 +72,12 @@ async fn hook_panic_in_pre_prompt_yields_turn_failed() -> Result<(), Box<dyn std
         tools,
         hooks,
         metrics: Arc::new(NoOpMetricsRecorder),
+        context_pipeline: Arc::new(cogito_context::build_pipeline(
+            &cogito_protocol::context::ContextConfig::default(),
+        )),
+        skills: None,
+        job_mgr: LocalJobManager::new(),
+        job_completion_tx,
     };
 
     let ctx = TurnCtx {

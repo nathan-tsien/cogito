@@ -8,7 +8,9 @@ pub mod wire;
 use std::time::Duration;
 
 use cogito_protocol::ExecCtx;
-use cogito_protocol::gateway::{ModelError, ModelEvent, ModelGateway, ModelInput};
+use cogito_protocol::gateway::{
+    ModelError, ModelEvent, ModelGateway, ModelInput, ModelLimits, parse_context_window_suffix,
+};
 use futures::stream::BoxStream;
 use reqwest::Client;
 
@@ -23,6 +25,9 @@ pub struct AnthropicConfig {
     pub anthropic_version: String,
     /// Per-request timeout. Default: 5 minutes.
     pub timeout: Duration,
+    /// Model identifier, e.g. `"claude-opus-4-7"` or `"claude-opus-4-7[1m]"`.
+    /// Used by `model_limits()` to return context window size.
+    pub model_id: String,
 }
 
 impl AnthropicConfig {
@@ -34,6 +39,7 @@ impl AnthropicConfig {
             base_url: "https://api.anthropic.com".into(),
             anthropic_version: "2023-06-01".into(),
             timeout: Duration::from_secs(5 * 60),
+            model_id: String::new(),
         }
     }
 }
@@ -57,6 +63,40 @@ impl AnthropicGateway {
             .build()
             .map_err(|e| crate::error::from_reqwest(&e))?;
         Ok(Self { cfg, client })
+    }
+
+    /// Construct a minimal gateway for unit/integration tests, bypassing
+    /// normal HTTP client configuration. The returned gateway is not
+    /// suitable for real API calls.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new_for_test(api_key: &str, model_id: &str) -> Self {
+        let cfg = AnthropicConfig {
+            api_key: api_key.into(),
+            base_url: "https://api.anthropic.com".into(),
+            anthropic_version: "2023-06-01".into(),
+            timeout: Duration::from_secs(5 * 60),
+            model_id: model_id.into(),
+        };
+        // unwrap is safe: default Client::new() cannot fail on a modern system.
+        #[allow(clippy::unwrap_used)]
+        let client = Client::new();
+        Self { cfg, client }
+    }
+}
+
+/// Return the default context window for a known Anthropic base model id
+/// (with any `[<size>]` suffix stripped). Returns `None` for unknown models.
+fn anthropic_default_window(model_id: &str) -> Option<u64> {
+    let base = model_id.split_once('[').map_or(model_id, |(b, _)| b);
+    match base {
+        "claude-opus-4-7"
+        | "claude-opus-4-7-20260301"
+        | "claude-sonnet-4-6"
+        | "claude-sonnet-4-6-20260301"
+        | "claude-haiku-4-5"
+        | "claude-haiku-4-5-20251001" => Some(200_000),
+        _ => None,
     }
 }
 
@@ -149,5 +189,18 @@ impl ModelGateway for AnthropicGateway {
 
     fn provider_id(&self) -> &'static str {
         "anthropic"
+    }
+
+    fn model_limits(&self) -> ModelLimits {
+        let window = parse_context_window_suffix(&self.cfg.model_id)
+            .or_else(|| anthropic_default_window(&self.cfg.model_id))
+            .unwrap_or_else(|| {
+                tracing::warn!(
+                    model_id = %self.cfg.model_id,
+                    "no context window declared for model; falling back to 200_000",
+                );
+                200_000
+            });
+        ModelLimits::new(self.cfg.model_id.clone(), window)
     }
 }

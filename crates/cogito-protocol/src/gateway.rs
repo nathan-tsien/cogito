@@ -224,6 +224,45 @@ pub enum ModelError {
     /// `ExecCtx.cancel` fired while the stream was in flight.
     #[error("cancelled")]
     Cancelled,
+    /// Provider declared a stream-payload failure (e.g. `OpenAI`
+    /// Responses `response.failed` SSE event, Anthropic `error` SSE
+    /// event). The transport succeeded and the body decoded; the model
+    /// itself signaled failure mid-stream. Distinct from
+    /// `Provider { status }` (HTTP-level) and `Decode` (JSON parse
+    /// failure).
+    #[error("provider stream error: {message}")]
+    ProviderStream {
+        /// Best-effort extracted message from the provider's failure payload.
+        message: String,
+    },
+}
+
+/// Limits of the model a `ModelGateway` serves.
+///
+/// Sourced from the gateway implementation, not from strategy config.
+/// Consumed by Compactor for adaptive thresholds and (future) H05 surface
+/// sizing. See ADR-0008.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ModelLimits {
+    /// The model id, with any `[<size>]` suffix preserved.
+    pub model_id: String,
+    /// Total context window in tokens (input + output combined).
+    pub context_window_tokens: u64,
+}
+
+impl ModelLimits {
+    /// Construct a `ModelLimits` value. Provided so that crates outside
+    /// `cogito-protocol` can build instances despite the `#[non_exhaustive]`
+    /// attribute (which forbids struct literal syntax outside the defining
+    /// crate).
+    #[must_use]
+    pub fn new(model_id: impl Into<String>, context_window_tokens: u64) -> Self {
+        Self {
+            model_id: model_id.into(),
+            context_window_tokens,
+        }
+    }
 }
 
 /// Boundary contract between Brain and external LLM providers.
@@ -256,6 +295,87 @@ pub trait ModelGateway: Send + Sync {
     /// Stable identifier for telemetry and logging. Adapters return a
     /// fixed string, not a per-instance value.
     fn provider_id(&self) -> &'static str;
+
+    /// Limits of the model this gateway serves. Used by Compactor for
+    /// adaptive thresholds. Default impl returns a conservative `32_768`
+    /// window; provider adapters SHOULD override.
+    fn model_limits(&self) -> ModelLimits {
+        ModelLimits {
+            model_id: self.provider_id().into(),
+            context_window_tokens: 32_768,
+        }
+    }
+}
+
+/// Parse the conventional `[<size>]` suffix from a model id.
+///
+/// Suffix grammar: `\[(\d+)([kKmM])?\]$`; `k` = `1_000`, `m` = `1_000_000`,
+/// no unit = literal value.
+///
+/// Returns `None` if no suffix or suffix is malformed.
+///
+/// # Panics
+///
+/// Never panics in practice. The internal static regex is a compile-time
+/// constant that is provably valid; the `expect` call exists only to satisfy
+/// `OnceLock::get_or_init`'s infallible-initializer requirement.
+///
+/// Examples:
+/// - `"claude-opus-4-7[1m]"` -> `Some(1_000_000)`
+/// - `"Llama-3.3-70B[32k]"` -> `Some(32_000)`
+/// - `"gpt-4o[128000]"` -> `Some(128_000)`
+/// - `"claude-opus-4-7"` -> `None`
+#[must_use]
+pub fn parse_context_window_suffix(model_id: &str) -> Option<u64> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        #[allow(clippy::expect_used)]
+        regex::Regex::new(r"\[(\d+)([kKmM])?\]$").expect("static regex compiles")
+    });
+    let caps = re.captures(model_id)?;
+    let num: u64 = caps.get(1)?.as_str().parse().ok()?;
+    let mult = match caps.get(2).map(|m| m.as_str().to_lowercase()).as_deref() {
+        Some("k") => 1_000,
+        Some("m") => 1_000_000,
+        _ => 1,
+    };
+    num.checked_mul(mult)
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented
+)]
+mod model_limits_tests {
+    use super::*;
+
+    struct DummyGateway;
+
+    #[async_trait::async_trait]
+    impl ModelGateway for DummyGateway {
+        async fn stream(
+            &self,
+            _input: ModelInput,
+            _ctx: crate::ExecCtx,
+        ) -> Result<BoxStream<'static, Result<ModelEvent, ModelError>>, ModelError> {
+            unimplemented!("not used in this test")
+        }
+
+        fn provider_id(&self) -> &'static str {
+            "dummy"
+        }
+    }
+
+    #[test]
+    fn default_model_limits_is_conservative() {
+        let g = DummyGateway;
+        let limits = g.model_limits();
+        assert_eq!(limits.context_window_tokens, 32_768);
+        assert_eq!(limits.model_id, "dummy");
+    }
 }
 
 #[cfg(test)]

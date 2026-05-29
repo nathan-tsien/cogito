@@ -2,6 +2,12 @@
 **/*.rs.bk
 Cargo.lock.bak
 
+# Fixture crates under integration tests are standalone (non-workspace)
+# packages — their `target/` and `Cargo.lock` are generated on demand by
+# the tests that invoke `cargo` against them and must not be tracked.
+crates/*/tests/fixtures/**/target/
+crates/*/tests/fixtures/**/Cargo.lock
+
 # IDE
 .vscode/
 .idea/
@@ -16,7 +22,9 @@ Thumbs.db
 *.db
 *.db-shm
 *.db-wal
-.cogito/
+.cogito/*
+# Example strategies are committed (see ADR-0026).
+!.cogito/strategies/
 
 # Local debug / scratch artefacts (e.g. Claude Code session graphs)
 debug/
@@ -29,3 +37,8 @@ sessions/
 
 # Git worktrees (superpowers:using-git-worktrees default location)
 .worktrees/
+
+# Local agent tooling state (Claude Code / superpowers); machine-local,
+# never tracked.
+.claude/
+.superpowers/

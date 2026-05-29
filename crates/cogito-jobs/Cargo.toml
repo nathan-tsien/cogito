@@ -6,20 +6,59 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Test-only async tools (e.g. `SleepTool`) used by integration and chaos
+# tests. Off by default so the fixtures do not ship in production builds.
+test-tools = []
+
 [dependencies]
 cogito-protocol.workspace = true
 
-tokio.workspace = true
 async-trait.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "rt", "time", "process", "io-util"] }
+tokio-util.workspace = true
 tracing.workspace = true
-sqlx.workspace = true
-uuid.workspace = true
 
 [dev-dependencies]
-tokio-test.workspace = true
+cogito-core.workspace = true
+cogito-mock-model.workspace = true
+cogito-protocol = { workspace = true, features = ["test-support"] }
+cogito-sandbox.workspace = true
+cogito-store.workspace = true
+cogito-test-fixtures.workspace = true
+cogito-tools.workspace = true
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util", "process"] }
+
+# Integration tests that wire `SleepTool` through the full Runtime require
+# the `test-tools` feature so the gated module compiles. `required-features`
+# silently skips them when the feature is not on — `make test` and `cargo
+# test --all-features` enable it for us.
+[[test]]
+name = "sleep_then_complete"
+required-features = ["test-tools"]
+
+[[test]]
+name = "cancel_while_paused"
+required-features = ["test-tools"]
+
+[[test]]
+name = "mid_pause_user_input"
+required-features = ["test-tools"]
+
+# `run_tests_happy_path` exercises the production `RunTestsTool` (not gated
+# on `test-tools`) against a tiny fixture crate under `tests/fixtures/`.
+# Marked with `harness = true` (the default) so test runner flags such as
+# `--test-threads=1` (required by the process-wide chdir guard) are honored.
+[[test]]
+name = "run_tests_happy_path"
+harness = true
 
 [lints]
 workspace = true

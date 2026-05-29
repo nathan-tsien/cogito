@@ -45,15 +45,16 @@
 | `turn_id` | ULID string \| `null` | ✓ | `null` for session-level events (e.g. `session_started`). |
 | `seq` | uint64 | ✓ | Monotonic per session, starts at 0. Used by Resume Coordinator. |
 | `ts` | RFC 3339 timestamp (UTC) | ✓ | Wall-clock at write time. Use for display only; causality is `seq`. |
-| `type` | string | ✓ | One of the payload variants below (snake_case); 10 shipped as of Sprint 2, with `model_call_completed` pending Sprint 3 P2.2. |
+| `type` | string | ✓ | One of the payload variants below (snake_case). Variant set has grown additively under ADR-0007 each sprint; consult the "Payload variants" header for the current count. |
 | `data` | object | ✓ | Variant-specific payload; see "Payload variants" below. |
 
-## Payload variants (12 shipped; 1 planned)
+## Payload variants (13 shipped; 1 planned)
 
 The original 9 variants (`session_started` through `turn_failed`) shipped in Sprint 1.
 Sprint 2 added `model_call_started` (documented below). Sprint 3 P2.2 will add
 `model_call_completed` (see its section below — marked pending). Sprint 4.7 added
-`thinking_block_recorded`. Sprint 5 added `hook_rejected`.
+`thinking_block_recorded`. Sprint 5 added `hook_rejected`. Sprint 8 added
+`job_submitted` (next to `job_completed_recorded`).
 
 ### `session_started`
 
@@ -179,6 +180,35 @@ is lowercase `output` (not `Output`). The `Output` variant carries
 The v0.2 multimodal upgrade will swap this for `Vec<ContentBlock>`
 (`ToolResult` doc comment in `cogito-protocol::tool`).
 
+### `job_submitted`
+
+Written by H08 Tool Dispatcher when `ToolProvider::invoke` returns
+`InvokeOutcome::Async(job_id)`. Recorded **before** H08 registers the
+`on_complete` sink with `JobManager`, and **before** the subsequent
+`turn_paused` event — so a crash between record and registration leaves
+a recoverable state where H03 can synthesize a `JobOutcome::Failed` for
+the unknown job (the in-memory `LocalJobManager` does not survive
+restart). This event also carries the `call_id` that H03 uses to map
+the eventual `job_completed_recorded` back to the originating
+`tool_use_recorded` — replacing the legacy Sprint 3 walk-back.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `call_id` | string | The `tool_use` block's `call_id` that produced this async job. Matches a preceding `tool_use_recorded.call_id` within the same turn. |
+| `job_id` | ULID string | Identifier minted by `JobManager`. Matches the subsequent `turn_paused.job_id` and the eventual `job_completed_recorded.job_id`. |
+| `tool_name` | string | Tool name. Informational; aids debugging / log readers. |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":8,"ts":"2026-05-24T10:00:00.500Z","type":"job_submitted","data":{"call_id":"toolu_01","job_id":"01J9C0R0K0JOB0JOB0JOB0JOB0","tool_name":"run_tests"}}
+```
+
+Added: Sprint 8 as an additive variant under ADR-0007. No
+`SCHEMA_VERSION` bump.
+
 ### `turn_paused`
 
 ```json
@@ -246,6 +276,138 @@ Added: Sprint 5 as an additive variant under ADR-0007. No
 `store_unavailable`, `model_gateway_failed`, `turn_panicked`,
 `turn_timed_out`, `hook_rejected`. The canonical fixture uses
 `turn_timed_out`.
+
+## Context management events
+
+Added Sprint 6 (ADR-0008). Four additive `EventPayload` variants; no `SCHEMA_VERSION` bump.
+
+These variants belong to `EventCategory::ContextDecision`. External readers must tolerate unknown `type` values per ADR-0007.
+
+A worked session demonstrating one truncate compaction is at
+`crates/testing/cogito-test-fixtures/fixtures/sessions/sample-truncate-v1.jsonl`.
+
+### `context_compacted`
+
+Written by the `Compactor` when it actually compacts history. A no-op compactor (`NoneCompactor`) never writes this event. At most one per turn in v0.1.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `turn_id` | ULID string | Turn during which compaction was decided. |
+| `replaced_seq_range` | `[u64, u64]` | Inclusive `[start_seq, end_seq]` covered by this compaction. Boundaries align to turn start/end. |
+| `produced_by` | string | `Compactor::id()` — e.g. `"truncate"`. |
+| `replacement` | object | What replaces the covered range in projection. `{"kind":"drop"}` for truncation; `{"kind":"summary","text":"...","model":"..."}` for summarization. |
+| `token_estimate_before` | u64 \| null | Estimated prompt tokens before compaction (informational). |
+| `token_estimate_after` | u64 \| null | Estimated prompt tokens after compaction (informational). |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":12,"ts":"2026-05-23T10:00:02.000Z","type":"context_compacted","data":{"turn_id":"01HFZZZ","replaced_seq_range":[1,8],"produced_by":"truncate","replacement":{"kind":"drop"},"token_estimate_before":1200,"token_estimate_after":300}}
+```
+
+### `system_prompt_injected`
+
+Written by `SystemPromptInjector` every turn, even when the suffix is empty (audit invariant). The suffix is appended after `strategy.system_prompt` with a `\n\n` separator when non-empty.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `turn_id` | ULID string | Turn whose system prompt this suffix applies to. |
+| `suffix` | string | Text appended to the base system prompt. Empty string for no-op injectors. |
+| `contributors` | string[] | Tags identifying what contributed (e.g. `["date", "skill:plan-review"]`). |
+| `produced_by` | string | `Injector::id()` — e.g. `"none"`. |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":13,"ts":"2026-05-23T10:00:02.100Z","type":"system_prompt_injected","data":{"turn_id":"01HFZZZ","suffix":"","contributors":[],"produced_by":"none"}}
+```
+
+### `tool_filter_overridden`
+
+Written by `ToolFilterOverrider` every turn, even when the mode is `Inherit` (audit invariant). H05 reads this event to apply the override on top of `strategy.allowed_tools`.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `turn_id` | ULID string | Turn whose tool surface this override applies to. |
+| `mode` | object | `{"kind":"inherit"}`, `{"kind":"intersect","tools":[...]}`, or `{"kind":"replace","tools":[...]}`. |
+| `contributors` | string[] | Tags identifying what contributed. |
+| `produced_by` | string | `Overrider::id()` — e.g. `"none"`. |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":14,"ts":"2026-05-23T10:00:02.200Z","type":"tool_filter_overridden","data":{"turn_id":"01HFZZZ","mode":{"kind":"inherit"},"contributors":[],"produced_by":"none"}}
+```
+
+### `context_decision_recorded`
+
+Written by H11 itself after all three traits finish. This is the summary index for the turn: it cross-references the event ids of the three trait events, and captures any per-trait errors from the degrade path.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `turn_id` | ULID string | Turn this decision summary belongs to. |
+| `compactions` | ULID string[] | Event ids of `context_compacted` events written this turn (0 or 1 for v0.1). |
+| `system_prompt_event` | ULID string | Event id of this turn's `system_prompt_injected`. |
+| `tool_filter_event` | ULID string | Event id of this turn's `tool_filter_overridden`. |
+| `errors` | object | Per-trait error capture. Fields: `compactor`, `injector`, `overrider` — each is a string (serialized error) or `null` if the trait ran cleanly. |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":15,"ts":"2026-05-23T10:00:02.300Z","type":"context_decision_recorded","data":{"turn_id":"01HFZZZ","compactions":["01HFCCC"],"system_prompt_event":"01HFSSS","tool_filter_event":"01HFTTT","errors":{"compactor":null,"injector":null,"overrider":null}}}
+```
+
+## Sprint 7 additive entries (no schema bump)
+
+Added Sprint 7 (ADR-0020). One additive `EventPayload` variant
+(`SkillActivated`) plus one additive optional field on the existing
+`TurnStarted` payload. No `SCHEMA_VERSION` bump per ADR-0007.
+
+### `turn_started.activate_skills`
+
+New optional field on the existing `TurnStarted` payload.
+
+- Type: `string[]`
+- Default on read: `[]` (older fixtures and turns triggered via
+  `TurnTrigger::UserText` continue to parse cleanly).
+- Source: user-channel skill activations carried with this turn — see
+  `TurnTrigger::SkillActivation` and the `/skill <name>` slash command
+  wired in by Surface. Sigil-based (model-channel) activations are NOT
+  recorded here; H11's `SkillInjector` re-derives them from previous-turn
+  assistant text.
+
+### `skill_activated`
+
+Written by `SkillInjector` (H11) — one event per newly activated skill
+within a turn. Dedupe rules and channel precedence live in the Sprint 7
+spec §11. Cross-references `system_prompt_injected.contributors` (which
+holds the same skill names) and the per-turn `system_prompt_event` in
+`context_decision_recorded`.
+
+**Payload**:
+
+| Field | Type | Description |
+|---|---|---|
+| `skill_name` | string | Bare name (`foo`) or `<plugin_id>:<name>` for Plugin scope. |
+| `source` | object | Where the skill was discovered. `{"kind":"repo","dir":"<workspace>"}` / `{"kind":"user"}` / `{"kind":"plugin","plugin_id":"<id>"}` / `{"kind":"system"}`. |
+| `channel` | object | What triggered the activation. `{"kind":"model_sigil"}` (assistant emitted `$Name` in prior-turn text) or `{"kind":"user_slash"}` (user typed `/skill <name>`). |
+
+**Example**:
+
+```json
+{"schema_version":1,"event_id":"01HFXXX","session_id":"01HFYYY","turn_id":"01HFZZZ","seq":2,"ts":"2026-05-23T00:00:00.200Z","type":"skill_activated","data":{"skill_name":"invoice-parser","source":{"kind":"user"},"channel":{"kind":"user_slash"}}}
+```
+
+A worked session demonstrating one user-channel skill activation is at
+`crates/testing/cogito-test-fixtures/fixtures/sessions/sample-skill-v1.jsonl`.
 
 ## Forward compatibility
 

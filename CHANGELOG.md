@@ -7,6 +7,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint 10 · v0.1 hardening (2026-05-29)
+
+**Changed**
+
+- **Renamed crate `cogito-store-jsonl` → `cogito-store`** (ADR-0024).
+  The crate is now named after its Session-layer role, not a backend.
+  The JSONL implementation moved into module `cogito_store::jsonl`,
+  gated by the default Cargo feature `jsonl`; `JsonlStore` is re-exported
+  at the crate root, so consumers change `use cogito_store_jsonl::JsonlStore`
+  to `use cogito_store::JsonlStore`. Future backends (`postgres` in v0.4,
+  `sqlite` later) land as additional feature-gated modules instead of new
+  workspace crates — the planned v0.4 `cogito-store-postgres` crate is now
+  `cogito-store --features postgres`. No on-disk format or schema change.
+
+### Sprint 9b · TUI (2026-05-28)
+
+**Added**
+
+- `cogito-tui` lifted from stub to working multi-pane ratatui surface.
+  Chat scrollback on the left, per-turn tool-call tree on the right,
+  bottom status bar, multi-line input with `Shift+Enter` newline, slash
+  command discovery popup, `Ctrl-T` to toggle tools pane,
+  `Ctrl-C`/`Ctrl-D` cancel/exit. Full flag parity with `cogito chat`
+  including `--strategy`, `--list-strategies`, `--session-id`,
+  `--mode resume`. Spec: `docs/superpowers/specs/2026-05-28-sprint-9b-tui-design.md`;
+  ROADMAP entry: Sprint 9b.
+- `tui-textarea` and `tracing-appender` added to workspace dependencies
+  (transitive consumers: `cogito-tui` only).
+- `assert_cmd` promoted from `cogito-cli` dev-dep to workspace dep.
+- `cogito-core` gains a `test-support` feature exposing
+  `SessionHandle::test_stub()` for pure-state Surface tests.
+
+**Changed**
+
+- Workspace layout table (AGENTS.md, ARCHITECTURE.md, CLAUDE.md):
+  `cogito-tui` row's "When" column updated from v0.2 to v0.1.
+
+### Sprint 9a · Multi-model Strategy (2026-05-27)
+
+**Added**
+- `cogito-protocol::StrategyRegistry` trait (read-only, object-safe).
+- `cogito-strategy` crate — FS-backed `StrategyRegistry` impl.
+  Markdown+frontmatter strategy files under `.cogito/strategies/`
+  (Repo scope) and `~/.config/cogito/strategies/` (User scope).
+- `cogito-model::openai_responses` adapter — OpenAI Responses API
+  with native reasoning-item decoding (ADR-0019).
+- `ProviderConfig::OpenAiResponses` variant.
+- `cogito.toml` `runtime.default_strategy` key.
+- `cogito chat --strategy <name>` and `--list-strategies` flags.
+- `cogito_cli::chat::resolve_strategy` helper — single seam for
+  combining strategy + CLI flags + `cogito.toml`.
+- Example strategies: `.cogito/strategies/{coder,planner,reviewer}.md`.
+- Resume-chaos `strategy_with_tool_filter` scenario.
+- ADR-0026 (Strategy registry).
+
+**Changed**
+- `runtime.strategies_dir` in `cogito.toml` is now an optional Repo-
+  scope override rather than a single canonical directory.
+
+**Removed**
+- `strategies/claude-opus.yaml` and `strategies/gpt-4.yaml` (stale
+  schema; replaced by `.cogito/strategies/*.md`).
+
+### Sprint 8 — Async Jobs
+
+- **Added** `cogito-jobs::LocalJobManager` — in-memory async job manager; jobs run as `tokio::task`s with `on_complete` sink registration.
+- **Added** `cogito-jobs::RunTestsTool` — `ExecutionClass::AlwaysAsync` tool that spawns `cargo nextest run`, kills on cancel/deadline (default 10 min), truncates output to 64 KiB.
+- **Added** `cogito-jobs::SleepTool` (test fixture, behind `test-tools` feature).
+- **Added** `EventPayload::JobSubmitted { call_id, job_id, tool_name }` — additive variant; no `SCHEMA_VERSION` bump.
+- **Activated** H08 async dispatch path; turn pauses on `InvokeOutcome::Async(job_id)`, resumes on `JobCompletionEvent`.
+- **Activated** `ResumePausedJob` and `ResumeAfterJobCompletion` paths in `apply_resume_point`; `ShutdownOutcome::JobManagerUnavailable` no longer returned.
+- **Added** single-slot mid-pause user-input queue (latest-wins, warn on overwrite).
+- **Changed** `SessionHandle::cancel_turn` mid-pause now calls `JobManager::cancel`.
+- **Fixed** cancel-token-disconnect — `SessionShared` and `SessionState` now share `Arc<parking_lot::Mutex<CancellationToken>>`, so `cancel_turn` works on every turn (not just the first).
+- **Removed** the H03 narrowing that inferred `call_id` from `ToolUseRecorded` near `TurnPaused`; now read directly from `JobSubmitted`.
+- **Added** chaos scenario `paused_async_job` with three crash boundaries.
+- **Added** `cogito-protocol::job::LocalJobSubmitter` — dyn-compatible submission trait (`submit_boxed(self: Arc<Self>, BoxFuture) -> JobId`) for async tools. Replaces concrete `Arc<LocalJobManager>` parameters in `RunTestsTool::new` and `SleepTool::new` (ADR-0025).
+- **Changed** `cogito-tools` no longer depends on `cogito-jobs`. `BuiltinToolProvider::with_jobs` and the embedded `run_tests` special-case are removed; `cogito-cli` composes builtins + async tools via `CompositeToolProvider::new(.., NamingPolicy::Strict)`.
+- **Added** ADR-0025 — Hands sub-layer boundary.
+
+### Sprint 7 — Skill loader (ADR-0020)
+
+- `cogito-skills` crate (Hands): SkillRegistry impl of SkillProvider; frontmatter parser; sigil regex + code-fence-aware scanner; Repo + User scope discovery.
+- `cogito-protocol`: SkillProvider trait + SkillMetadata/Content/Source; SkillActivated event variant; TurnStarted.activate_skills field; TurnTrigger::SkillActivation variant; StreamEvent::SkillActivationRequested broadcast; SystemPromptInjectorConfig::Skill; EventRecorder.record_skill_activated default impl; cogito_protocol::sigil module promoted from cogito-skills for ADR-0004 layer compliance.
+- `cogito-context`: SkillInjector impl of SystemPromptInjector; build_pipeline_v2 takes Option<Arc<dyn SkillProvider>>.
+- `cogito-core`: H06 sigil side-channel; TurnDeps.skills field; RuntimeBuilder.skills(...); session_loop projects SkillActivation to TurnStarted.activate_skills.
+- `cogito-cli`: `/skill <name> [text]` slash parser; `[skills]` cogito.toml section; SkillRegistry built at chat startup.
+- Resume chaos: `text_then_skill_then_tool` scenario with crash injection at sigil/activation boundaries.
+- Docs: `docs/skills/overview.md`; H06/H11 closure notes; ADR-0020 promoted to Accepted.
+- Additive event-log changes (no SCHEMA_VERSION bump).
+
+### Added — Sprint 6 (Context Management)
+
+- `cogito-protocol::context` — 4 traits (`Compactor`, `HistoryProjector`, `SystemPromptInjector`, `ToolFilterOverrider`) + `ContextConfig` + `ContextPipeline` + supporting types
+- `EventPayload` variants: `ContextCompacted`, `SystemPromptInjected`, `ToolFilterOverridden`, `ContextDecisionRecorded` (additive, no `SCHEMA_VERSION` bump per ADR-0007)
+- `EventPayload::category()` classifier (Conversation / HarnessMeta / ContextDecision)
+- `ModelGateway::model_limits()` additive method + `ModelLimits` type
+- `parse_context_window_suffix()` helper (`[1m]`/`[32k]`-style model id suffix parsing)
+- `cogito-context` crate: `NoneCompactor`, `TruncateCompactor`, `StandardProjector`, `NoneInjector`, `NoneOverrider`, `build_pipeline` factory
+- `OpenAiCompatProviderConfig.context_window_tokens: Option<u64>` fallback field
+- `StepRecorder::record_context_compacted` / `record_system_prompt_injected` / `record_tool_filter_overridden` / `record_context_decision` methods (StoreError invariant checking + per-turn idempotency)
+- `EventRecorder` trait in `cogito-protocol::store` (write-side abstraction so trait impls can persist events without depending on cogito-core)
+- `StoreError::InvariantViolated` variant
+
+### Changed — Sprint 6 (Context Management)
+
+- H01 Turn Driver `ContextManaged` state from pass-through to real orchestration (4-trait pipeline + degrade-on-failure)
+- H04 Prompt Composer delegates history projection to `dyn HistoryProjector`
+- H05 Tool Surface honors per-turn `ToolFilterOverridden` event
+- `AnthropicGateway` / `OpenAiCompatGateway` override `model_limits()`; OpenAI-compat strips `[<size>]` suffix from `params.model` before sending wire request to vLLM/SGLang
+- `HarnessStrategy` gains `context: ContextConfig` field (default = all no-op)
+
+### Decisions (ADR) — Sprint 6
+
+- **ADR-0008** Context Management — Accepted 2026-05-23
+
 ### Added — Sprint 5 (Hook Pipeline 实化)
 
 - `cogito-protocol::hook` — `HookHandler` + `HookProvider` + `HookDecision` + `HookLifecyclePoint` traits/types

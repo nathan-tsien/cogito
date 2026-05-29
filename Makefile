@@ -41,6 +41,7 @@ export XDG_CONFIG_HOME ?= $(HOME)/.config
 # Internal helpers
 CARGO        := cargo
 CLI_RUN      := $(CARGO) run -p cogito-cli --
+TUI_RUN      := $(CARGO) run -p cogito-tui --
 
 # Detect nextest; fall back to cargo test
 NEXTEST      := $(shell $(CARGO) nextest --version 2>/dev/null && echo yes || echo no)
@@ -75,7 +76,7 @@ CHAT_FLAGS = \
   $(call from_cli,SYSTEM,--system '$(SYSTEM)')
 
 .PHONY: default help \
-        chat \
+        chat tui \
         test test-integration ci fmt fmt-check fix clippy layer-check \
         bench bench-baseline chaos \
         clean sessions-clean \
@@ -94,6 +95,9 @@ help:
 	@echo "                            resume an existing session (default MODE=attach)"
 	@echo "    make chat MODEL=… PROVIDER=… BASE_URL=… SYSTEM='…' CONFIG=…"
 	@echo "                            per-invocation overrides (all optional)"
+	@echo ""
+	@echo "    make tui                ratatui TUI surface (same flags as chat)"
+	@echo "    make tui SESSION_ID=01K… [MODE=resume|attach|new]"
 	@echo ""
 	@echo "  Testing"
 	@echo "    make test               all workspace tests"
@@ -128,6 +132,9 @@ env-check:
 # on this single invocation.
 chat:
 	$(CLI_RUN) chat $(CHAT_FLAGS)
+
+tui:
+	$(TUI_RUN) $(CHAT_FLAGS)
 
 # Tests
 test:
@@ -176,7 +183,7 @@ bench:
 	$(CARGO) bench --workspace
 
 bench-baseline:
-	$(CARGO) bench -p cogito-store-jsonl --bench append_throughput
+	$(CARGO) bench -p cogito-store --bench append_throughput
 
 # Schema
 gen-schema:

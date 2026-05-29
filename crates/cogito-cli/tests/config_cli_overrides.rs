@@ -42,7 +42,9 @@ async fn cli_base_url_overrides_file_base_url() {
             ProviderConfig::Anthropic { base_url, .. } => {
                 assert_eq!(base_url, "https://from-cli");
             }
-            ProviderConfig::OpenAiCompat { .. } => panic!("expected Anthropic"),
+            ProviderConfig::OpenAiCompat { .. } | ProviderConfig::OpenAiResponses { .. } => {
+                panic!("expected Anthropic")
+            }
         }
     })
     .await;

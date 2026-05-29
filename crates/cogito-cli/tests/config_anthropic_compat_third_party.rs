@@ -61,7 +61,9 @@ async fn two_anthropic_providers_internal_selected() {
                 assert_eq!(api_key, "k-internal");
                 assert_eq!(base_url, "https://internal.api/anthropic/v1");
             }
-            ProviderConfig::OpenAiCompat { .. } => panic!("expected Anthropic"),
+            ProviderConfig::OpenAiCompat { .. } | ProviderConfig::OpenAiResponses { .. } => {
+                panic!("expected Anthropic")
+            }
         }
     })
     .await;
@@ -108,7 +110,9 @@ async fn cli_provider_flag_overrides_file_default() {
             ProviderConfig::Anthropic { name, .. } => {
                 assert_eq!(name, "anthropic-internal");
             }
-            ProviderConfig::OpenAiCompat { .. } => panic!("expected Anthropic"),
+            ProviderConfig::OpenAiCompat { .. } | ProviderConfig::OpenAiResponses { .. } => {
+                panic!("expected Anthropic")
+            }
         }
     })
     .await;

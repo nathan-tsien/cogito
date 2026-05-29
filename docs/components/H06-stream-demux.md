@@ -118,6 +118,19 @@ The `MessageCompleted` → `record_model_call_completed` call **must complete be
 
 → Sprint 3 decision: spec `2026-05-20-sprint-3-resume-coordinator-design.md` §4 Q1 落库时机 + §5.4 EventId 串回.
 
+## Sprint 7: sigil side-channel
+
+H06 maintains a per-text-block `FenceState` and on each text-delta runs
+`cogito_protocol::sigil::find_sigils_outside_code`. For each hit whose name
+is registered in the injected `SkillProvider`, H06 broadcasts a
+`StreamEvent::SkillActivationRequested` (deduped per text-block). The
+broadcast surface is informational; authoritative activation lands in the
+next turn's H11 pass via the SkillInjector.
+
+See `docs/adr/0020-skill-loader.md` and
+`docs/superpowers/specs/2026-05-23-sprint-7-skill-loader-design.md` for the
+end-to-end activation flow.
+
 ## References
 
 - ARCHITECTURE.md §"Turn state machine" (ModelCalling → ModelCompleted)

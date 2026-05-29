@@ -9,22 +9,146 @@ use crate::render::Renderer;
 use anyhow::{Context, Result, anyhow};
 use clap::{Args, ValueEnum};
 use cogito_core::runtime::{OpenMode, Runtime};
+use cogito_jobs::{BashTool, LocalJobManager, RunTestsTool};
 use cogito_model::build_gateway;
 use cogito_protocol::content::ContentBlock;
 use cogito_protocol::event::EventPayload;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::ids::SessionId;
+use cogito_protocol::job::{JobManager, LocalJobSubmitter};
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
+use cogito_protocol::strategy_registry::{StrategyError, StrategyRegistry};
 use cogito_protocol::stream::StreamEvent;
 use cogito_protocol::tool::ToolResult;
-use cogito_store_jsonl::JsonlStore;
-use cogito_tools::{BuiltinToolProvider, ReadFile};
+use cogito_store::JsonlStore;
+use cogito_strategy::FsStrategyRegistry;
+use cogito_tools::{BuiltinToolProvider, CompositeToolProvider, NamingPolicy, ReadFile};
 use futures::StreamExt;
 use std::io::Write as _;
 
+use thiserror::Error;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
+
+/// Errors from [`parse_slash_skill`]. These are user-facing — printed
+/// to stderr by the REPL and surfaced as a usage hint rather than
+/// being submitted as a turn.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum SlashError {
+    /// First token after `/skill ` was not a registered name; the user
+    /// either typo'd a name or referred to a skill that was never
+    /// discovered. Treated as a hard rejection — we do not silently
+    /// fall back to `UserText` to avoid surprising the user.
+    #[error("unknown skill: {0}")]
+    UnknownSkill(String),
+    /// Skill is registered but its SKILL.md set `user-invocable: false`,
+    /// so the slash channel must not activate it. Surface as a
+    /// distinct error so the REPL can tell the user *why* the slash
+    /// invocation was rejected.
+    #[error("skill not user-invocable: {0}")]
+    NotUserInvocable(String),
+    /// User typed bare `/skill` with no arguments.
+    #[error("missing skill name after /skill")]
+    Empty,
+}
+
+/// Parse a REPL input line. Returns either a plain
+/// [`TurnTrigger::UserText`] trigger or a
+/// [`TurnTrigger::SkillActivation`] trigger.
+///
+/// Grammar:
+/// ```text
+/// "/skill <name>[ <name>...] [ <user_text>]"
+/// ```
+///
+/// Scanning rule: after `/skill `, read tokens left-to-right; each
+/// registered name is added to `names`. The first unknown token (or
+/// end of input) switches to user-text accumulation. The first token
+/// MUST be registered; otherwise we return
+/// [`SlashError::UnknownSkill`].
+///
+/// `is_registered` and `is_user_invocable` are closures over the
+/// corresponding [`cogito_protocol::skill::SkillProvider`] checks so
+/// the parser stays decoupled from the registry's concrete type and
+/// can be exercised with stub registries in tests.
+///
+/// # Errors
+///
+/// Returns [`SlashError::Empty`] when the line is exactly `/skill`,
+/// [`SlashError::UnknownSkill`] when the first token after `/skill `
+/// is not registered, and [`SlashError::NotUserInvocable`] when the
+/// first token is registered but its `SKILL.md` set
+/// `user-invocable: false`.
+pub fn parse_slash_skill<F, G>(
+    line: &str,
+    is_registered: &F,
+    is_user_invocable: &G,
+) -> Result<cogito_protocol::turn_trigger::TurnTrigger, SlashError>
+where
+    F: Fn(&str) -> bool,
+    G: Fn(&str) -> bool,
+{
+    use cogito_protocol::turn_trigger::TurnTrigger;
+    let trimmed = line.trim_start();
+    let Some(rest) = trimmed
+        .strip_prefix("/skill ")
+        .or_else(|| trimmed.strip_prefix("/skill\t"))
+    else {
+        if trimmed == "/skill" {
+            return Err(SlashError::Empty);
+        }
+        return Ok(TurnTrigger::UserText(line.to_string()));
+    };
+
+    let mut names: Vec<String> = Vec::new();
+    let mut text_start: Option<usize> = None;
+    let mut cursor = 0usize;
+    // Track the first registered-but-blocked token so we can return a
+    // precise `NotUserInvocable` error after the scan. The blocked
+    // token is treated as a hard reject only when it is the first
+    // token; a blocked token *after* an already-accepted name is
+    // treated as the start of user_text (consistent with how an
+    // unregistered token is handled), since the user's preceding
+    // accepted names are valid activations on their own.
+    let mut first_blocked: Option<String> = None;
+    for tok in rest.split_whitespace() {
+        // Locate `tok` inside `rest` starting at `cursor` so we can
+        // preserve the original spacing of the trailing user text.
+        // `split_whitespace` collapses runs of whitespace, which would
+        // otherwise lose the user's "do  this" double-spacing.
+        let abs = rest[cursor..].find(tok).map_or(cursor, |p| cursor + p);
+        cursor = abs + tok.len();
+        let registered = is_registered(tok);
+        let invocable = registered && is_user_invocable(tok);
+        if invocable && text_start.is_none() {
+            names.push(tok.to_string());
+        } else {
+            if registered && !invocable && names.is_empty() && first_blocked.is_none() {
+                first_blocked = Some(tok.to_string());
+            }
+            // First non-name token (or unregistered/non-invocable) starts user_text.
+            text_start = Some(abs);
+            break;
+        }
+    }
+
+    if names.is_empty() {
+        if let Some(blocked) = first_blocked {
+            return Err(SlashError::NotUserInvocable(blocked));
+        }
+        // The first token wasn't registered — hard error.
+        let first = rest.split_whitespace().next().unwrap_or("");
+        return Err(SlashError::UnknownSkill(first.to_string()));
+    }
+
+    let user_text = text_start
+        .map(|pos| rest[pos..].trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    Ok(TurnTrigger::SkillActivation { names, user_text })
+}
 
 /// CLI value for `--mode`. Mirrors `OpenMode` but lives in the Surface
 /// crate so clap can derive `ValueEnum` without touching the Brain
@@ -59,7 +183,7 @@ impl From<ChatMode> for OpenMode {
 const CTRL_C_EXIT_WINDOW: Duration = Duration::from_secs(2);
 
 /// Arguments for the `chat` subcommand.
-#[derive(Debug, Args)]
+#[derive(Debug, Default, Args)]
 pub struct ChatArgs {
     /// Path to a `cogito.toml`. Highest precedence in the search path.
     #[arg(long)]
@@ -97,6 +221,187 @@ pub struct ChatArgs {
     /// Override the default system prompt.
     #[arg(long)]
     pub system: Option<String>,
+
+    /// Strategy name to load from `.cogito/strategies/`. Overrides
+    /// `cogito.toml` `runtime.default_strategy`. Mutually independent of
+    /// `--model`: `--model` can still override the strategy's model.
+    #[arg(long, value_name = "NAME")]
+    pub strategy: Option<String>,
+
+    /// Print available strategies (name + description) and exit.
+    #[arg(long)]
+    pub list_strategies: bool,
+}
+
+/// Resolve a `HarnessStrategy` + `ProviderConfig` pair from CLI args,
+/// the loaded `RuntimeConfig`, and the FS-backed registry. This is the
+/// single seam where strategy + provider + CLI overrides collide;
+/// downstream code (`RuntimeBuilder`, gateway construction) consumes
+/// only the resolved values.
+///
+/// Resolution order (per Sprint 9a spec §12.1):
+///   strategy        = `--strategy` -> `cogito.toml` `default_strategy` -> synthesized
+///   provider        = `--provider` -> `strategy.provider` -> `cogito.toml` `default_provider` -> error
+///   model           = `--model` -> `strategy.model` -> `cogito.toml` `runtime.default_model` -> error
+///   `system_prompt` = `--system` -> `strategy.system_prompt` -> empty
+///
+/// # Errors
+///
+/// Returns one of:
+/// - `ResolveError::UnknownStrategy { name, available }` — CLI named a missing strategy.
+/// - `ResolveError::UnknownProvider { strategy, provider }` — strategy.provider points to nothing.
+/// - `ResolveError::MissingProvider` — no `--provider`, no strategy provider, no `default_provider`.
+/// - `ResolveError::MissingModel` — no `--model`, no strategy model, no `runtime.default_model`.
+pub fn resolve_strategy(
+    args: &ChatArgs,
+    cfg: &cogito_config::RuntimeConfig,
+    registry: &dyn StrategyRegistry,
+) -> Result<(HarnessStrategy, cogito_model::ProviderConfig), ResolveError> {
+    // Pick the strategy name (or None for synthesis).
+    let strategy_name = args
+        .strategy
+        .clone()
+        .or_else(|| cfg.runtime.default_strategy.clone());
+
+    let mut strategy = if let Some(name) = strategy_name.as_deref() {
+        match registry.get(name) {
+            Ok(s) => s,
+            Err(StrategyError::Unknown(n, available)) => {
+                return Err(ResolveError::UnknownStrategy { name: n, available });
+            }
+            Err(e) => return Err(ResolveError::Strategy(e)),
+        }
+    } else {
+        // Synthesized default. Model resolved further below; seed with
+        // the best guess we have so the strategy is well-formed.
+        let initial_model = args
+            .model
+            .clone()
+            .or_else(|| cfg.runtime.default_model.clone())
+            .unwrap_or_default();
+        HarnessStrategy::default_with_model(initial_model)
+    };
+
+    // Apply CLI overrides on top of the strategy.
+    if let Some(model) = args.model.as_ref() {
+        strategy.model_params.model.clone_from(model);
+    }
+    if let Some(sys) = args.system.as_ref() {
+        strategy.system_prompt.clone_from(sys);
+    }
+
+    // Ensure model is non-empty after overrides + strategy + cogito.toml fallback.
+    if strategy.model_params.model.is_empty()
+        && let Some(m) = cfg.runtime.default_model.as_ref()
+    {
+        strategy.model_params.model.clone_from(m);
+    }
+    if strategy.model_params.model.is_empty() {
+        return Err(ResolveError::MissingModel);
+    }
+
+    // Resolve provider:
+    //   --provider > strategy.provider (via FsStrategyRegistry downcast)
+    //              > cogito.toml default_provider
+    //              > Sprint 2 legacy ENV bridge (empty cfg.providers only)
+    let strategy_provider_ref = strategy_name
+        .as_deref()
+        .and_then(|n| registry_provider_ref(registry, n));
+
+    let provider_name = args
+        .provider
+        .clone()
+        .or(strategy_provider_ref)
+        .or_else(|| cfg.runtime.default_provider.clone());
+
+    let Some(provider_name) = provider_name else {
+        // Sprint 2 legacy bridge: no providers declared and no name
+        // selected anywhere -> synthesize one from
+        // `ANTHROPIC_API_KEY` / `OPENAI_BASE_URL`. Anything else
+        // (e.g. user set `default_provider` but the named entry is
+        // missing) still surfaces as `MissingProvider` /
+        // `UnknownProvider` below.
+        if cfg.providers.is_empty() {
+            let synth = crate::chat_config::synthesize_legacy_provider(
+                &strategy.model_params.model,
+                args.base_url.as_deref(),
+            )
+            .map_err(|e| ResolveError::LegacyBridge(e.to_string()))?;
+            return Ok((strategy, synth));
+        }
+        return Err(ResolveError::MissingProvider);
+    };
+
+    let provider_cfg = cfg
+        .providers
+        .iter()
+        .find(|p| p.name() == provider_name)
+        .cloned()
+        .ok_or_else(|| ResolveError::UnknownProvider {
+            strategy: strategy_name
+                .clone()
+                .unwrap_or_else(|| "<synthesized>".into()),
+            provider: provider_name,
+        })?;
+
+    Ok((strategy, provider_cfg))
+}
+
+/// Extract a strategy's `provider:` reference. Concrete-impl downcast
+/// (`FsStrategyRegistry` only). Returns `None` for other impls — those
+/// must declare provider via `cogito.toml` `default_provider` in v0.1.
+//
+// TODO(v0.4): replace the `as_any` downcast with a first-class
+// `fn provider_ref(&self, name: &str) -> Option<&str>` method on the
+// `StrategyRegistry` trait itself (default `None`). DB- and S3-backed
+// SaaS impls return `None` cleanly; FsStrategyRegistry overrides to
+// the same body as today. Removes the `Any` dance and tightens the
+// trait contract. See ADR-0026 §"as_any downcast trade-off".
+fn registry_provider_ref(registry: &dyn StrategyRegistry, name: &str) -> Option<String> {
+    let any_self: &dyn std::any::Any = registry.as_any();
+    any_self
+        .downcast_ref::<FsStrategyRegistry>()
+        .and_then(|fs| fs.provider_ref(name).map(str::to_string))
+}
+
+/// Errors returned by [`resolve_strategy`]. Surface code maps these to
+/// user-facing diagnostics.
+#[derive(Debug, Error)]
+pub enum ResolveError {
+    /// CLI named a strategy that the registry does not have.
+    #[error("strategy `{name}` not found; available: {available:?}")]
+    UnknownStrategy {
+        /// Strategy id the user asked for.
+        name: String,
+        /// Snapshot of `registry.list()` at the time of the failed lookup.
+        available: Vec<String>,
+    },
+    /// Strategy resolved to a `provider:` name that is not declared in
+    /// `cogito.toml`.
+    #[error("strategy `{strategy}` references provider `{provider}` which is not in cogito.toml")]
+    UnknownProvider {
+        /// Owning strategy name (or `<synthesized>` for the default).
+        strategy: String,
+        /// Provider id the strategy referenced.
+        provider: String,
+    },
+    /// No `--provider`, no strategy provider, no `runtime.default_provider`.
+    #[error(
+        "no provider available: pass --provider, set strategy.provider, or set runtime.default_provider"
+    )]
+    MissingProvider,
+    /// No `--model`, no strategy model, no `runtime.default_model`.
+    #[error("no model available: pass --model, set strategy.model, or set runtime.default_model")]
+    MissingModel,
+    /// Sprint 2 legacy ENV bridge attempted (no providers declared) but
+    /// failed -- e.g. neither `ANTHROPIC_API_KEY` nor `OPENAI_BASE_URL`
+    /// is set. The wrapped string is the underlying anyhow chain.
+    #[error("legacy ENV bridge failed: {0}")]
+    LegacyBridge(String),
+    /// Pass-through for non-`Unknown` `StrategyError` variants surfaced
+    /// from the registry.
+    #[error(transparent)]
+    Strategy(StrategyError),
 }
 
 /// Resolve the open mode from CLI flags. Rejects incoherent
@@ -126,21 +431,57 @@ fn resolve_mode(args: &ChatArgs) -> Result<ChatMode> {
     }
 }
 
-/// Build the chat session's `ToolProvider`: registers builtins, brings
-/// up MCP servers (per `cogito.toml`), prints the startup banner to
-/// stderr, and composes the two via `CompositeToolProvider::Strict`
-/// when MCP brought up at least one server.
+/// Construct the local tool inventory: sync builtins
+/// (`BuiltinToolProvider`, including `read_file` and `web_fetch`) plus
+/// the async `run_tests` and adaptive `bash` tools, composed via
+/// `CompositeToolProvider` with strict naming. Also brings up MCP
+/// servers (per `cogito.toml`), prints the startup banner to stderr,
+/// and layers MCP on top of the local composite when at least one
+/// server came up.
 ///
-/// Returns the builtin-only provider when no MCP servers were
+/// Adding a new async tool means appending another
+/// `Arc<dyn ToolProvider>` to the local composite below — no edits
+/// required in `cogito-tools` or `cogito-jobs`. See ADR-0025
+/// §"Decision" item 4.
+///
+/// Returns the local-only composite when no MCP servers were
 /// configured or all of them failed (see ADR-0018 §3.5 — MCP failures
 /// are non-fatal to Runtime).
 async fn build_tool_provider(
     cfg: &cogito_config::RuntimeConfig,
+    job_mgr: Arc<LocalJobManager>,
 ) -> Result<Arc<dyn cogito_protocol::tool::ToolProvider>> {
+    // Command executor for `bash`. Whether it is sandboxed is a policy
+    // decision made here at the Surface layer (ADR-0027): the CLI calls
+    // `build_executor` and receives a trait object, never matching on the
+    // sandbox kind itself.
+    let executor = cogito_sandbox::build_executor(&cfg.tools.sandbox)
+        .map_err(|e| anyhow!("build command executor: {e}"))?;
+
     let builtin: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(
         BuiltinToolProvider::builder()
             .with_tool(Arc::new(ReadFile))
+            .with_tool(Arc::new(cogito_tools::WebFetch::new(
+                cfg.tools.web_fetch.clone(),
+            )))
             .build(),
+    );
+    // `RunTestsTool` and `BashTool` implement `ToolProvider` directly
+    // (their dispatch outcome is `InvokeOutcome::Async`/`Adaptive`). The
+    // SAME job-manager handle threads through both async tools and
+    // `RuntimeBuilder::job_manager` below, so we `Arc::clone` it for each
+    // consumer and coerce to `Arc<dyn LocalJobSubmitter>`.
+    let run_tests: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(RunTestsTool::new(
+        Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>,
+    ));
+    let bash: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(BashTool::new(
+        executor,
+        Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>,
+        cfg.tools.bash.clone(),
+    ));
+    let local: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(
+        CompositeToolProvider::new(vec![builtin, run_tests, bash], NamingPolicy::Strict)
+            .map_err(|e| anyhow!("compose builtin + run_tests + bash: {e}"))?,
     );
 
     let mcp_build = cogito_mcp::build_mcp_provider(&cfg.mcp_servers).await;
@@ -186,55 +527,94 @@ async fn build_tool_provider(
     // debug_assert in BuiltinToolProviderBuilder enforces this).
     let tools: Arc<dyn cogito_protocol::tool::ToolProvider> = match mcp_build.provider {
         Some(mcp) => Arc::new(
-            cogito_tools::CompositeToolProvider::new(
-                vec![builtin, mcp],
-                cogito_tools::NamingPolicy::Strict,
-            )
-            .map_err(|e| anyhow!("compose builtins + mcp: {e}"))?,
+            CompositeToolProvider::new(vec![local, mcp], NamingPolicy::Strict)
+                .map_err(|e| anyhow!("compose local + mcp: {e}"))?,
         ),
-        None => builtin,
+        None => local,
     };
     Ok(tools)
 }
 
 /// Entry point for the `chat` subcommand.
 pub async fn run(args: ChatArgs) -> Result<()> {
-    let inputs = cogito_cli::chat_config::ChatConfigInputs {
+    let inputs = crate::chat_config::ChatConfigInputs {
         config_path: args.config.clone(),
         model: args.model.clone(),
         provider: args.provider.clone(),
         base_url: args.base_url.clone(),
         session_root: args.session_root.clone(),
     };
-    let cfg = cogito_cli::chat_config::load_layered_config(&inputs).await?;
-    let provider_cfg = cogito_cli::chat_config::select_provider(&cfg, &inputs)?;
+    let (cfg, registry) = crate::chat_config::build_runtime_config_and_registry(&inputs).await?;
+
+    // `--list-strategies`: print available strategies and exit before
+    // we open a runtime / gateway / store. The CLI is the surface
+    // layer; primary command output goes to stdout (not tracing), so
+    // we silence `print_stdout` for this single block.
+    if args.list_strategies {
+        for name in registry.list() {
+            let desc = registry.description(&name).unwrap_or("(no description)");
+            #[allow(clippy::print_stdout)]
+            {
+                println!("{name:<24} {desc}");
+            }
+        }
+        return Ok(());
+    }
+
+    let (strategy, provider_cfg) =
+        resolve_strategy(&args, &cfg, registry.as_ref()).map_err(|e| match e {
+            ResolveError::UnknownStrategy { name, available } => anyhow!(
+                "unknown strategy `{name}`; available: {avail}",
+                avail = available.join(", ")
+            ),
+            other => anyhow!(other),
+        })?;
+
+    // CLI `--base-url` is a post-merge field patch; apply it on the
+    // provider chosen by `resolve_strategy` so the Sprint 2 flag
+    // continues to override base_url for any provider kind.
+    let provider_cfg = if let Some(b) = args.base_url.as_ref() {
+        crate::chat_config::patch_base_url(provider_cfg, b.clone())
+    } else {
+        provider_cfg
+    };
+
     let gateway: Arc<dyn ModelGateway> =
         build_gateway(provider_cfg).map_err(|e| anyhow!("building gateway: {e}"))?;
-
-    let model_id = args
-        .model
-        .clone()
-        .or_else(|| cfg.runtime.default_model.clone())
-        .ok_or_else(|| anyhow!("--model required (or set runtime.default_model in cogito.toml)"))?;
 
     let store = Arc::new(JsonlStore::new(cfg.runtime.session_root.clone()));
     // Keep a typed handle for the post-`open_session` replay; the
     // Runtime builder takes its own `Arc<dyn ConversationStore>` clone.
     let store_for_replay: Arc<dyn ConversationStore> = store.clone();
-    let tools = build_tool_provider(&cfg).await?;
 
-    let mut strategy = HarnessStrategy::default_with_model(&model_id);
-    if let Some(sys) = args.system.clone() {
-        strategy.system_prompt = sys;
-    }
+    // Construct the `LocalJobManager` singleton up here so the SAME
+    // `Arc` flows into both the async-tool provider (typed for
+    // `submit` via the `LocalJobSubmitter` coercion) and
+    // `RuntimeBuilder::job_manager` (typed for `on_complete`). If
+    // these diverged the async tools would submit to one manager
+    // while the Brain registered sinks on a different one — every
+    // async tool call would hang. See ADR-0008 and ADR-0025.
+    let job_mgr: Arc<LocalJobManager> = LocalJobManager::new();
 
-    let runtime = Runtime::builder()
+    let tools = build_tool_provider(&cfg, Arc::clone(&job_mgr)).await?;
+    let skills = crate::chat_config::build_skill_provider(&cfg)?;
+
+    // `Arc<LocalJobManager>` -> `Arc<dyn JobManager>` via the unsized
+    // coercion impl on `Arc<T>`. The typed `Arc<LocalJobManager>` was
+    // already cloned into `build_tool_provider` above for `RunTestsTool`
+    // and `BashTool`; here we consume the original to produce the
+    // dyn-typed handle the `RuntimeBuilder::job_manager` setter wants.
+    let job_mgr_dyn: Arc<dyn JobManager> = job_mgr;
+    let mut builder = Runtime::builder()
         .store(store)
         .model(gateway)
         .tools(tools)
         .strategy(strategy)
-        .build()
-        .context("building runtime")?;
+        .job_manager(job_mgr_dyn);
+    if let Some(provider) = skills.clone() {
+        builder = builder.skills(provider);
+    }
+    let runtime = builder.build().context("building runtime")?;
 
     // Parse or generate the session ID.
     let session_id = match &args.session_id {
@@ -256,7 +636,7 @@ pub async fn run(args: ChatArgs) -> Result<()> {
         "cogito chat started (type /quit to exit, Ctrl-C to cancel turn / exit when idle)"
     );
 
-    run_repl(handle.clone(), store_for_replay, session_id, mode).await?;
+    run_repl(handle.clone(), store_for_replay, session_id, mode, skills).await?;
     let _ = handle.shutdown(Duration::from_secs(30)).await;
     Ok(())
 }
@@ -274,6 +654,7 @@ async fn run_repl(
     store: Arc<dyn ConversationStore>,
     session_id: SessionId,
     mode: ChatMode,
+    skills: Option<Arc<dyn cogito_protocol::skill::SkillProvider>>,
 ) -> Result<()> {
     // Ctrl-C handler — forwards each press as a message; the main loop
     // interprets it relative to current state (in-flight turn vs idle).
@@ -344,15 +725,11 @@ async fn run_repl(
                     let l = String::from_utf8_lossy(&line_buf).into_owned();
                     line_buf.clear();
 
-                    if l.trim() == "/quit" {
-                        break;
+                    match dispatch_input_line(&l, &handle, skills.as_ref(), &mut renderer).await? {
+                        InputOutcome::Quit => break,
+                        InputOutcome::Submitted => turn_in_flight = true,
+                        InputOutcome::ReDisplayPrompt => {}
                     }
-                    if l.trim().is_empty() {
-                        renderer.prompt_user()?;
-                        continue;
-                    }
-                    handle.submit_user_text(l).await.context("submit_user_text")?;
-                    turn_in_flight = true;
                 }
                 Err(e) => return Err(e).context("stdin read"),
             },
@@ -379,6 +756,77 @@ async fn run_repl(
         }
     }
     Ok(())
+}
+
+/// Decision returned by [`dispatch_input_line`]: tells the REPL loop
+/// whether to exit, mark a turn as in-flight, or simply redraw the
+/// prompt and keep going.
+enum InputOutcome {
+    /// `/quit` was typed — break out of the REPL.
+    Quit,
+    /// A turn was submitted via `submit(...)`.
+    Submitted,
+    /// Either the line was blank, the slash form was malformed, or the
+    /// skill name was unknown. The caller should redraw the prompt and
+    /// wait for the next line; no turn was started.
+    ReDisplayPrompt,
+}
+
+/// Handle one already-trimmed-of-trailing-newline input line from the
+/// REPL: dispatch `/quit`, blank lines, `/skill ...` slash commands,
+/// and plain user text. Factored out of `run_repl` so the loop stays
+/// under `clippy::too_many_lines` and so the slash-vs-text branch can
+/// evolve without growing the main `tokio::select!`.
+async fn dispatch_input_line(
+    line: &str,
+    handle: &cogito_core::runtime::SessionHandle,
+    skills: Option<&Arc<dyn cogito_protocol::skill::SkillProvider>>,
+    renderer: &mut Renderer<std::io::Stdout>,
+) -> Result<InputOutcome> {
+    if line.trim() == "/quit" {
+        return Ok(InputOutcome::Quit);
+    }
+    if line.trim().is_empty() {
+        renderer.prompt_user()?;
+        return Ok(InputOutcome::ReDisplayPrompt);
+    }
+    // Slash dispatch. The closures are backed by the injected
+    // `SkillProvider`; when no provider was wired
+    // (`[skills].enabled = false`), every name is unregistered and
+    // `/skill` invocations surface to the user as `UnknownSkill`.
+    // `is_user_invocable` honors `SKILL.md` `user-invocable: false`.
+    let parsed = parse_slash_skill(
+        line,
+        &|n: &str| skills.is_some_and(|s| s.is_registered(n)),
+        &|n: &str| skills.is_some_and(|s| s.get_metadata(n).is_some_and(|m| m.user_invocable)),
+    );
+    match parsed {
+        Ok(trigger) => {
+            handle.submit(trigger).await.context("submit trigger")?;
+            Ok(InputOutcome::Submitted)
+        }
+        Err(SlashError::UnknownSkill(name)) => {
+            let _ = writeln!(std::io::stderr(), "unknown skill: {name}");
+            renderer.prompt_user()?;
+            Ok(InputOutcome::ReDisplayPrompt)
+        }
+        Err(SlashError::NotUserInvocable(name)) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "skill '{name}' is not user-invocable (SKILL.md set user-invocable: false)"
+            );
+            renderer.prompt_user()?;
+            Ok(InputOutcome::ReDisplayPrompt)
+        }
+        Err(SlashError::Empty) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "usage: /skill <name> [<name>...] [ <user-text>]"
+            );
+            renderer.prompt_user()?;
+            Ok(InputOutcome::ReDisplayPrompt)
+        }
+    }
 }
 
 /// Read every persisted `ConversationEvent` for `session_id` and feed
@@ -411,7 +859,7 @@ async fn replay_history(
         let event = ev.context("replay event")?;
         event_count += 1;
         match event.payload {
-            EventPayload::TurnStarted { user_input } => {
+            EventPayload::TurnStarted { user_input, .. } => {
                 if let Some(text) = first_user_text(&user_input) {
                     renderer.replay_user_input(text)?;
                 }
@@ -512,6 +960,8 @@ mod tests {
             session_id: session_id.map(str::to_owned),
             mode,
             system: None,
+            strategy: None,
+            list_strategies: false,
         }
     }
 

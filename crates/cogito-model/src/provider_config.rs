@@ -14,7 +14,10 @@ use std::time::Duration;
 use cogito_protocol::gateway::{ModelError, ModelGateway};
 use serde::{Deserialize, Serialize};
 
-use crate::{AnthropicConfig, AnthropicGateway, OpenAiCompatConfig, OpenAiCompatGateway};
+use crate::{
+    AnthropicConfig, AnthropicGateway, OpenAiCompatConfig, OpenAiCompatGateway,
+    OpenAiResponsesConfig, OpenAiResponsesGateway, ReasoningEffort,
+};
 
 /// Provider configuration: a tagged-union over the gateway kinds
 /// `cogito-model` knows how to construct. `kind` is the serde tag.
@@ -73,8 +76,38 @@ pub enum ProviderConfig {
         /// `<think>` context. See ADR-0019 §5.3.
         #[serde(default)]
         include_prior_thinking: bool,
+        /// Optional fallback for `ModelGateway::model_limits().context_window_tokens`
+        /// when the model id does not carry a `[<size>]` suffix. Users typically
+        /// know what their vLLM/SGLang server is configured for; this is the
+        /// place to declare it. When both the suffix and this field are absent,
+        /// the gateway falls back to `32_768` with a warn log.
+        #[serde(default)]
+        context_window_tokens: Option<u64>,
     },
-    // OpenAiResponses { ... } lands in Sprint 5 — single-arm addition.
+    /// `OpenAI` Responses API endpoint. Native reasoning items mapped to
+    /// `ContentBlock::Thinking` per ADR-0019.
+    #[serde(rename = "openai-responses")]
+    OpenAiResponses {
+        /// Provider entry name (used by surfaces for `--provider <name>` lookup).
+        name: String,
+        /// API key for `Authorization: Bearer ...`.
+        api_key: String,
+        /// Base URL. Defaults to `https://api.openai.com/v1`.
+        #[serde(default = "defaults::openai_responses_base_url")]
+        base_url: String,
+        /// Per-request timeout in seconds. `None` keeps the gateway default.
+        #[serde(default)]
+        timeout_secs: Option<u64>,
+        /// `low` | `medium` | `high` | omit (= provider default).
+        #[serde(default)]
+        reasoning_effort: Option<ReasoningEffort>,
+        /// Optional fallback for `ModelGateway::model_limits().context_window_tokens`
+        /// when the model id does not carry a `[<size>]` suffix. Responses-eligible
+        /// models (o1, o3, gpt-4o) generally support 128k; this lets you pin a
+        /// different size if your deployment differs.
+        #[serde(default)]
+        context_window_tokens: Option<u64>,
+    },
 }
 
 impl ProviderConfig {
@@ -83,7 +116,9 @@ impl ProviderConfig {
     #[must_use]
     pub fn name(&self) -> &str {
         match self {
-            Self::Anthropic { name, .. } | Self::OpenAiCompat { name, .. } => name,
+            Self::Anthropic { name, .. }
+            | Self::OpenAiCompat { name, .. }
+            | Self::OpenAiResponses { name, .. } => name,
         }
     }
 }
@@ -120,6 +155,7 @@ pub fn build_gateway(cfg: ProviderConfig) -> Result<Arc<dyn ModelGateway>, Model
             auth_scheme,
             timeout_secs,
             include_prior_thinking,
+            context_window_tokens,
             ..
         } => {
             let mut c = OpenAiCompatConfig::with_base_url(base_url);
@@ -127,10 +163,28 @@ pub fn build_gateway(cfg: ProviderConfig) -> Result<Arc<dyn ModelGateway>, Model
             c.auth_header = auth_header;
             c.auth_scheme = auth_scheme;
             c.include_prior_thinking = include_prior_thinking;
+            c.context_window_tokens = context_window_tokens;
             if let Some(s) = timeout_secs {
                 c.timeout = Duration::from_secs(s);
             }
             Ok(Arc::new(OpenAiCompatGateway::new(c)?))
+        }
+        ProviderConfig::OpenAiResponses {
+            api_key,
+            base_url,
+            timeout_secs,
+            reasoning_effort,
+            context_window_tokens,
+            ..
+        } => {
+            let mut c = OpenAiResponsesConfig::with_api_key(api_key);
+            c.base_url = base_url;
+            c.reasoning_effort = reasoning_effort;
+            c.context_window_tokens = context_window_tokens;
+            if let Some(s) = timeout_secs {
+                c.timeout = Duration::from_secs(s);
+            }
+            Ok(Arc::new(OpenAiResponsesGateway::new(c)?))
         }
     }
 }
@@ -147,5 +201,41 @@ mod defaults {
     }
     pub(super) fn auth_scheme() -> String {
         "Bearer".into()
+    }
+    pub(super) fn openai_responses_base_url() -> String {
+        "https://api.openai.com/v1".into()
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod responses_tests {
+    use super::*;
+
+    #[test]
+    fn parses_openai_responses_toml() {
+        let toml_str = r#"
+kind = "openai-responses"
+name = "openai-prod"
+api_key = "sk-xxx"
+reasoning_effort = "high"
+"#;
+        let cfg: ProviderConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.name(), "openai-prod");
+        assert!(matches!(cfg, ProviderConfig::OpenAiResponses { .. }));
+    }
+
+    #[test]
+    fn build_gateway_dispatch_includes_responses() {
+        let cfg = ProviderConfig::OpenAiResponses {
+            name: "p".into(),
+            api_key: "k".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            timeout_secs: Some(60),
+            reasoning_effort: None,
+            context_window_tokens: None,
+        };
+        let gw = build_gateway(cfg).unwrap();
+        assert_eq!(gw.provider_id(), "openai-responses");
     }
 }

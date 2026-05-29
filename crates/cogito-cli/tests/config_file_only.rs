@@ -55,7 +55,9 @@ async fn file_declares_anthropic_with_env_interpolation() {
                 assert_eq!(name, "anthropic-prod");
                 assert_eq!(api_key, "sk-file-test");
             }
-            ProviderConfig::OpenAiCompat { .. } => panic!("expected Anthropic"),
+            ProviderConfig::OpenAiCompat { .. } | ProviderConfig::OpenAiResponses { .. } => {
+                panic!("expected Anthropic")
+            }
         }
     })
     .await;

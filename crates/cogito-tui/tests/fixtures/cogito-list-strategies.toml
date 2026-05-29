@@ -1,0 +1,9 @@
+[runtime]
+strategies_dir = "."
+
+[[providers]]
+kind = "anthropic"
+name = "test"
+api_key = "fake"
+base_url = "https://example.invalid"
+anthropic_version = "2023-06-01"

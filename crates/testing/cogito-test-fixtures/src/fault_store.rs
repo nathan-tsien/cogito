@@ -131,7 +131,7 @@ mod tests {
     use chrono::Utc;
     use cogito_protocol::ids::EventId;
     use cogito_protocol::{ConversationEvent, EventPayload, SCHEMA_VERSION, SessionMeta};
-    use cogito_store_jsonl::JsonlStore;
+    use cogito_store::JsonlStore;
     use ulid::Ulid;
 
     fn evt(session_id: SessionId, seq: u64) -> ConversationEvent {

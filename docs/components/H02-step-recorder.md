@@ -54,7 +54,7 @@ lifecycle" below for the full state diagram.
 - After a successful `record_*().await`, the event is in the OS page
   cache via userspace flush per event; no `sync_data`/`fsync` in v0.1
   JSONL (dev/debug only — production durability lives in
-  `cogito-store-postgres` at v0.4). Process crash is recoverable; power
+  `cogito-store --features postgres` at v0.4). Process crash is recoverable; power
   loss may lose recent events. The next Brain instance reads back
   whatever the kernel managed to flush.
 - If `record_*().await` panics mid-write, the JSONL file may have a
@@ -68,8 +68,9 @@ lifecycle" below for the full state diagram.
 
 ## v0.1 scope
 
-- Sole `ConversationStore` impl: `cogito-store-jsonl` (per-session file,
-  userspace flush per event; no fsync — see ADR-0007 dev/debug scope).
+- Sole `ConversationStore` impl: `cogito-store` default `jsonl` feature
+  (per-session file, userspace flush per event; no fsync — see ADR-0007
+  dev/debug scope).
 - No compaction, no archival, no rotation.
 - Text-block buffer is per-session, in-process; one `TextBlockBuf` slot
   per recorder, drained on `on_text_block_complete()`.
@@ -125,7 +126,7 @@ All `record_*` methods currently return `Result<(), StoreError>`. Sprint 3 P2.5 
 ## Testing strategy
 
 - **Unit**: text-block lifecycle — `on_text_delta` accumulates into the buffer + broadcasts each chunk; `on_text_block_complete` drains and writes one `AssistantMessageAppended`. Verify with synthetic delta streams that multiple `text_block_complete` boundaries produce N separate events (not one combined event).
-- **Contract**: any future `ConversationStore` impl must pass the same contract test as `cogito-store-jsonl`. Shared test in `cogito-protocol::tests::store_contract` (consumed by each store crate).
+- **Contract**: any future `ConversationStore` impl must pass the same contract test as the `cogito-store` `jsonl` backend. Shared test in `cogito-protocol::tests::store_contract` (consumed by each store backend).
 - **Property** (proptest): given an arbitrary sequence of `record`, `on_text_delta`, and `on_text_block_complete` calls, the resulting event log replays to a structurally equivalent state.
 - **Performance**: experiment E01 (10K events) targets P99 write < 5 ms and is the published budget.
 

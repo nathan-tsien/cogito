@@ -9,14 +9,15 @@ publish.workspace = true
 [dependencies]
 cogito-protocol.workspace = true
 
-tokio.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "time", "rt", "macros"] }
 async-trait.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-serde.workspace = true
+serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-tokio-test.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+cogito-protocol = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

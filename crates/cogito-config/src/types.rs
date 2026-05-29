@@ -5,9 +5,12 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use cogito_jobs::BashConfig;
 use cogito_mcp::{McpServerConfig, McpStartupFailure};
 use cogito_model::ProviderConfig;
 use cogito_protocol::strategy::HarnessStrategy;
+use cogito_sandbox::SandboxConfig;
+use cogito_tools::WebFetchConfig;
 use serde::{Deserialize, Serialize};
 
 /// Finalized configuration value consumed by `RuntimeBuilder`. Always
@@ -27,6 +30,29 @@ pub struct RuntimeConfig {
     /// Surface code joins these with handshake-time failures from
     /// `build_mcp_provider` and surfaces them in the startup banner.
     pub mcp_parse_failures: Vec<McpStartupFailure>,
+    /// Sprint 7: optional `[skills]` section. Surfaces (CLI / TUI) use
+    /// this to construct a `SkillRegistry` and inject it into
+    /// `RuntimeBuilder::skills`. `None` is equivalent to "section
+    /// omitted"; finalize does not synthesize a default so absence
+    /// stays distinguishable from `enabled = true`.
+    pub skills: Option<SkillsConfig>,
+    /// Resolved `[tools]` section. Always present (defaults when omitted).
+    /// Unlike `skills`, `tools` has no omitted-vs-default distinction, so
+    /// `finalize` collapses an absent section straight to defaults.
+    pub tools: ToolsConfig,
+}
+
+/// `[tools]` cogito.toml section: aggregates per-tool config owned by the
+/// implementing crates. Whole-section replace on merge (like `[skills]`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct ToolsConfig {
+    /// `bash` tool tunables (owned by `cogito-jobs`).
+    pub bash: BashConfig,
+    /// `web_fetch` tool tunables (owned by `cogito-tools`).
+    pub web_fetch: WebFetchConfig,
+    /// Command-execution backend selection (owned by `cogito-sandbox`).
+    pub sandbox: SandboxConfig,
 }
 
 /// Finalized `[runtime]` section. All fields are resolved (no `Option`
@@ -40,6 +66,10 @@ pub struct RuntimeSection {
     pub default_provider: Option<String>,
     /// Default model identifier; provider-specific.
     pub default_model: Option<String>,
+    /// Optional default strategy name. If `None` and `--strategy`
+    /// is not given, `resolve_strategy` synthesizes a strategy from
+    /// `default_model` + CLI flags. See ADR-0026.
+    pub default_strategy: Option<String>,
     /// Directory scanned for strategy files (Sprint 5+).
     pub strategies_dir: PathBuf,
 }
@@ -64,6 +94,40 @@ pub struct RuntimeConfigPartial {
     /// finalize, where a bad entry becomes a `McpStartupFailure`
     /// instead of poisoning the whole parse. See ADR-0018 §3.
     pub mcp_servers: Option<Vec<toml::Value>>,
+    /// Optional `[skills]` section (Sprint 7). Plumbed into
+    /// `RuntimeBuilder` by `cogito-cli` to build a `SkillRegistry`.
+    pub skills: Option<SkillsConfig>,
+    /// Optional `[tools]` section. Whole-section replace on merge.
+    pub tools: Option<ToolsConfig>,
+}
+
+/// `[skills]` cogito.toml section.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkillsConfig {
+    /// Master switch. When `false`, `RuntimeBuilder` receives no `SkillProvider`
+    /// and selecting `SystemPromptInjectorConfig::Skill` fails at build time.
+    #[serde(default = "default_skills_enabled")]
+    pub enabled: bool,
+    /// User scope dir. None / empty disables user scope.
+    pub user_dir: Option<String>,
+    /// Opt-in to bundled (System) skills.
+    #[serde(default)]
+    pub include_system: bool,
+}
+
+fn default_skills_enabled() -> bool {
+    true
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            user_dir: None,
+            include_system: false,
+        }
+    }
 }
 
 /// Partial `[runtime]` section. Every field is `Option<T>` so the
@@ -77,6 +141,8 @@ pub struct RuntimeSectionPartial {
     pub default_provider: Option<String>,
     /// Override for `RuntimeSection::default_model`.
     pub default_model: Option<String>,
+    /// Override for `RuntimeSection::default_strategy`.
+    pub default_strategy: Option<String>,
     /// Override for `RuntimeSection::strategies_dir`.
     pub strategies_dir: Option<PathBuf>,
 }
@@ -116,16 +182,23 @@ mod tests {
                 session_root: Some(PathBuf::from("/tmp/sessions")),
                 default_provider: Some("anthropic-prod".into()),
                 default_model: Some("claude-opus-4-7".into()),
-                strategies_dir: Some(PathBuf::from("./strategies")),
+                default_strategy: Some("coder".into()),
+                strategies_dir: Some(PathBuf::from(".cogito/strategies")),
             }),
             providers: Some(vec![]),
             mcp_servers: None,
+            skills: None,
+            tools: None,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: RuntimeConfigPartial = serde_json::from_str(&s).unwrap();
         assert_eq!(
             back.runtime.as_ref().unwrap().default_provider,
             p.runtime.as_ref().unwrap().default_provider
+        );
+        assert_eq!(
+            back.runtime.as_ref().unwrap().default_strategy,
+            p.runtime.as_ref().unwrap().default_strategy
         );
     }
 
@@ -135,6 +208,8 @@ mod tests {
         assert!(p.runtime.is_none());
         assert!(p.providers.is_none());
         assert!(p.mcp_servers.is_none());
+        assert!(p.skills.is_none());
+        assert!(p.tools.is_none());
     }
 
     #[test]
@@ -201,6 +276,52 @@ mod tests {
             panic!("expected ConfigParse");
         };
         assert_eq!(*index, 1);
+    }
+
+    #[test]
+    fn skills_config_rejects_unknown_field() {
+        // A typo like `userdir` (missing underscore) must surface rather
+        // than silently degrade to the default.
+        let toml_str = r#"
+            [skills]
+            enabled = true
+            userdir = "/tmp/skills"
+        "#;
+        let err = toml::from_str::<RuntimeConfigPartial>(toml_str)
+            .expect_err("unknown [skills] field must error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("userdir") || msg.contains("unknown"),
+            "error should mention the offending field, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn tools_section_parses_and_defaults() {
+        let toml_str = r#"
+            [tools.bash]
+            sync_timeout_secs = 5
+
+            [tools.sandbox]
+            kind = "direct"
+            root = "/work"
+        "#;
+        let partial: RuntimeConfigPartial = toml::from_str(toml_str).unwrap();
+        let cfg = partial.finalize().unwrap();
+        assert_eq!(cfg.tools.bash.sync_timeout_secs, 5);
+        // web_fetch absent -> default.
+        assert_eq!(cfg.tools.web_fetch.timeout_secs, 30);
+        // sandbox root honored.
+        let cogito_sandbox::SandboxConfig::Direct(d) = &cfg.tools.sandbox;
+        assert_eq!(d.root, std::path::PathBuf::from("/work"));
+    }
+
+    #[test]
+    fn tools_default_when_section_absent() {
+        let partial: RuntimeConfigPartial =
+            toml::from_str("[runtime]\nsession_root='/tmp/x'\n").unwrap();
+        let cfg = partial.finalize().unwrap();
+        assert_eq!(cfg.tools.bash.max_output_bytes, 32 * 1024);
     }
 
     #[test]

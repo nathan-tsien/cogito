@@ -43,10 +43,13 @@ impl ConfigLoader for EnvConfigLoader {
                 session_root,
                 default_provider,
                 default_model,
+                default_strategy: None,
                 strategies_dir,
             }),
             providers: None,
             mcp_servers: None,
+            skills: None,
+            tools: None,
         };
         Ok(partial)
     }

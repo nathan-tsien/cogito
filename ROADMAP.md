@@ -6,12 +6,10 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 complete; Sprint 4
-> (MCP sync tools) in flight; Sprints 6–10 reshaped per
-> [2026-05-22 roadmap rebalance](docs/superpowers/specs/2026-05-22-roadmap-rebalance-design.md)
-> (Hook impl + Context C2 trait freeze + Skill loader promoted into
-> v0.1; Async Jobs / Multi-model / TUI / hardening renumbered;
-> Storage+Multimodal deferred from v0.2 to v0.5).
+> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 + 6 + 7 + 8 + 9a + 9b complete;
+> Sprint 4 (MCP sync tools) in flight; Sprint 9 split into 9a (done)
+> and 9b (done); Sprints 10 unchanged.
+> **Current sprint: Sprint 10 (v0.1 hardening).**
 
 ## Version plan
 
@@ -26,7 +24,7 @@ Driver, panic isolation, and chaos-tested resume.
 - [x] CLAUDE.md added; ADR-0004 (Brain/Hands/Session) ratified
 - [x] ADR-0005 (production scope) ratified
 - [x] ADR-0006 (Runtime + H01 execution model) ratified
-- [x] Workspace topology fixed per ADR-0004: dropped `cogito-conversation`, added `cogito-store-jsonl`, stripped Hands/Boundary/Session deps from `cogito-core`
+- [x] Workspace topology fixed per ADR-0004: dropped `cogito-conversation`, added `cogito-store` (originally `cogito-store-jsonl`; renamed per ADR-0024), stripped Hands/Boundary/Session deps from `cogito-core`
 - [x] Protocol types landed: `ExecutionClass`, `StreamEvent`, `JobCompletionEvent`, `JobManager::on_complete`, `TurnOutcome`, `TurnFailureReason` (12+ serde-roundtrip tests passing)
 - [x] Runtime module scaffolded (stubs): `Runtime`, `RuntimeBuilder`, `SessionHandle`, per-session loop task (`runtime::session_loop::run_session` + `SessionShared`), `store_writer`
 - [x] CI runs `make ci` (fmt + clippy + layer-check + test) + cargo-deny job
@@ -35,7 +33,7 @@ Driver, panic isolation, and chaos-tested resume.
 #### Sprint 1 · H02 Step Recorder + JSONL store (1.5 day)
 - [x] `cogito-protocol` defines `ConversationEvent` with `schema_version: u32` + `Vec<ContentBlock>` payload (Text + ToolUse + ToolResult variants)
 - [x] `cogito-protocol` defines `ConversationStore` trait
-- [x] `cogito-store-jsonl` implementation: per-session file, `flush` per event, append-only (durability scope: dev/debug — see ADR-0007)
+- [x] `cogito-store` (then named `cogito-store-jsonl`) implementation: per-session file, `flush` per event, append-only (durability scope: dev/debug — see ADR-0007)
 - [x] Contract test infrastructure (shared test consumed by every backend crate)
 - [x] `cogito-core::harness::step_recorder` writes events
 - [x] Text-block batching: per content_block boundary (matches Codex / Claude Code; see ADR-0007 + H02 doc)
@@ -147,15 +145,15 @@ Sprint 12) can load hooks from disk.
 2026-05-22 rebalance — enables team-parallel context strategy
 contributions and unblocks Sprint 7 Skill injection into H11.
 
-- [ ] Research carryover: Codex (`run_inline_auto_compact_task`), Claude Code (`/compact` + auto), Manus, other SaaS agent platforms — trigger policies and persisted shape
-- [ ] **ADR-0008**: Context Management — freeze `Compactor` / `HistoryProjector` / `SystemPromptInjector` traits + event variants (`ContextCompacted`, `ContextDecisionRecorded`, `SystemPromptInjected`, `ToolFilterOverridden`) + trigger policy + summarization model selection rules
-- [ ] `cogito-protocol`: additive `EventPayload` variants for context lifecycle (per `#[non_exhaustive]`, no schema_version bump)
-- [ ] **New crate `cogito-context`** (umbrella): hosts all Compactor / HistoryProjector / SystemPromptInjector implementations as modules; future strategies (`compactor::summarize`, `compactor::sliding`, …) are added as modules, not new crates; `build_pipeline(&ContextConfig)` factory lives here
-- [ ] v0.1 ships only `cogito_context::compactor::truncate` as the reference Compactor
-- [ ] `cogito-core::harness`: H11 implementation; H01 `Init → ContextManaged` transition stops being a pass-through
-- [ ] H04 history projection: honor `ContextCompacted` events
-- [ ] H03 Resume Coordinator: crash-mid-compaction recovery
-- [ ] Chaos test: inject crash during summarization model call (skipped if v0.1 reference Compactor is truncate-only)
+- [x] Research carryover: Codex (`run_inline_auto_compact_task`), Claude Code (`/compact` + auto), Manus, other SaaS agent platforms — trigger policies and persisted shape
+- [x] **ADR-0008**: Context Management — freeze `Compactor` / `HistoryProjector` / `SystemPromptInjector` traits + event variants (`ContextCompacted`, `ContextDecisionRecorded`, `SystemPromptInjected`, `ToolFilterOverridden`) + trigger policy + summarization model selection rules
+- [x] `cogito-protocol`: additive `EventPayload` variants for context lifecycle (per `#[non_exhaustive]`, no schema_version bump)
+- [x] **New crate `cogito-context`** (umbrella): hosts all Compactor / HistoryProjector / SystemPromptInjector implementations as modules; future strategies (`compactor::summarize`, `compactor::sliding`, …) are added as modules, not new crates; `build_pipeline(&ContextConfig)` factory lives here
+- [x] v0.1 ships only `cogito_context::compactor::truncate` as the reference Compactor
+- [x] `cogito-core::harness`: H11 implementation; H01 `Init → ContextManaged` transition stops being a pass-through
+- [x] H04 history projection: honor `ContextCompacted` events
+- [x] H03 Resume Coordinator: crash-mid-compaction recovery
+- [x] Chaos test: inject crash during summarization model call (skipped if v0.1 reference Compactor is truncate-only)
 
 #### Sprint 7 · Skill loader (`cogito-skills`) — ADR-0020 (1.5–2 days)
 
@@ -163,39 +161,54 @@ contributions and unblocks Sprint 7 Skill injection into H11.
 members ship knowledge packs as markdown + frontmatter, no Rust
 required.
 
-- [ ] **ADR-0020**: Skill loader — locks K5 sigil activation (`$SkillName` + `/skill X` dual channel; no `load_skill` tool), scope precedence (Repo > User > Plugin > System), `SKILL.md` frontmatter schema (`name` / `description` / `disable-model-invocation` / `user-invocable`), bundled-scripts deferral (see ADR-0023)
-- [ ] **New crate `cogito-skills`** (Hands): SkillRegistry + scope-based filesystem discovery + frontmatter parser + sigil regex + `SkillProvider` trait impl
-- [ ] `cogito-protocol`: add `SkillProvider` trait + `EventPayload::SkillActivated { skill_name, source, recorded_event_id }` (additive, no schema_version bump)
-- [ ] H04 Prompt Composer: inject "Available Skills" block (name + description with character cap per skill)
-- [ ] H06 Stream Demultiplexer: detect sigil in `text_delta`; emit `ModelEvent::SkillActivationRequested`
-- [ ] H11 Context Manage: on `SkillActivationRequested`, inject full `SKILL.md` as user-role message before next turn (via `SystemPromptInjector` trait from Sprint 6)
-- [ ] CLI: `/skill <name>` slash command in `cogito chat` REPL
-- [ ] Sigil edge-case guardrails (see rebalance spec §7.1): match only registered skill names + system-prompt escape instruction
-- [ ] Smoke test: skill defined under `.cogito/skills/` activates via sigil + via slash; SKILL.md content reaches model
-- [ ] Resume-chaos: new scenario `text_then_skill_then_tool` — crash injection at boundaries with skill-activated context
+- [x] **ADR-0020**: Skill loader — locks K5 sigil activation (`$SkillName` + `/skill X` dual channel; no `load_skill` tool), scope precedence (Repo > User > Plugin > System), `SKILL.md` frontmatter schema (`name` / `description` / `disable-model-invocation` / `user-invocable`), bundled-scripts deferral (see ADR-0023)
+- [x] **New crate `cogito-skills`** (Hands): SkillRegistry + scope-based filesystem discovery + frontmatter parser + sigil regex + `SkillProvider` trait impl
+- [x] `cogito-protocol`: add `SkillProvider` trait + `EventPayload::SkillActivated { skill_name, source, recorded_event_id }` (additive, no schema_version bump)
+- [x] H04 Prompt Composer: inject "Available Skills" block (name + description with character cap per skill)
+- [x] H06 Stream Demultiplexer: detect sigil in `text_delta`; emit `ModelEvent::SkillActivationRequested`
+- [x] H11 Context Manage: on `SkillActivationRequested`, inject full `SKILL.md` as user-role message before next turn (via `SystemPromptInjector` trait from Sprint 6)
+- [x] CLI: `/skill <name>` slash command in `cogito chat` REPL
+- [x] Sigil edge-case guardrails (see rebalance spec §7.1): match only registered skill names + system-prompt escape instruction
+- [x] Smoke test: skill defined under `.cogito/skills/` activates via sigil + via slash; SKILL.md content reaches model
+- [x] Resume-chaos: new scenario `text_then_skill_then_tool` — crash injection at boundaries with skill-activated context
 
 #### Sprint 8 · Async Jobs (2 days)
 
 **Renumbered from old Sprint 5** by 2026-05-22 rebalance. Required by
 v0.3 Subagent S1 `wait_agent` semantics and v0.4 multi-replica resume.
 
-- [ ] `cogito-jobs` implements `JobManager` (tokio task + JSONL job log persistence)
-- [ ] `cogito-jobs` provides cross-process job state persistence (mirrors event log structure; required by Sprint 3 ResumePausedJob path — see Sprint 3 spec §5.6)
-- [ ] H08 Tool Dispatcher async path (handles `InvokeOutcome::Async(JobId)`)
-- [ ] One real long task tool (`run_tests` or similar)
-- [ ] Loop pauses on async, resumes on completion
-- [ ] Mid-pause user input handling: queued, processed after current turn
+- [x] `cogito-jobs` implements `JobManager` (in-memory; jobs run as `tokio::task`s with `on_complete` sink registration)
+- [x] Process-bounded jobs; conversation event log is the sole persistence; resume coordinator synthesizes `JobOutcome::Failed` for any open job whose process was lost. See `docs/superpowers/specs/2026-05-24-sprint-8-async-jobs-design.md`.
+- [x] H08 Tool Dispatcher async path (handles `InvokeOutcome::Async(JobId)`)
+- [x] One real long task tool (`RunTestsTool` wrapping `cargo nextest run`)
+- [x] Loop pauses on async, resumes on completion
+- [x] Mid-pause user input handling: single-slot queue (latest-wins, warn on overwrite); processed after current turn drains
+- [x] `EventPayload::JobSubmitted { call_id, job_id, tool_name }` additive variant (no `SCHEMA_VERSION` bump); H03 reads `call_id` directly instead of walk-back
+- [x] Fix cancel-token-disconnect: `SessionShared` and `SessionState` share `Arc<parking_lot::Mutex<CancellationToken>>` so `cancel_turn` works on every turn (closes Sprint 3 latent narrowing)
+- [x] Resume-chaos: new `paused_async_job` scenario with three crash boundaries
 
-#### Sprint 9 · Multi-model Strategy + TUI (2 days)
+#### Sprint 9a · Multi-model Strategy (2 days)
 
-**Merged from old Sprint 6 + old Sprint 7 lower half** by 2026-05-22
-rebalance.
+**Split from old Sprint 9** by 2026-05-27 spec/plan. Carries the
+multi-model half of the original Sprint 9. TUI carries to Sprint 9b.
 
-- [ ] OpenAI adapter in `cogito-model` (Responses API; ContentBlock serialization to OpenAI's flat top-level items)
-- [ ] H10 Strategy Selector with YAML config loading from `strategies/*.yaml`
-- [ ] CLI `--model` flag selects strategy
-- [ ] Per-strategy `model_params`, `allowed_tools`, `system_prompt`
-- [ ] Basic TUI with ratatui (replicates `cogito chat`)
+- [x] OpenAI Responses adapter in `cogito-model` (Responses API; ContentBlock serialization with native reasoning items per ADR-0019)
+- [x] H10 Strategy Selector — markdown+frontmatter strategy registry via new crate `cogito-strategy` (FS-backed `StrategyRegistry` impl)
+- [x] CLI `--strategy <name>` flag selects strategy; `--model` overrides strategy.model
+- [x] Per-strategy `model_params`, `allowed_tools`, `system_prompt`, `context`
+- [x] Three example strategies under `.cogito/strategies/` (coder, planner, reviewer)
+- [x] **ADR-0026**: Strategy registry — markdown+frontmatter format, Repo > User scope precedence, supersedes ADR-0017 §13
+- [x] Resume-chaos `strategy_with_tool_filter` scenario passes all 4 oracles
+
+#### Sprint 9b · TUI (1 day)
+
+**Split from old Sprint 9** by 2026-05-27 spec/plan. Replicates
+`cogito chat` in a ratatui TUI; consumes the same `resolve_strategy`
+helper landed in 9a.
+
+- [x] Basic TUI with ratatui replicating `cogito chat`
+- [x] `cogito-tui` reads the same FsStrategyRegistry; `--strategy` flag honored
+- [x] Spec landed: `docs/superpowers/specs/2026-05-28-sprint-9b-tui-design.md`
 
 #### Sprint 10 · v0.1 硬化 + tag v0.1.0 (1 day)
 
@@ -203,7 +216,8 @@ rebalance.
 `cogito-store-jsonl` → `cogito-store` rename PR (see ADR-0024).
 
 - [ ] All component design docs cross-referenced and current
-- [ ] `cogito-store-jsonl` → `cogito-store` rename PR landed (see ADR-0024); JSONL becomes the default Cargo feature
+- [x] `cogito-store-jsonl` → `cogito-store` rename PR landed (see ADR-0024); JSONL becomes the default Cargo feature
+- [x] **明示追加(非原排期)**: 核心工具 `bash` + `web_fetch`,以及 `cogito-sandbox` 的 `CommandExecutor` 接缝(`DirectExecutor` + `build_executor`)与 `[tools]` 配置段。详见 ADR-0027 / `docs/components/cogito-sandbox.md`
 - [ ] CHANGELOG.md initial entry
 - [ ] Tag `v0.1.0`
 

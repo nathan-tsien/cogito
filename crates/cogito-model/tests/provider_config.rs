@@ -28,7 +28,9 @@ fn anthropic_deserializes_with_defaults() {
             assert_eq!(anthropic_version, "2023-06-01");
             assert!(timeout_secs.is_none());
         }
-        ProviderConfig::OpenAiCompat { .. } => panic!("expected Anthropic variant"),
+        ProviderConfig::OpenAiCompat { .. } | ProviderConfig::OpenAiResponses { .. } => {
+            panic!("expected Anthropic variant")
+        }
     }
 }
 
@@ -54,7 +56,9 @@ fn anthropic_deserializes_with_overrides() {
             assert_eq!(anthropic_version, "2024-01-01");
             assert_eq!(timeout_secs, Some(120));
         }
-        ProviderConfig::OpenAiCompat { .. } => panic!("expected Anthropic variant"),
+        ProviderConfig::OpenAiCompat { .. } | ProviderConfig::OpenAiResponses { .. } => {
+            panic!("expected Anthropic variant")
+        }
     }
 }
 
@@ -81,7 +85,9 @@ fn openai_compat_deserializes() {
             assert_eq!(auth_header, "Authorization");
             assert_eq!(auth_scheme, "Bearer");
         }
-        ProviderConfig::Anthropic { .. } => panic!("expected OpenAiCompat variant"),
+        ProviderConfig::Anthropic { .. } | ProviderConfig::OpenAiResponses { .. } => {
+            panic!("expected OpenAiCompat variant")
+        }
     }
 }
 
@@ -132,6 +138,7 @@ fn build_openai_compat_gateway() {
         auth_scheme: "Bearer".into(),
         timeout_secs: None,
         include_prior_thinking: false,
+        context_window_tokens: None,
     };
     let gw: Arc<dyn ModelGateway> = build_gateway(cfg).expect("build");
     assert_eq!(gw.provider_id(), "openai-compat");
@@ -164,7 +171,9 @@ fn openai_compat_include_prior_thinking_defaults_false() {
         } => {
             assert!(!include_prior_thinking, "default must be false");
         }
-        ProviderConfig::Anthropic { .. } => panic!("expected OpenAiCompat variant"),
+        ProviderConfig::Anthropic { .. } | ProviderConfig::OpenAiResponses { .. } => {
+            panic!("expected OpenAiCompat variant")
+        }
     }
 }
 
@@ -184,6 +193,8 @@ fn openai_compat_include_prior_thinking_honors_explicit_true() {
         } => {
             assert!(include_prior_thinking, "explicit true must propagate");
         }
-        ProviderConfig::Anthropic { .. } => panic!("expected OpenAiCompat variant"),
+        ProviderConfig::Anthropic { .. } | ProviderConfig::OpenAiResponses { .. } => {
+            panic!("expected OpenAiCompat variant")
+        }
     }
 }

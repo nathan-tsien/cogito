@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 cogito-protocol.workspace = true
+cogito-context.workspace = true
+cogito-jobs.workspace = true
 jsonschema.workspace = true
 
 tokio.workspace = true
@@ -27,11 +29,21 @@ ulid.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 
+[features]
+# Opt-in stub constructors for downstream crate tests that need a
+# `SessionHandle` without standing up a full `Runtime` (e.g.
+# `cogito-tui`'s pure-state App tests). Production builds leave the
+# feature off, so the stubs are never compiled into shipped binaries.
+test-support = []
+
 [dev-dependencies]
 cogito-test-fixtures.workspace = true
 cogito-tools.workspace = true
 cogito-mock-model.workspace = true
-cogito-store-jsonl.workspace = true
+cogito-context.workspace = true
+cogito-store.workspace = true
+cogito-skills.workspace = true
+async-stream.workspace = true
 tokio-test.workspace = true
 rstest.workspace = true
 insta.workspace = true

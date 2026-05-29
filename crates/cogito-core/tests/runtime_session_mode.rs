@@ -9,7 +9,7 @@ use cogito_mock_model::MockModelGateway;
 use cogito_protocol::ids::SessionId;
 use cogito_protocol::store::ConversationStore as _;
 use cogito_protocol::strategy::HarnessStrategy;
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use cogito_test_fixtures::canonical_sample_session;
 use cogito_tools::{BuiltinToolProvider, ReadFile};
 

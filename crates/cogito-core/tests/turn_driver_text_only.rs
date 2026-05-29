@@ -12,6 +12,7 @@ use cogito_core::harness::step_recorder::StepRecorder;
 use cogito_core::harness::turn_driver::deps::TurnDeps;
 use cogito_core::harness::turn_driver::state::TurnCtx;
 use cogito_core::harness::turn_driver::{TurnEntry, enter_turn};
+use cogito_jobs::LocalJobManager;
 use cogito_mock_model::MockModelGateway;
 use cogito_protocol::ExecCtx;
 use cogito_protocol::NoOpMetricsRecorder;
@@ -19,10 +20,10 @@ use cogito_protocol::gateway::{ModelEvent, StopReason, Usage};
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::turn::TurnOutcome;
-use cogito_store_jsonl::JsonlStore;
+use cogito_store::JsonlStore;
 use cogito_tools::ReadFile;
 use cogito_tools::provider::BuiltinToolProvider;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, mpsc};
 
 #[tokio::test]
 async fn text_only_turn_reaches_completed() -> Result<(), Box<dyn std::error::Error>> {
@@ -66,6 +67,7 @@ async fn text_only_turn_reaches_completed() -> Result<(), Box<dyn std::error::Er
             .build(),
     );
 
+    let (job_completion_tx, _job_completion_rx) = mpsc::channel(32);
     let deps = TurnDeps {
         step: Arc::clone(&recorder),
         store: Arc::clone(&store),
@@ -73,6 +75,12 @@ async fn text_only_turn_reaches_completed() -> Result<(), Box<dyn std::error::Er
         tools,
         hooks: Arc::new(CompositeHookPipeline::default()),
         metrics: Arc::new(NoOpMetricsRecorder),
+        context_pipeline: Arc::new(cogito_context::build_pipeline(
+            &cogito_protocol::context::ContextConfig::default(),
+        )),
+        skills: None,
+        job_mgr: LocalJobManager::new(),
+        job_completion_tx,
     };
 
     let ctx = TurnCtx {

@@ -77,6 +77,15 @@ pub enum EventPayload {
     TurnStarted {
         /// User input that triggered this turn.
         user_input: Vec<ContentBlock>,
+        /// User-requested skill activations carried via
+        /// `TurnTrigger::SkillActivation` (slash-command channel). Empty
+        /// for plain `UserText` triggers. Independent from sigil-based
+        /// activations, which are re-derived from previous-turn text.
+        ///
+        /// Additive per ADR-0007: defaults to empty on read for older
+        /// fixtures.
+        #[serde(default)]
+        activate_skills: Vec<String>,
     },
 
     /// One content block of assistant text has been fully emitted.
@@ -101,6 +110,22 @@ pub enum EventPayload {
         call_id: String,
         /// The tool result.
         result: ToolResult,
+    },
+
+    /// H08 submitted an async job for a tool call. Recorded immediately
+    /// after the tool's `invoke()` returns `InvokeOutcome::Async(job_id)`
+    /// and BEFORE the `on_complete` sink is registered.
+    ///
+    /// Added Sprint 8 as an additive variant under ADR-0007. No
+    /// `SCHEMA_VERSION` bump.
+    JobSubmitted {
+        /// Identifier matching the originating `ToolUseRecorded.call_id`.
+        call_id: String,
+        /// Opaque job identifier produced by `JobManager`.
+        job_id: JobId,
+        /// Tool name (redundant with the `call_id` lookup but kept for
+        /// log readability and debugging).
+        tool_name: String,
     },
 
     /// The turn paused on an async tool call.
@@ -201,6 +226,131 @@ pub enum EventPayload {
         /// Rejection reason from `HookDecision::Reject`.
         reason: String,
     },
+
+    /// H11 Compactor decided to compact a portion of the event log.
+    ///
+    /// Added Sprint 6 as an additive variant under ADR-0007 / ADR-0008. No
+    /// `SCHEMA_VERSION` bump.
+    ContextCompacted {
+        /// The turn during which this compaction was decided.
+        turn_id: TurnId,
+        /// Inclusive seq range that this compaction covers.
+        replaced_seq_range: (u64, u64),
+        /// `Compactor::id()` — implementation identity.
+        produced_by: String,
+        /// What replaces the covered range in projection.
+        replacement: crate::context::CompactionReplacement,
+        /// Token estimate before this compaction (informational).
+        token_estimate_before: Option<u64>,
+        /// Token estimate after this compaction (informational).
+        token_estimate_after: Option<u64>,
+    },
+
+    /// `SystemPromptInjector` ran for this turn (even if suffix is empty).
+    ///
+    /// Added Sprint 6 as an additive variant under ADR-0007 / ADR-0008. No
+    /// `SCHEMA_VERSION` bump.
+    SystemPromptInjected {
+        /// The turn whose system prompt this suffix is for.
+        turn_id: TurnId,
+        /// Text appended after `strategy.system_prompt` (may be empty).
+        suffix: String,
+        /// Tags identifying what contributed (e.g. `["date", "skill:plan-review"]`).
+        contributors: Vec<String>,
+        /// `Injector::id()`.
+        produced_by: String,
+    },
+
+    /// `ToolFilterOverrider` ran for this turn (Inherit counts as ran).
+    ///
+    /// Added Sprint 6 as an additive variant under ADR-0007 / ADR-0008. No
+    /// `SCHEMA_VERSION` bump.
+    ToolFilterOverridden {
+        /// The turn whose tool surface this override applies to.
+        turn_id: TurnId,
+        /// What modification to apply on top of `strategy.allowed_tools`.
+        mode: crate::context::ToolFilterOverrideMode,
+        /// Tags identifying what contributed.
+        contributors: Vec<String>,
+        /// `Overrider::id()`.
+        produced_by: String,
+    },
+
+    /// H11 summary at the end of `ContextManaged` — index of what was decided.
+    ///
+    /// Added Sprint 6 as an additive variant under ADR-0007 / ADR-0008. No
+    /// `SCHEMA_VERSION` bump.
+    ContextDecisionRecorded {
+        /// The turn this decision summary belongs to.
+        turn_id: TurnId,
+        /// Event ids of `ContextCompacted` events written this turn (0 or 1 for v0.1).
+        compactions: Vec<EventId>,
+        /// Event id of this turn's `SystemPromptInjected`.
+        system_prompt_event: EventId,
+        /// Event id of this turn's `ToolFilterOverridden`.
+        tool_filter_event: EventId,
+        /// Per-trait error capture for degrade paths.
+        errors: crate::context::ContextDecisionErrors,
+    },
+
+    /// A skill (Skill loader, ADR-0020) was activated for the upcoming
+    /// turn. Written by `SkillInjector` in H11; one event per newly
+    /// activated skill (dedupe rules in spec §11).
+    SkillActivated {
+        /// Bare name (`foo`) or `<plugin_id>:<name>` for Plugin scope.
+        skill_name: String,
+        /// Where the skill was discovered.
+        source: crate::skill::SkillSource,
+        /// Channel that triggered this activation.
+        channel: crate::skill::SkillActivationChannel,
+    },
+}
+
+/// Coarse classification of `EventPayload` variants. Used by Postgres backends
+/// for optional physical table partitioning (v0.4+) and by analysis tooling
+/// for filtering.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventCategory {
+    /// User / model conversation events — "what was said".
+    Conversation,
+    /// Harness FSM markers and decisions not part of dialog.
+    HarnessMeta,
+    /// Context management decisions (compaction and per-turn injection).
+    ContextDecision,
+}
+
+impl EventPayload {
+    /// Classify this payload into its coarse category. Pure function.
+    #[must_use]
+    pub fn category(&self) -> EventCategory {
+        match self {
+            Self::SessionStarted { .. }
+            | Self::TurnStarted { .. }
+            | Self::AssistantMessageAppended { .. }
+            | Self::ToolUseRecorded { .. }
+            | Self::ToolResultRecorded { .. }
+            | Self::ThinkingBlockRecorded { .. } => EventCategory::Conversation,
+
+            Self::ContextManageEntered { .. }
+            | Self::ContextManageCompleted { .. }
+            | Self::PromptComposed { .. }
+            | Self::ModelCallStarted { .. }
+            | Self::ModelCallCompleted { .. }
+            | Self::TurnPaused { .. }
+            | Self::JobSubmitted { .. }
+            | Self::JobCompletedRecorded { .. }
+            | Self::TurnCompleted { .. }
+            | Self::TurnFailed { .. }
+            | Self::HookRejected { .. } => EventCategory::HarnessMeta,
+
+            Self::ContextCompacted { .. }
+            | Self::SystemPromptInjected { .. }
+            | Self::ToolFilterOverridden { .. }
+            | Self::ContextDecisionRecorded { .. }
+            | Self::SkillActivated { .. } => EventCategory::ContextDecision,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -246,7 +396,8 @@ mod tests {
     }
 
     #[test]
-    fn all_sixteen_variants_roundtrip() -> serde_json::Result<()> {
+    #[allow(clippy::too_many_lines)]
+    fn all_twenty_three_variants_roundtrip() -> serde_json::Result<()> {
         // Covers every EventPayload variant. When a new variant is added,
         // add it here too and rename the test to match the new count.
         //
@@ -263,6 +414,7 @@ mod tests {
             },
             EventPayload::TurnStarted {
                 user_input: vec![ContentBlock::Text { text: "go".into() }],
+                activate_skills: vec![],
             },
             EventPayload::AssistantMessageAppended { text: "ok".into() },
             EventPayload::ToolUseRecorded {
@@ -273,6 +425,11 @@ mod tests {
             EventPayload::ToolResultRecorded {
                 call_id: "c1".into(),
                 result: ToolResult::text("out"),
+            },
+            EventPayload::JobSubmitted {
+                call_id: "c1".into(),
+                job_id: JobId::default(),
+                tool_name: "run_tests".into(),
             },
             EventPayload::TurnPaused {
                 job_id: JobId::default(),
@@ -311,6 +468,51 @@ mod tests {
                 hook_name: "sensitive-content".into(),
                 point: crate::hook::HookLifecyclePoint::PreDispatch,
                 reason: "AWS key in args".into(),
+            },
+            // Sprint 6 context-decision variants (ADR-0008).
+            EventPayload::ContextCompacted {
+                turn_id: TurnId::new(),
+                replaced_seq_range: (2, 79),
+                produced_by: "truncate".into(),
+                replacement: crate::context::CompactionReplacement::Drop,
+                token_estimate_before: Some(5200),
+                token_estimate_after: Some(800),
+            },
+            EventPayload::ContextCompacted {
+                turn_id: TurnId::new(),
+                replaced_seq_range: (86, 399),
+                produced_by: "summarize".into(),
+                replacement: crate::context::CompactionReplacement::Summary {
+                    text: "covered turns t21-t60".into(),
+                    model: "claude-haiku-4-5".into(),
+                },
+                token_estimate_before: Some(8400),
+                token_estimate_after: Some(2300),
+            },
+            EventPayload::SystemPromptInjected {
+                turn_id: TurnId::new(),
+                suffix: "Today is 2026-05-23.".into(),
+                contributors: vec!["date".into()],
+                produced_by: "none".into(),
+            },
+            EventPayload::ToolFilterOverridden {
+                turn_id: TurnId::new(),
+                mode: crate::context::ToolFilterOverrideMode::Inherit,
+                contributors: vec![],
+                produced_by: "none".into(),
+            },
+            EventPayload::ContextDecisionRecorded {
+                turn_id: TurnId::new(),
+                compactions: vec![],
+                system_prompt_event: EventId::new(),
+                tool_filter_event: EventId::new(),
+                errors: crate::context::ContextDecisionErrors::default(),
+            },
+            // Sprint 7 skill-loader variant (ADR-0020).
+            EventPayload::SkillActivated {
+                skill_name: "invoice-parser".into(),
+                source: crate::skill::SkillSource::User,
+                channel: crate::skill::SkillActivationChannel::ModelSigil,
             },
         ];
         for v in variants {
@@ -366,6 +568,28 @@ mod tests {
         let back: ConversationEvent = serde_json::from_str(&json)?;
         assert_eq!(event, back);
         Ok(())
+    }
+
+    #[test]
+    fn category_classifies_all_variants() {
+        let conv = EventPayload::TurnStarted {
+            user_input: vec![ContentBlock::Text { text: "hi".into() }],
+            activate_skills: vec![],
+        };
+        assert_eq!(conv.category(), EventCategory::Conversation);
+
+        let meta = EventPayload::ContextManageEntered {};
+        assert_eq!(meta.category(), EventCategory::HarnessMeta);
+
+        let ctx = EventPayload::ContextCompacted {
+            turn_id: TurnId::new(),
+            replaced_seq_range: (1, 2),
+            produced_by: "x".into(),
+            replacement: crate::context::CompactionReplacement::Drop,
+            token_estimate_before: None,
+            token_estimate_after: None,
+        };
+        assert_eq!(ctx.category(), EventCategory::ContextDecision);
     }
 
     #[test]

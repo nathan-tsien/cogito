@@ -1,6 +1,6 @@
 # H11 · Context Manage
 
-> **Status**: 🧭 Architectural slot reserved · 🚧 Mechanism design pending ADR-0008 (Context Management initiative) · 🚧 Not implemented (target: post-Sprint 2)
+> **Status**: Implemented in v0.1 Sprint 6 (see ADR-0008)
 
 ## Why this component exists
 
@@ -18,12 +18,63 @@ H11 is that home. It sits **between H10 (strategy lookup) and H04 (passive compo
 
 Decide, for the turn that is about to start, the **context shape** that H04 will then mechanically render into a `ModelInput`. Context shape covers:
 
-- **History compaction**: do we need to summarize old events? What's the summary? Which seq-range does it supersede?
-- **System prompt injection**: any per-turn additions on top of `strategy.system_prompt` (date/locale, sub-task context, tenant-specific preamble)?
-- **Tool surface override**: any per-turn restriction beyond what H05 would produce from strategy alone (e.g., "this is a planning subagent — drop all file-write tools regardless of strategy")?
-- **Length-budget enforcement**: if compaction is needed, how aggressively?
+- **History compaction**: do we need to compact old events? Which seq-range does it supersede?
+- **System prompt injection**: any per-turn additions on top of `strategy.system_prompt`.
+- **Tool surface override**: any per-turn restriction beyond what H05 would produce from strategy alone.
 
-H11 emits a `ContextDecision` value plus zero-or-more **persisted events** describing what it did (compaction events, override events). H04 then reads the event log (including H11's just-written events) and composes the prompt deterministically.
+H11 orchestrates four traits in a fixed order each `ContextManaged` transition, persisting structured events for each step.
+
+## v0.1 implementation
+
+Full design rationale, pseudocode, and test plan: **ADR-0008** (`docs/adr/0008-context-management.md`).
+
+Sprint 6 spec: `docs/superpowers/specs/2026-05-23-sprint-6-context-management-design.md`.
+
+### Four-trait surface
+
+H11's protocol surface (`cogito-protocol::context`) defines four traits with distinct invariants:
+
+1. **`Compactor`** — async, may do I/O (including model calls for summarization). Writes 0 or 1 `ContextCompacted` event per turn via `StepRecorder`. Failures degrade: H11 records the error but does not block the turn.
+
+2. **`HistoryProjector`** — pure synchronous function. Projects the event log to `Vec<Message>` for `ModelInput`. Implements the set-union covered-range semantics from ADR-0008 §"Projection semantics". No I/O, no event writes. Invoked by H04, not by H11's orchestration pipeline.
+
+3. **`SystemPromptInjector`** — async (filesystem I/O needed by Sprint 7 Skill loader). Computes a per-turn system-prompt suffix and persists exactly one `SystemPromptInjected` event per turn, even when the suffix is empty (audit invariant).
+
+4. **`ToolFilterOverrider`** — async. Decides a per-turn tool filter override on top of `strategy.allowed_tools` and persists exactly one `ToolFilterOverridden` event per turn, even when the decision is `Inherit`.
+
+Merging any two traits would violate one side's invariant; see ADR-0008 §"Alternatives considered" for the full analysis.
+
+### v0.1 shipped implementations
+
+| Slot | v0.1 implementation | Config tag |
+|---|---|---|
+| Compactor | `NoneCompactor`, `TruncateCompactor` | `none`, `truncate` |
+| HistoryProjector | `StandardProjector` | `standard` |
+| SystemPromptInjector | `NoneInjector`, `SkillInjector` (Sprint 7) | `none`, `skill` |
+| ToolFilterOverrider | `NoneOverrider` | `none` |
+
+Sprint 7 added `SkillInjector` alongside `NoneInjector` under the
+`SystemPromptInjector` slot. It is the authoritative landing point for skill
+activations: it consumes pending `SkillActivationRequested` triggers (from H06
+sigil detection in the previous turn, or from a CLI `/skill <name>` command),
+loads the corresponding SKILL.md bodies via the injected `SkillProvider`, and
+emits a deduplicated `SkillActivated` event plus the appended system-prompt
+suffix. Cross-turn dedup is anchored on `(session_id, skill_name)`. See
+`docs/adr/0020-skill-loader.md` and
+`docs/superpowers/specs/2026-05-23-sprint-7-skill-loader-design.md` for the
+end-to-end design.
+
+### Orchestration order
+
+Each `ContextManaged` transition H11 runs in this fixed order:
+
+1. Compactor — may write 0 or 1 `ContextCompacted` event.
+2. SystemPromptInjector — always writes 1 `SystemPromptInjected` event.
+3. ToolFilterOverrider — always writes 1 `ToolFilterOverridden` event.
+4. H11 writes `ContextDecisionRecorded` — the summary index for the turn.
+5. H11 writes `ContextManageCompleted` — FSM transition marker.
+
+A trait failure degrades: the error is captured in `ContextDecisionRecorded.errors`; only a failure of H11's own fallback write propagates up and causes `TurnFailed`.
 
 ## State machine placement
 
@@ -32,10 +83,12 @@ Init
   │  H10 strategy (pure)
   │  H03 resume decision (pure)
   ▼
-ContextManaged ◄── new state introduced by ADR-0006 amendment (this PR)
+ContextManaged
   │  H11 manage(context)
-  │     ├─ may call ModelGateway for summarization
-  │     └─ writes 0+ events via H02 (ContextCompacted, ContextDecision, ...)
+  │     ├─ Compactor (may call ModelGateway for summarization)
+  │     ├─ SystemPromptInjector
+  │     ├─ ToolFilterOverrider
+  │     └─ writes ContextDecisionRecorded + ContextManageCompleted via H02
   ▼
 PromptBuilt
   │  H04 compose (pure; reads history including H11's just-written events)
@@ -49,104 +102,69 @@ ModelCalling → ModelCompleted → ToolDispatching → {Completed | Paused | Fa
 
 - **It does I/O** (summarization model call) — possibly long-running.
 - **It must be resumable**: H03 needs to know if a crash happened mid-summarization, so H11 transitions must be visible to the event log.
-- **It writes its own events** to the log — `ContextCompacted`, `ContextDecisionRecorded`, etc. (exact variant set TBD by ADR-0008).
+- **It writes its own events** to the log, which H04 and H05 then read to compose the prompt.
 
-## Interface (PROVISIONAL — final shape in ADR-0008)
+## Resume / idempotency
 
-```rust
-// In cogito-protocol (final placement TBD)
-#[async_trait]
-pub trait ContextManager: Send + Sync {
-    /// Make one context-management decision for an upcoming turn.
-    /// May persist events via the recorder; returns the decision H04/H05
-    /// must honor when composing the prompt.
-    async fn manage(
-        &self,
-        input: ContextManageInput<'_>,
-    ) -> Result<ContextDecision, ContextError>;
-}
+No new `ResumePoint` variant is needed. H03 handles a `ContextManageEntered` with no paired `ContextManageCompleted` by choosing `ResumeFromInit`, which re-runs the `ContextManaged` transition. All three H11-orchestrated traits are idempotent on `turn_id`: each checks whether its event already exists in history before doing work. See ADR-0008 §"Resume / idempotency" for details.
 
-pub struct ContextManageInput<'a> {
-    pub session_id: SessionId,
-    pub turn_id: TurnId,
-    pub strategy: &'a HarnessStrategy,
-    pub store: &'a dyn ConversationStore,    // for reading history
-    pub model_gateway: &'a dyn ModelGateway, // for summarization calls
-    pub recorder: &'a mut StepRecorder,      // for persisting decisions
-}
+## Configuration
 
-pub struct ContextDecision {
-    /// History range that should be projected through compaction summaries
-    /// instead of literal events. H04 honors this when projecting.
-    pub compaction_replacements: Vec<CompactionRange>,
-    /// Optional per-turn system prompt suffix appended after strategy.system.
-    pub system_prompt_suffix: Option<String>,
-    /// Optional per-turn tool filter that intersects with H05's strategy filter.
-    pub tool_filter_override: Option<ToolFilter>,
+`HarnessStrategy.context: ContextConfig` holds four tagged-config enums:
+
+```
+ContextConfig {
+    compactor:              CompactorConfig,              // none | truncate
+    history_projector:      HistoryProjectorConfig,       // standard
+    system_prompt_injector: SystemPromptInjectorConfig,   // none
+    tool_filter_overrider:  ToolFilterOverriderConfig,    // none
 }
 ```
 
-**These are placeholders, not contracts.** The Context Management initiative will refine them. What is locked by this PR:
+Each enum is `#[non_exhaustive]` with `#[serde(tag = "kind")]`. The factory `cogito_context::build_pipeline(&ContextConfig)` lives in `cogito-context` (the crate that owns the implementations), following CLAUDE.md "Tagged-config factories" rule.
 
-- **H11 sits between H10 and H04 in the lifecycle.**
-- **H11 is allowed to do I/O** (model calls); H04/H05/H10 are not.
-- **H11 writes events through H02 like any other component.**
-- **`ContextManaged` is a real FSM state** in the H01 Turn Driver state machine.
+## Crate layout
+
+- `cogito-protocol::context` — trait definitions, `ContextPipeline`, config types, shared value types.
+- `cogito-context` — no-op defaults, `TruncateCompactor`, `StandardProjector`, and the `build_pipeline` factory.
+- `cogito-core::harness` — H11 `transitions/context_managed.rs` calls through the pipeline; H04 uses `HistoryProjector`; H05 reads `ToolFilterOverridden` events.
 
 ## Dependencies
 
-**Calls (out)** (provisional):
+**Calls (out)**:
 
-- `ConversationStore::replay` — read history to decide if compaction is needed.
-- `ModelGateway::stream` — issue a summarization call when compacting (this is the only Brain component besides H01's main-loop call that uses ModelGateway).
-- `StepRecorder` — persist `ContextCompacted` / decision events.
+- `Compactor::maybe_compact` — checks token budget; may call `ModelGateway::stream` for summarization.
+- `SystemPromptInjector::inject` — computes per-turn suffix.
+- `ToolFilterOverrider::override_filter` — decides per-turn tool filter.
+- `StepRecorder` — persists all four context-decision events.
 
 **Called by**: H01 Turn Driver, at the `Init → ContextManaged` transition.
 
-**Does NOT call**: H04, H05, H07, H08, H09 (per AGENTS.md §1 "H01 is the only coordinator"). H11 produces a value; H01 hands that value to H04/H05.
+**Does NOT call**: H04, H05, H07, H08, H09 (per AGENTS.md §1 "H01 is the only coordinator").
 
-## Critical invariants (locked by this PR)
+## Critical invariants
 
 1. **Brain-side**. Lives in `cogito-core::harness`. Imports `cogito-protocol` only.
-2. **Recorder pass-through, not Hand**. H11 writes events through H02 (which writes to `ConversationStore`). H11 does NOT acquire its own `Arc<dyn ConversationStore>` outside of H02 — Storage stays single-writer per session.
-3. **ModelGateway access is read-allowed, write-restricted**. H11 may call `ModelGateway::stream` for summarization, but the result is NEVER a real assistant message persisted as `AssistantMessageAppended`. Summarization output is persisted as a context-management variant (TBD ADR-0008).
-4. **Decisions are turn-scoped**. A `ContextDecision` applies to the current turn only. The next turn's H11 invocation re-decides from scratch (reading the persisted history, including prior compactions).
+2. **Recorder pass-through**. H11 writes events through H02 (`StepRecorder`). H11 does NOT acquire its own `Arc<dyn ConversationStore>` outside of H02 — Storage stays single-writer per session.
+3. **ModelGateway access is summarization-only**. H11 may call `ModelGateway::stream` for summarization, but the result is NEVER persisted as `AssistantMessageAppended`. Summarization output is persisted as `ContextCompacted.replacement`.
+4. **Decisions are turn-scoped**. `ContextDecisionRecorded` applies to the current turn only. The next turn's H11 invocation re-decides from scratch.
 5. **No cross-turn state in H11 struct fields**. State lives in the event log (AGENTS.md §3). H11 may have read-only configuration injected at construction.
-6. **Recoverable from log**. If a crash occurs mid-`ContextManaged` (e.g., during a summarization call), H03 reads the persisted partial events and decides whether to redo or skip the H11 step. This requires H11 events to be self-describing — exact event shape is the central deliverable of ADR-0008.
 
-## Open design questions (resolved by Context Management initiative)
-
-- **Trigger policy**: token-count threshold (Codex pattern) vs strategy-flag-driven vs hook-gated? Probably all three are valid configurations — the question is the default.
-- **Summarization model**: same as the turn's model, or a separate "summarization model" injectable via strategy?
-- **Replacement semantics**: do compactions cascade (summary of summaries)? Is there a max compaction depth?
-- **Tool injection mechanism**: is there a separate "context-aware tool catalog" Hand, or does H11 always work from H05's filter as a starting point?
-- **System prompt evolution**: append-only vs replace-all per turn? Persisted as part of `ContextDecisionRecorded` or as a separate `SystemPromptUpdated` event?
-- **EventPayload variants needed**: at minimum `ContextCompacted`. Possibly also `ContextDecisionRecorded`, `SystemPromptInjected`, `ToolFilterOverridden`. ADR-0008 will enumerate and lock.
-- **Trait placement**: `ContextManager` in `cogito-protocol` (consumer-overridable) vs `cogito-core` internal (cogito-controlled)?
-- **Composability with H09 hooks**: do `pre_context` and `post_context` hook lifecycle points exist? If yes, where in the H01 FSM?
-
-## v0.1–v0.2 plan (this PR's commitment)
-
-- **This PR**: lock the architectural slot. `ContextManaged` state added to ADR-0006's FSM by amendment. H01 doc updated. AGENTS.md component count updated 10 → 11. H11 doc (this file) exists as the design anchor.
-- **Sprint 2** (Minimal Loop): H01 implements `ContextManaged` as a pass-through (no work — immediately transitions to `PromptBuilt`). This keeps the FSM honest while the real H11 is being designed.
-- **Context Management initiative** (post-Sprint 2, before/parallel-to Sprint 3): research + spec + ADR-0008 + implementation sprint(s). At that point H11 transitions to real work.
-- **Resume Coordinator (Sprint 3)**: must understand `ContextManaged` state from day one — the resume decision table includes "crashed in ContextManaged" as a case (pass-through in Sprint 2/3, real semantics when H11 is implemented).
-
-## Testing strategy (post-implementation)
+## Testing strategy
 
 - **Unit**: each decision branch (no-op, compact-needed, system-prompt-override, tool-override) tested with mocked `ModelGateway` and in-memory store.
-- **Integration**: full turn through Init → ContextManaged → PromptBuilt against a scripted compaction scenario.
-- **Chaos**: inject crash between every event H11 writes; H03 must recover correctly (either redo the H11 step or use the partial result deterministically).
-- **Property**: H04 projection through a `ContextDecision` is deterministic; same `(history, decision)` → same `ModelInput`.
+- **Integration**: full turn through Init → ContextManaged → PromptBuilt against a scripted compaction scenario. See `crates/cogito-core/tests/context_managed_with_truncate.rs`.
+- **Chaos**: inject crash between every event H11 writes; H03 must recover correctly. See `make chaos`.
+- **Fixture**: `crates/testing/cogito-test-fixtures/fixtures/sessions/sample-truncate-v1.jsonl` illustrates a session with one truncate compaction event.
 
 ## References
 
-- AGENTS.md §"Inviolable design principles" #1 (H01 is the only coordinator), #6 (Brain sees Hands only through Protocol)
-- ADR-0003 (state-machine Turn Driver — extended by this amendment)
+- ADR-0008 (`docs/adr/0008-context-management.md`) — full design discussion and alternatives
+- ADR-0003 (state-machine Turn Driver)
 - ADR-0004 (Brain / Hands / Session boundaries)
-- ADR-0006 (Runtime + H01 execution model — amended by this PR to add `ContextManaged` state)
-- ADR-0008 (Context Management — pending; this doc is a placeholder for it)
-- H01 Turn Driver doc §"Init → ContextManaged → PromptBuilt sequence" (canonical walkthrough)
-- H04 Prompt Composer doc §"Pure function invariant" (the constraint that forced H11 to exist)
-- Codex Rust prior art: `codex-rs/core/src/codex.rs:2913` (pre-turn `if total_usage_tokens >= auto_compact_limit`); `codex-rs/core/src/compact.rs` (compaction implementation)
-- Claude Code: `/compact` slash command + auto-compaction at context-window threshold
+- ADR-0006 (Runtime + H01 execution model; `ContextManaged` state originally reserved here)
+- ADR-0007 (event log forward-compat; additive variant precedent)
+- H01 Turn Driver doc §"Init → ContextManaged → PromptBuilt sequence"
+- H04 Prompt Composer doc §"Sprint 6: HistoryProjector dispatch"
+- H05 Tool Surface Builder doc §"Sprint 6: ToolFilterOverridden integration"
+- `docs/data-model/jsonl-v1.md` §"Context management events"

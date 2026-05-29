@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::context::ContextConfig;
 use crate::gateway::ModelParams;
 
 /// Tool filter applied by H05 Tool Surface Builder. `Allow` is an explicit
@@ -38,6 +39,12 @@ pub struct HarnessStrategy {
     /// (Init -> `ToolDispatching` -> Init -> ...) before H01 stops the turn
     /// with `TurnFailureReason::MaxTurnsExceeded`.
     pub max_turns: u32,
+    /// Sprint 6: per-strategy context-management pipeline configuration.
+    /// Default = all-no-op (`StandardProjector` for projection; None for
+    /// the other three traits). Strategies opt into compaction by setting
+    /// `compactor: CompactorConfig::Truncate(...)`.
+    #[serde(default)]
+    pub context: ContextConfig,
 }
 
 impl HarnessStrategy {
@@ -61,6 +68,7 @@ impl HarnessStrategy {
                 stop_sequences: vec![],
             },
             max_turns: 16,
+            context: ContextConfig::default(),
         }
     }
 }
