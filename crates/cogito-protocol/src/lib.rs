@@ -24,6 +24,7 @@
 //! - [`strategy`]: `HarnessStrategy`, `ToolFilter`
 //! - [`strategy_registry`]: `StrategyRegistry` trait + `StrategyError` (wiring-layer seam, ADR-0026)
 //! - [`stream`]: `StreamEvent` enum (real-time fanout to subscribers)
+//! - [`subagent`]: `BrainSpawner` trait + `DelegateRequest` + `SpawnError` — subagent execution seam (ADR-0011)
 //! - [`tool`]: `ToolProvider` trait, `ToolDescriptor`, `InvokeOutcome`, `ExecutionClass`
 //! - [`turn`]: `TurnOutcome`, `TurnFailureReason`
 //! - [`turn_trigger`]: `TurnTrigger` — what caused a new turn to start (ADR-0016)
@@ -49,6 +50,7 @@ pub mod store;
 pub mod strategy;
 pub mod strategy_registry;
 pub mod stream;
+pub mod subagent;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 pub mod tool;
@@ -78,6 +80,7 @@ pub use session::SessionMeta;
 pub use store::{ConversationStore, EventRecorder, StoreError};
 pub use strategy::{HarnessStrategy, ToolFilter};
 pub use strategy_registry::{StrategyError, StrategyRegistry};
+pub use subagent::{BrainSpawner, DelegateRequest, SpawnError};
 pub use tool::{
     ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
 };
