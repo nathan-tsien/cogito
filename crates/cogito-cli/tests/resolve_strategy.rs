@@ -37,6 +37,7 @@ fn cfg_with_provider() -> RuntimeConfig {
         mcp_servers: vec![],
         mcp_parse_failures: vec![],
         skills: None,
+        tools: cogito_config::types::ToolsConfig::default(),
     }
 }
 
