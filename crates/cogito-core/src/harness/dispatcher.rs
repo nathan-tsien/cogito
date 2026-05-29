@@ -75,6 +75,10 @@ pub async fn dispatch(
     let name = inv.name.clone();
     let call_id = inv.call_id.clone();
     let args = inv.args.clone();
+    // Set the tool-call id on the context handed to `invoke` so tools (e.g.
+    // the subagent `delegate`) can record parent-call linkage child-side.
+    let mut ctx = ctx;
+    ctx.call_id = Some(call_id.clone());
     let caught = AssertUnwindSafe(provider.invoke(&name, args, ctx))
         .catch_unwind()
         .await;

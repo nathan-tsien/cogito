@@ -128,6 +128,9 @@ pub(super) struct SessionState {
     /// once the turn is fully terminal (not on `Paused`, which leaves
     /// `in_flight = Some(PausedOnJob)`).
     pub(super) pending_user_input: Option<TurnTrigger>,
+    /// Subagent nesting depth of this session (0 = top-level). Read from
+    /// the seq=0 `SessionMeta` at open; flowed into each turn's `ExecCtx`.
+    pub(super) subagent_depth: u32,
 }
 
 /// External dependencies injected at spawn time.
@@ -141,6 +144,9 @@ pub(super) struct SessionDeps {
     /// one. Task 11 will additionally plumb this into `TurnDeps` so the
     /// async dispatcher path (Task 12) can submit and register jobs.
     pub job_mgr: Arc<dyn JobManager>,
+    /// Recursive Brain spawner injected per-turn into `ExecCtx`. `None`
+    /// when the Runtime had no spawner (subagent disabled).
+    pub brain_spawner: Option<std::sync::Arc<dyn cogito_protocol::subagent::BrainSpawner>>,
 }
 
 impl SessionState {
@@ -463,8 +469,11 @@ fn spawn_turn_driver(
     let exec_ctx = ExecCtx {
         session_id: state.session_id,
         turn_id,
+        call_id: None,
         deadline: None,
         cancel: new_token,
+        subagent_depth: state.subagent_depth,
+        brain_spawner: deps.brain_spawner.clone(),
     };
     let ctx = TurnCtx {
         session_id: state.session_id,
@@ -968,18 +977,15 @@ async fn drain_shutdown(
     }
 }
 
-/// Record the `SessionStarted` event once at session open.
-pub(super) async fn record_session_started(
+/// Record the `SessionStarted` event once at session open with an explicit
+/// `SessionMeta`. The Runtime builds the meta (from the strategy for a
+/// top-level session, or a caller-supplied override for a subagent child
+/// that records parent linkage) and hands it here.
+pub(super) async fn record_session_started_with_meta(
     recorder: &Arc<Mutex<StepRecorder>>,
     session_id: SessionId,
-    strategy: &HarnessStrategy,
+    meta: SessionMeta,
 ) {
-    let meta = SessionMeta {
-        cogito_version: env!("CARGO_PKG_VERSION").into(),
-        strategy: Some(strategy.name.clone()),
-        model: Some(strategy.model_params.model.clone()),
-        ..Default::default()
-    };
     let mut rec = recorder.lock().await;
     if let Err(e) = rec.record_session_started(meta).await {
         tracing::error!(
