@@ -573,7 +573,14 @@ Event::Start(Tag::Item) => {
     self.cur.push(Span::styled(marker, self.styles.list_marker));
 }
 Event::End(TagEnd::Item) => {
-    self.flush_line();
+    // End(Paragraph) is suppressed inside lists, so this is the
+    // authoritative flush point. Guard against an empty flush: when an
+    // item wraps only a nested list, its line was already flushed at the
+    // nested List start, leaving pending_spans empty (avoids a stray
+    // blank line between nested content and the next sibling).
+    if !self.pending_spans.is_empty() {
+        self.flush_line();
+    }
 }
 ```
 
