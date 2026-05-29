@@ -29,6 +29,13 @@ ulid.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 
+[features]
+# Opt-in stub constructors for downstream crate tests that need a
+# `SessionHandle` without standing up a full `Runtime` (e.g.
+# `cogito-tui`'s pure-state App tests). Production builds leave the
+# feature off, so the stubs are never compiled into shipped binaries.
+test-support = []
+
 [dev-dependencies]
 cogito-test-fixtures.workspace = true
 cogito-tools.workspace = true

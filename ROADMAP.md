@@ -6,10 +6,10 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 + 6 + 7 + 8 + 9a complete;
+> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 + 6 + 7 + 8 + 9a + 9b complete;
 > Sprint 4 (MCP sync tools) in flight; Sprint 9 split into 9a (done)
-> and 9b (TUI; spec pending); Sprints 10 unchanged.
-> **Current sprint: Sprint 9b (TUI).**
+> and 9b (done); Sprints 10 unchanged.
+> **Current sprint: Sprint 10 (v0.1 hardening).**
 
 ## Version plan
 
@@ -206,9 +206,9 @@ multi-model half of the original Sprint 9. TUI carries to Sprint 9b.
 `cogito chat` in a ratatui TUI; consumes the same `resolve_strategy`
 helper landed in 9a.
 
-- [ ] Basic TUI with ratatui replicating `cogito chat`
-- [ ] `cogito-tui` reads the same FsStrategyRegistry; `--strategy` flag honored
-- [ ] Spec to follow once 9a lands
+- [x] Basic TUI with ratatui replicating `cogito chat`
+- [x] `cogito-tui` reads the same FsStrategyRegistry; `--strategy` flag honored
+- [x] Spec landed: `docs/superpowers/specs/2026-05-28-sprint-9b-tui-design.md`
 
 #### Sprint 10 · v0.1 硬化 + tag v0.1.0 (1 day)
 

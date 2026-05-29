@@ -1855,7 +1855,6 @@ async fn async_run_to_completion() -> GoldenRun {
         .await
         .expect("open New");
 
-    let mut events_rx = handle.subscribe();
     handle
         .submit_user_text("run the async tool")
         .await
@@ -1865,20 +1864,33 @@ async fn async_run_to_completion() -> GoldenRun {
     // TurnPaused, which would leave the golden log without the post-pause
     // events we need to compare against. Wait for TurnCompleted / Failed /
     // Cancelled specifically.
-    let _ = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            match events_rx.recv().await {
-                Ok(
-                    StreamEvent::TurnCompleted
-                    | StreamEvent::TurnFailed { .. }
-                    | StreamEvent::TurnCancelled,
-                )
-                | Err(_) => return,
-                Ok(_) => {}
-            }
+    //
+    // We poll the on-disk log rather than relying solely on the broadcast
+    // channel: on resource-constrained CI runners the broadcast receiver
+    // can Lagged-error out before the actor finishes writing all events,
+    // producing an incomplete golden log (only 21 events instead of 23).
+    // The disk is the source of truth.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let events = read_log(store.as_ref(), session_id).await;
+        let has_closed_terminal = events.iter().any(|e| {
+            matches!(
+                e.payload,
+                EventPayload::TurnCompleted { .. } | EventPayload::TurnFailed { .. }
+            )
+        });
+        if has_closed_terminal {
+            break;
         }
-    })
-    .await;
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "golden run did not reach TurnCompleted within 10s; \
+             log has {} events, terminal={:?}",
+            events.len(),
+            terminal_payload(&events)
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     let events = read_log(store.as_ref(), session_id).await;
     let terminal = terminal_payload(&events).clone();

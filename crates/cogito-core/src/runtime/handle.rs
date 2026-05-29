@@ -54,6 +54,35 @@ impl SessionHandle {
         Self { shared }
     }
 
+    /// Construct a fully detached `SessionHandle` suitable for tests that
+    /// only need a value to plug into a struct field. The handle's
+    /// channels are bounded with capacity 1 and have no receiver task
+    /// behind them, so every method that talks to the actor
+    /// (`submit`, `cancel_turn`, `shutdown`, ...) will fail with
+    /// `SessionError::SessionClosed`. Tests must only construct this
+    /// handle and never invoke its async methods.
+    ///
+    /// Gated behind the `test-support` feature so the stub never enters
+    /// production builds.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn test_stub() -> Self {
+        use tokio::sync::{broadcast, mpsc};
+        use tokio_util::sync::CancellationToken;
+
+        let (mailbox_tx, _mailbox_rx) = mpsc::channel(1);
+        let (events_tx, _events_rx) = broadcast::channel(1);
+        let (job_completion_tx, _job_completion_rx) = mpsc::channel(1);
+        let shared = Arc::new(SessionShared {
+            session_id: SessionId::new(),
+            mailbox_tx,
+            events_tx,
+            current_cancel_token: Arc::new(parking_lot::Mutex::new(CancellationToken::new())),
+            job_completion_tx,
+        });
+        Self { shared }
+    }
+
     /// Submit a [`TurnTrigger`]. The session loop spawns a `TurnDriver`
     /// if no turn is in flight. **Canonical entry point** for any new
     /// trigger source — `submit_user_text` is a convenience shim that

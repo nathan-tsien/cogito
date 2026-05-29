@@ -10,13 +10,61 @@ publish.workspace = true
 name = "cogito-tui"
 path = "src/main.rs"
 
-[dependencies]
-cogito-core.workspace = true
+[lib]
+path = "src/lib.rs"
 
-tokio.workspace = true
-anyhow.workspace = true
+[dependencies]
+# Internal layers
+cogito-core.workspace = true
+cogito-protocol.workspace = true
+cogito-config.workspace = true
+cogito-strategy.workspace = true
+cogito-model.workspace = true
+cogito-tools.workspace = true
+cogito-jobs.workspace = true
+cogito-mcp.workspace = true
+cogito-skills.workspace = true
+cogito-store-jsonl.workspace = true
+cogito-sandbox.workspace = true
+# Surface-layer sibling: re-uses chat_config, banner, slash parser.
+# Library promotion already done — cogito-cli/src/lib.rs exposes the needed modules.
+cogito-cli = { path = "../cogito-cli" }
+
+# UI
 ratatui.workspace = true
-crossterm.workspace = true
+crossterm = { workspace = true, features = ["event-stream"] }
+tui-textarea.workspace = true
+
+# Async runtime
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+futures.workspace = true
+
+# CLI
+clap = { workspace = true, features = ["derive"] }
+
+# Errors
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+
+# Misc
+serde_json.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+tempfile.workspace = true
+cogito-mock-model.workspace = true
+cogito-test-fixtures.workspace = true
+tokio-test.workspace = true
+# Re-declare cogito-core with the `test-support` feature so the App
+# pure-state tests can construct a stub `SessionHandle` without a Runtime.
+cogito-core = { workspace = true, features = ["test-support"] }
+chrono.workspace = true
 
 [lints]
 workspace = true

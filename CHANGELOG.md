@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint 9b · TUI (2026-05-28)
+
+**Added**
+
+- `cogito-tui` lifted from stub to working multi-pane ratatui surface.
+  Chat scrollback on the left, per-turn tool-call tree on the right,
+  bottom status bar, multi-line input with `Shift+Enter` newline, slash
+  command discovery popup, `Ctrl-T` to toggle tools pane,
+  `Ctrl-C`/`Ctrl-D` cancel/exit. Full flag parity with `cogito chat`
+  including `--strategy`, `--list-strategies`, `--session-id`,
+  `--mode resume`. Spec: `docs/superpowers/specs/2026-05-28-sprint-9b-tui-design.md`;
+  ROADMAP entry: Sprint 9b.
+- `tui-textarea` and `tracing-appender` added to workspace dependencies
+  (transitive consumers: `cogito-tui` only).
+- `assert_cmd` promoted from `cogito-cli` dev-dep to workspace dep.
+- `cogito-core` gains a `test-support` feature exposing
+  `SessionHandle::test_stub()` for pure-state Surface tests.
+
+**Changed**
+
+- Workspace layout table (AGENTS.md, ARCHITECTURE.md, CLAUDE.md):
+  `cogito-tui` row's "When" column updated from v0.2 to v0.1.
+
 ### Sprint 9a · Multi-model Strategy (2026-05-27)
 
 **Added**
