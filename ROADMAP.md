@@ -6,9 +6,10 @@
 
 ## Current
 
-> **v0.1 · Foundation** — Sprints 0–3 + 4.5 + 4.7 + 5 + 6 + 7 + 8 + 9a + 9b complete;
-> Sprint 4 (MCP sync tools) in flight; Sprint 9 split into 9a (done)
-> and 9b (done); Sprints 10 unchanged.
+> **v0.1 · Foundation** — Sprints 0–3 + 4 + 4.5 + 4.7 + 5 + 6 + 7 + 8 + 9a + 9b
+> code-complete. Sprint 4 (MCP sync tools) landed (PR #14) with one deferred
+> item — the live-server happy-path integration test (see the Sprint 4
+> closure note). Sprint 9 split into 9a (done) and 9b (done).
 > **Current sprint: Sprint 10 (v0.1 hardening).**
 
 ## Version plan
@@ -91,12 +92,26 @@ Architecture-inspired by Codex's `rmcp-client` (Apache-2.0) — pattern-only
 reimplementation, no source-code lift; `rmcp` itself is a normal upstream
 dep (Apache-2.0, `modelcontextprotocol/rust-sdk`).
 
-- [ ] `cogito-mcp` crate: thin wrapper over `rmcp` 1.5 with `transport-child-process` (stdio) + `transport-streamable-http-client-reqwest` (streamable-HTTP); bearer-token via env-var. OAuth flow deferred to a follow-up ADR.
-- [ ] `McpToolProvider`: `ToolProvider` impl aggregating tools across configured servers via `mcp__<server>__<tool>` qualified naming (sanitize disallowed chars to `_`, 64-char cap with SHA-1 truncation suffix, dedupe with warn).
-- [ ] `cogito-config`: `mcp_servers` section with `Stdio` / `StreamableHttp` transports + per-server `enabled_tools` / `disabled_tools` + startup/tool timeouts.
-- [ ] `cogito-cli chat`: wire `McpToolProvider` into the `Runtime` builder via the existing `--config` path; tool surface visible to Brain.
-- [ ] Integration test: exercise `tools/list` + `tools/call` end-to-end through `cogito chat` against a real streamable-HTTP MCP server with bearer auth.
-- [ ] **ADR-0018**: MCP integration — transport scope, namespacing convention, deferred OAuth, license note (`rmcp` upstream + Codex pattern attribution).
+- [x] `cogito-mcp` crate: thin wrapper over `rmcp` 1.5 with `transport-child-process` (stdio) + `transport-streamable-http-client-reqwest` (streamable-HTTP); bearer-token via env-var. OAuth flow deferred to a follow-up ADR.
+- [x] `McpToolProvider`: `ToolProvider` impl aggregating tools across configured servers via `mcp__<server>__<tool>` qualified naming (sanitize disallowed chars to `_`, 64-char cap with SHA-1 truncation suffix, dedupe with warn).
+- [x] `cogito-config`: `mcp_servers` section with `Stdio` / `StreamableHttp` transports + per-server `enabled_tools` / `disabled_tools` + startup/tool timeouts.
+- [x] `cogito-cli chat`: wire `McpToolProvider` into the `Runtime` builder via the existing `--config` path; tool surface visible to Brain.
+- [ ] Integration test: exercise `tools/list` + `tools/call` end-to-end through `cogito chat` against a real streamable-HTTP MCP server with bearer auth. **(Deferred — see closure note.)** Landed instead: failure-path integration tests covering the soft-skip / fault-containment invariants.
+- [x] **ADR-0018**: MCP integration — transport scope, namespacing convention, deferred OAuth, license note (`rmcp` upstream + Codex pattern attribution).
+
+**Sprint 4 closure — deferred item:**
+
+The success-path integration test (live streamable-HTTP MCP server with
+bearer auth, asserting `tools/list` + `tools/call` end-to-end through
+`cogito chat`) was **deferred**: it requires a real MCP server binary or
+an in-process test server, which was out of scope for the soft-skip
+work that landed. What shipped instead (`crates/cogito-mcp/tests/integration.rs`)
+covers the resilience invariants — missing bearer env yields a per-server
+failure (not a runtime break), a failed server is contained without
+affecting healthy servers, duplicate server names skip later entries, and
+an all-servers-fail config still builds a usable runtime. The happy-path
+acceptance test is tracked for a follow-up (candidate: a Sprint 10 or
+v0.2 task once a lightweight in-process MCP test server fixture exists).
 
 #### Sprint 4.5 · 配置文件 + base_url override (0.5–1 day)
 
