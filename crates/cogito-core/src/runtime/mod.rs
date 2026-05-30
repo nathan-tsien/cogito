@@ -17,10 +17,10 @@
 pub mod builder;
 pub mod handle;
 pub mod session_loop;
+mod session_spec;
 pub mod store_writer;
 pub mod subagent;
 pub mod types;
-mod session_spec;
 
 pub use builder::{Runtime, RuntimeBuilder, RuntimeError};
 pub use handle::{SessionError, SessionHandle};
