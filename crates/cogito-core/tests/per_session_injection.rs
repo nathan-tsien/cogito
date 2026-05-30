@@ -92,3 +92,39 @@ async fn open_session_with_uses_injected_providers() -> Result<(), Box<dyn std::
     assert!(matches!(out, ShutdownOutcome::Clean { .. }));
     Ok(())
 }
+
+#[tokio::test]
+async fn update_session_then_turn_completes() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = tempfile::tempdir()?;
+    let store = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let mock = Arc::new(MockModelGateway::new());
+    mock.push_reply(end_turn_reply());
+
+    let runtime = Runtime::builder()
+        .store(Arc::clone(&store) as Arc<dyn ConversationStore>)
+        .model(mock)
+        .tools(builtin_tools())
+        .strategy(HarnessStrategy::default_with_model("mock"))
+        .build()?;
+
+    let sid = SessionId::new();
+    let handle = runtime.open_session(sid, OpenMode::New).await?;
+
+    // Swap the tool provider mid-session (no turn in flight yet).
+    let spec = SessionSpec {
+        tools: Some(builtin_tools()),
+        ..Default::default()
+    };
+    handle.update_session(spec).await?;
+
+    // The next turn must still complete with the swapped provider.
+    handle.submit_user_text("hi").await?;
+    assert!(
+        await_turn_completed(&handle).await,
+        "turn did not complete after update"
+    );
+
+    let out = handle.shutdown(Duration::from_secs(5)).await?;
+    assert!(matches!(out, ShutdownOutcome::Clean { .. }));
+    Ok(())
+}

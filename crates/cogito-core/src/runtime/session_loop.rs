@@ -43,6 +43,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::types::{SessionCommand, ShutdownOutcome, TurnTrigger};
 use crate::harness::hooks::CompositeHookPipeline;
+use crate::runtime::SessionSpec;
 // cogito-context is wired by the Runtime layer (not the Brain/harness layer),
 // consistent with ADR-0004: the runtime composes the pipeline from config and
 // injects it as a protocol trait object into TurnDeps.
@@ -204,7 +205,7 @@ pub(super) async fn run_session(
     mut state: SessionState,
     mut mailbox_rx: mpsc::Receiver<SessionCommand>,
     mailbox_tx: mpsc::Sender<SessionCommand>,
-    deps: SessionDeps,
+    mut deps: SessionDeps,
     initial_events: Vec<cogito_protocol::ConversationEvent>,
 ) -> ShutdownOutcome {
     // 1. Schema check (must come before replay so we never feed a
@@ -249,9 +250,13 @@ pub(super) async fn run_session(
             // Arm 2: caller commands.
             cmd = mailbox_rx.recv() => {
                 let Some(cmd) = cmd else { break; };
-                let outcome_opt = handle_command(&mut state, cmd, &mailbox_tx, &deps).await;
-                if let Some(outcome) = outcome_opt {
-                    return outcome;
+                if let SessionCommand::UpdateSession(spec) = cmd {
+                    apply_session_update(&mut state, &mut deps, *spec);
+                } else {
+                    let outcome_opt = handle_command(&mut state, cmd, &mailbox_tx, &deps).await;
+                    if let Some(outcome) = outcome_opt {
+                        return outcome;
+                    }
                 }
             }
 
@@ -515,6 +520,22 @@ fn spawn_turn_driver(
     });
 }
 
+/// Apply a mid-session provider swap (ADR-0028). Replaces only the
+/// provided Arcs; `tenant_id` / `user_id` are intentionally not changed
+/// (session identity is fixed at open). Effective at the next turn
+/// boundary because `spawn_turn_driver` rebuilds `TurnDeps` from these.
+fn apply_session_update(state: &mut SessionState, deps: &mut SessionDeps, spec: SessionSpec) {
+    if let Some(tools) = spec.tools {
+        deps.tools = tools;
+    }
+    if let Some(skills) = spec.skills {
+        state.skills = Some(skills);
+    }
+    if let Some(strategy) = spec.strategy {
+        state.strategy = strategy;
+    }
+}
+
 /// Dispatch one `SessionCommand`. Returns `Some(outcome)` if the loop should
 /// exit with that `ShutdownOutcome`, or `None` to keep looping.
 ///
@@ -683,6 +704,10 @@ async fn handle_command(
                 _ => None,
             };
             let _ = reply.send(job_id);
+            None
+        }
+        SessionCommand::UpdateSession(_) => {
+            // Intercepted in run_session before dispatch; never reaches here.
             None
         }
     }
