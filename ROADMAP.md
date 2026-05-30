@@ -11,8 +11,10 @@
 > live-server MCP happy-path integration test (see the Sprint 4 closure
 > note); candidate for a v0.2 task once an in-process MCP test-server
 > fixture exists.
-> **Sprint 11 (Subagent S2 minimal) shipped. Next: v0.2 · Extensibility
-> (Sprint 12 — Plugin P1 local-only).**
+> **Sprint 11 (Subagent S2 minimal) shipped. In progress: v0.2 ·
+> Extensibility (Sprint 12 — Plugin P1 Skills+MCP, local-only, plus
+> per-session provider injection pulled forward from v0.4 — see
+> ADR-0028 and the Sprint 12 deviation note).**
 
 ## Version plan
 
@@ -256,14 +258,40 @@ tool); Plugin ships local-path only.
 - [x] Strategy role mapping: `delegate` arg `role` resolves to a known strategy via `RuntimeBuilder::strategy_registry`
 - [x] Integration test: parent session invokes `delegate`, child session runs to completion, parent receives final text (acceptance test); plus a depth test asserting recursion terminates at the limit with a depth-limit `ToolResult::Error`
 
-#### Sprint 12 · Plugin (P1 local-only) — ADR-0021 (1.5–2 days)
+#### Sprint 12 · Plugin (P1 Skills+MCP, local-only) + per-session injection — ADR-0021 + ADR-0028 (2–3 days)
 
-- [ ] **ADR-0021**: Plugin manifest + loader — locks TOML primary (`.cogito-plugin/plugin.toml`) + Claude-plugin JSON compat read (`.claude-plugin/plugin.json`); default artifact paths (`skills/` / `agents/` / `hooks/hooks.toml` / `mcp.toml` / `commands/`); `<plugin_id>:<artifact_name>` namespace for ALL bundled artifacts; per-plugin / per-artifact enable/disable; **v0.2 distribution scope = local path only**
-- [ ] **New crate `cogito-plugin`** (Hands): manifest parsers (TOML + JSON compat) + filesystem scan + provider composition (SkillProvider + HookProvider + McpToolProvider + slash-command registry + strategy registry)
-- [ ] `cogito-config`: `[[plugins]] path = "..."` entries; per-plugin `enabled` flag; `[[plugins.artifact_overrides]]` block
-- [ ] Plugin id uniqueness check at startup (fatal if duplicate; same shape as MCP server name uniqueness from ADR-0018)
-- [ ] `cogito-cli chat`: load plugins via existing `--config` path; wire into existing provider composites
-- [ ] Integration test: local plugin contributing 1 skill + 1 hook + 1 MCP server + 1 subagent role → all four artifacts callable from Brain through normal provider abstractions
+**Scope reshaped during 2026-05-30 brainstorming** (design:
+`docs/superpowers/specs/2026-05-30-sprint-12-saas-session-plugin-design.md`).
+Two ordered pieces: (1) per-session provider injection — a SaaS-ready
+capability pulled forward from v0.4 on explicit consumer direction
+(see deviation note below); (2) plugin loader narrowed to Skills + MCP.
+Hooks / subagent-roles (`agents/`) / slash-commands (`commands/`) are
+**deferred** (a cogito hook is a pure no-I/O Rust gate, so its
+data-format is product-form-dependent; `agents/` will reuse strategies;
+no command registry exists yet) — their plugin directories are reserved
+but not loaded.
+
+Piece 1 — per-session provider injection (ADR-0028):
+- [ ] **ADR-0028**: `SessionSpec` + `Runtime::open_session_with(id, mode, spec)`; legacy `open_session` delegates to an all-`None` spec
+- [ ] Per-session providers become mutable session state: `SessionCommand::UpdateSession` + `SessionHandle::update_session`, effective at the next turn boundary (TurnDeps already rebuilt per turn)
+- [ ] `tenant_id` / `user_id` stamped into `SessionMeta`; composition stays caller-side (core swaps whole Arcs)
+- [ ] Resume narrowing: caller re-supplies the current `SessionSpec`; core does not persist provider identity (self-describing multi-replica resume → v0.4)
+- [ ] Resume-chaos `session_spec_mutated_then_resume`: open spec A → mutate to B → crash boundaries → resume with B → all 4 oracles pass
+- [ ] Brain (H01–H11) unchanged
+
+Piece 2 — plugin loader, Skills + MCP (ADR-0021):
+- [ ] **ADR-0021**: TOML primary (`.cogito-plugin/plugin.toml`) + Claude-plugin JSON metadata-only fallback; `<plugin_id>:<artifact_name>` namespace; per-plugin / per-artifact enable/disable; plugin-id uniqueness fatal; **local path only**
+- [ ] **New crate `cogito-plugin`** (Hands): manifest parsers + local-path discovery + namespacing + overrides; `PluginSet::load → PluginContributions { skill_roots, mcp_servers }` (produces contributions; registries keep cross-scope merge)
+- [ ] `cogito-config`: `[[plugins]]` Reserved → Locked; `PluginEntry` defined in `cogito-plugin`, aggregated by `cogito-config` (mirrors `cogito-config → cogito-mcp`)
+- [ ] Skills folded via `ScanConfig.plugin_roots` (Plugin scope); MCP concatenated into one `build_mcp_provider`
+- [ ] `cogito-cli chat`: build per-session `SessionSpec` from plugins and inject via `open_session_with`
+- [ ] Integration test: local plugin with 1 skill + 1 MCP server → both reachable; plus mid-session `update_session` adding a 2nd plugin MCP → new tool visible next turn
+
+**Deviation note (2026-05-30):** ADR-0028 advances a v0.4 "SaaS-ready"
+item (per-session provider injection) into v0.2. Reason: the consumer
+needs multi-tenant, single-process, per-request (and mid-session
+mutable) tool/skill surfaces now. The v0.4 entry below is correspondingly
+narrowed to the remaining multi-replica / TenantContext / store work.
 
 #### Sprint 13 · v0.2 硬化 + tag v0.2.0 (1 day)
 
@@ -291,6 +319,12 @@ covers both the Subagent full upgrade AND Plugin git distribution.
 ### v0.4 · SaaS-ready
 
 **Goal**: enable multi-replica deployment behind a consumer's gateway.
+
+> **Pulled forward:** per-session provider injection (`SessionSpec` /
+> `open_session_with`, ADR-0028) landed early in v0.2 Sprint 12. v0.4
+> now covers the remaining multi-replica / TenantContext / store work,
+> including self-describing resume (rebuild a session's provider surface
+> on any replica without the caller re-supplying the spec).
 
 - [ ] **ADR-0012**: Sandbox lifecycle (lazy provisioning, pets-vs-cattle) _(renumbered from ADR-0010)_
 - [ ] **ADR-0013**: Credential isolation (sandbox proxy pattern) _(renumbered from ADR-0011)_

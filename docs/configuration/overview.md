@@ -35,7 +35,7 @@ which are injected into the Runtime. The Brain layer never sees raw
 configuration — it sees already-built trait objects.
 
 Configuration is partitioned into **sections** by concern: `runtime`,
-`providers`, `strategies` (locked now); `plugins`, `subagents`
+`providers`, `strategies`, `plugins` (locked now); `subagents`
 (reserved for later). Two file formats: `cogito.toml` for the small
 fixed-size sections, `strategies/*.yaml` for the strategy registry.
 Secrets stay out of files via `${ENV_VAR}` interpolation.
@@ -99,7 +99,7 @@ clear concern. Sections are loaded independently and composed into one
 | `providers`   | Locked      | `cogito-model::ProviderConfig`    | Named provider instances |
 | `strategies`  | Locked      | `cogito-protocol::HarnessStrategy` (loader: `cogito-config`) | YAML registry, dir-based |
 | `tools`       | Locked      | `cogito-config::ToolsConfig` (per-tool sub-tables owned by impl crates) | `bash` / `web_fetch` / `sandbox` tunables (Sprint 10) |
-| `plugins`     | Reserved    | TBD post-v0.3                     | Slot named; schema deferred |
+| `plugins`     | Locked      | `cogito-plugin::PluginEntry` (aggregated by `cogito-config`) | Local-path plugin bundles, Skills+MCP (Sprint 12, ADR-0021) |
 | `subagents`   | Reserved    | TBD v0.3                          | Slot named; schema deferred |
 
 "Locked" sections have a defined schema and a designated owner crate
@@ -391,7 +391,8 @@ across projects, put it in `$XDG_CONFIG_HOME` and omit
 | `strategies/*.yaml` loader (H10 registry) | Sprint 6      | H10 doc        |
 | `--strategy <name>` CLI                   | Sprint 6      | H10 doc        |
 | `[tools]` (`bash` / `web_fetch` / `sandbox`) | Sprint 10  | ADR-0027       |
-| `[plugins]` schema                        | post-v0.3     | future ADR     |
+| `[[plugins]]` schema (Skills+MCP, local)  | Sprint 12     | ADR-0021       |
+| Per-session provider injection (`SessionSpec`) | Sprint 12 | ADR-0028       |
 | `[[subagents]]` schema                    | v0.3          | ADR-0011 (reserved) |
 | Database `ConfigLoader` (consumer-impl)   | v0.4+         | consumer code  |
 | Hot reload                                | not planned   | —              |

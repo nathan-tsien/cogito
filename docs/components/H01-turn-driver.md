@@ -338,6 +338,14 @@ session_loop::on_turn_complete(TurnOutcome)      [back in runtime/session_loop.r
 
 ### Loop topology
 
+`TurnDeps` (carrying `tools` / `skills` / `model`) is **rebuilt on every
+turn** from the session actor's `SessionState`. This is the mechanism
+behind per-session, mid-session-mutable providers (ADR-0028): a
+`SessionCommand::UpdateSession` swaps the Arcs in `SessionState`, and the
+next `spawn_turn_driver` picks them up — so a provider change lands at the
+next turn boundary, never mid-turn. H01 reads providers only through
+`TurnDeps` and is otherwise unaware of their origin or lifetime.
+
 A single TurnDriver task = one `input → final answer or paused` cycle.
 Multi-turn tool loops are an **inner** loop within the FSM — after
 `ToolDispatching` completes all sync calls, the FSM re-enters

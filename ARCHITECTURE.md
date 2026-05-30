@@ -330,6 +330,34 @@ requirements, not engineering preferences:
 
 > Cross-refs: ADR-0006 §1 (decision), §3 (cancellation), §4 (channels), §5 (job wake-up); spec 2026-05-20-sprint-3-resume-coordinator-design.md §7.
 
+### Per-session provider injection (`SessionSpec`)
+
+The `Runtime` holds **default** provider trait objects (`ToolProvider`,
+`SkillProvider`, strategy, `ModelGateway`, `JobManager`), but they are a
+fallback, not a global pin. `Runtime::open_session_with(id, mode, spec)`
+accepts a `SessionSpec` whose `Some` fields override the defaults **for
+that session only**; the legacy `open_session(id, mode)` is the all-`None`
+case. This lets one process serve many tenants with different tool/skill
+surfaces without a `Runtime` per tenant. See
+[ADR-0028](docs/adr/0028-per-session-provider-injection.md).
+
+Providers are **per-session mutable state**, not open-time constants.
+They live in the session actor's private `SessionState`; a
+`SessionCommand::UpdateSession(SessionSpec)` (via
+`SessionHandle::update_session`) swaps the Arcs at runtime. Because
+`TurnDeps` is rebuilt per turn from `SessionState`, a swap takes effect
+at the **next turn boundary** — never mid-turn (the in-flight turn's
+tool surface and model call are already committed). This is what lets a
+user attach an MCP server or skill mid-session and have it live on the
+next turn. Composition stays caller-side: the core swaps whole Arcs and
+performs no incremental merge.
+
+Provider **identity is not persisted** (a provider is code, not state).
+On resume the caller re-supplies the current `SessionSpec`, which may
+differ from the open-time one; `SessionMeta.tenant_id` / `user_id` are
+persisted to help the caller rebuild. Fully self-describing,
+caller-agnostic multi-replica resume is a v0.4 concern (ADR-0014).
+
 ## Hands layer internal structure
 
 Hands has **three internal levels**. Only Level 1 is visible to Brain.
@@ -748,9 +776,9 @@ adds a specific capability without breaking prior protocol guarantees
 | Version | Theme | What's added |
 |---|---|---|
 | **v0.1** | Foundation | Brain skeleton + state machine + `cogito-store` (JSONL default) + Anthropic + OpenAI-compat gateways + MCP (Sprint 4) + Hook impl (Sprint 5) + Context Management trait freeze + first Compactor (Sprint 6) + Skill loader (Sprint 7) + Async Jobs (Sprint 8) + Multi-model strategy + TUI (Sprint 9) + chaos tests |
-| **v0.2** | Extensibility | Subagent S2 minimal (`delegate` tool, lives in `cogito-core::runtime::subagent`; `BrainSpawner` trait added to protocol) + `cogito-plugin` crate (manifest parsing + bundle loading + provider composition; local-path-only distribution) |
+| **v0.2** | Extensibility | Subagent S2 minimal (`delegate` tool, lives in `cogito-core::runtime::subagent`; `BrainSpawner` trait added to protocol) + `cogito-plugin` crate (Skills + MCP bundle loading, local-path-only; hooks/agents/commands deferred) + **per-session provider injection** (`SessionSpec` / `open_session_with` / `update_session`, ADR-0028 — pulled forward from v0.4 for SaaS) |
 | **v0.3** | Distributed Collaboration | Subagent S1 full (`BrainSpawner` 4-tool surface, parent-child event tree, crash semantics, depth limits) + Plugin git distribution (`cogito.lock` + `cogito plugin sync` + commit pinning) |
-| **v0.4** | SaaS-ready | `cogito-store --features postgres` + `cogito-storage-s3` + `TenantContext` (optional field on `ExecCtx`) + `MetricsRecorder` trait + `cogito-observability-otel` + resource budget enforcement + ADR-0012 / 0013 (sandbox lifecycle, credential isolation) |
+| **v0.4** | SaaS-ready | `cogito-store --features postgres` + `cogito-storage-s3` + `TenantContext` (optional field on `ExecCtx`) + `MetricsRecorder` trait + `cogito-observability-otel` + resource budget enforcement + ADR-0012 / 0013 (sandbox lifecycle, credential isolation) + self-describing multi-replica resume (rebuild a session's provider surface on any replica; per-session injection itself landed in v0.2 via ADR-0028) |
 | **v0.5** | Storage + Multimodal | `StorageSystem` trait + `cogito-storage-local` + full multimedia tool catalog (`cogito-tools-multimedia`: transcribe_audio, extract_frames, summarize_video, describe_image, analyze_frame, synthesize_speech) + `ContentBlock::Image` end-to-end through `ModelGateway` adapters + `outputs_model_visible_multimodal` flag in H05. **Theme absorbs original v0.2 + original v0.5** per 2026-05-22 rebalance. |
 | **v0.6** | Hardening + Marketplace spike | Hook policy maturity + load tests + soak tests + migration tooling docs + `cogito-storage-http` + Storage HTTP wire protocol (ADR-0015) + Plugin marketplace (P3) design spike |
 | **v1.0** | API freeze | Public API stability commitment + event log forward-compat strict mode + 1.0 GA release |
@@ -780,10 +808,14 @@ adds a specific capability without breaking prior protocol guarantees
 | [ADR-0018](docs/adr/0018-mcp-integration.md) | MCP integration (`cogito-mcp` + `rmcp` 1.5) | Accepted (v0.1 Sprint 4) |
 | [ADR-0019](docs/adr/0019-reasoning-content-modeling.md) | Reasoning content modeling + event scope | Accepted (v0.1 Sprint 4.7) |
 | [ADR-0020](docs/adr/0020-skill-loader.md) | Skill loader (`cogito-skills`, K5 sigil activation, scope precedence, SKILL.md frontmatter, scripts deferred) | Proposed — finalized in v0.1 Sprint 7 |
-| [ADR-0021](docs/adr/0021-plugin-manifest-and-loader.md) | Plugin manifest + loader (`cogito-plugin`, TOML primary + Claude-plugin JSON compat read, namespace, local-path-only v0.2) | Proposed — finalized in v0.2 Sprint 12 |
+| [ADR-0021](docs/adr/0021-plugin-manifest-and-loader.md) | Plugin manifest + loader (`cogito-plugin`, TOML primary + Claude-plugin JSON metadata fallback, namespace, local-path-only; v0.2 scope narrowed to Skills + MCP) | Accepted (v0.2 Sprint 12) |
 | [ADR-0022](docs/adr/0022-plugin-distribution.md) | Plugin distribution (git fetch + lock file + `cogito plugin sync`) | Proposed — finalized in v0.3 |
 | [ADR-0023](docs/adr/0023-bundled-script-execution.md) | Bundled-script execution in Skills | **Deliberately deferred** — records design space, revisit when concrete use case surfaces or Subagent v0.3 lands |
 | [ADR-0024](docs/adr/0024-crate-naming-consolidation.md) | Crate naming consolidation (`cogito-store-jsonl` → `cogito-store` rename, name-by-layer/role principle) | Accepted (2026-05-29) |
+| [ADR-0025](docs/adr/0025-hands-sublayer-boundary.md) | Hands sublayer boundary | Accepted |
+| [ADR-0026](docs/adr/0026-strategy-registry.md) | Strategy registry (markdown+frontmatter, Repo > User scope, supersedes ADR-0017 §13) | Accepted (v0.1 Sprint 9a) |
+| [ADR-0027](docs/adr/0027-command-executor-seam-and-builtin-scope.md) | Command executor seam + builtin tool scope (`bash` / `web_fetch`, `DirectExecutor`) | Accepted (v0.1 Sprint 10) |
+| [ADR-0028](docs/adr/0028-per-session-provider-injection.md) | Per-session provider injection (`SessionSpec`, `open_session_with`, mid-session `update_session`; resume re-supplies spec) | Accepted (v0.2 Sprint 12 — pulls a v0.4 SaaS slice forward) |
 
 ## v0.1 scope (IN / OUT)
 
