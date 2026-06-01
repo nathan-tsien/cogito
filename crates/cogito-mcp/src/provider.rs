@@ -137,6 +137,7 @@ mod tests {
             cancel: CancellationToken::new(),
             subagent_depth: 0,
             brain_spawner: None,
+            workspace: None,
         };
         let outcome = provider.invoke("mcp__nope__nope", Value::Null, ctx).await;
         let InvokeOutcome::Sync(ToolResult::Error { kind, .. }) = outcome else {

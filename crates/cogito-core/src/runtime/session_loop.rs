@@ -148,6 +148,10 @@ pub(super) struct SessionDeps {
     /// Recursive Brain spawner injected per-turn into `ExecCtx`. `None`
     /// when the Runtime had no spawner (subagent disabled).
     pub brain_spawner: Option<std::sync::Arc<dyn cogito_protocol::subagent::BrainSpawner>>,
+    /// Session working tree injected per-turn into `ExecCtx` (ADR-0030 /
+    /// ADR-0031). `None` when no workspace was wired; per-session and
+    /// swappable mid-session via `SessionSpec`.
+    pub workspace: Option<std::sync::Arc<dyn cogito_protocol::workspace::Workspace>>,
 }
 
 impl SessionState {
@@ -479,6 +483,7 @@ fn spawn_turn_driver(
         cancel: new_token,
         subagent_depth: state.subagent_depth,
         brain_spawner: deps.brain_spawner.clone(),
+        workspace: deps.workspace.clone(),
     };
     let ctx = TurnCtx {
         session_id: state.session_id,
@@ -536,6 +541,9 @@ fn spawn_turn_driver(
 fn apply_session_update(state: &mut SessionState, deps: &mut SessionDeps, spec: SessionSpec) {
     if let Some(tools) = spec.tools {
         deps.tools = tools;
+    }
+    if let Some(workspace) = spec.workspace {
+        deps.workspace = Some(workspace);
     }
     let skills_changed = spec.skills.is_some();
     if let Some(skills) = spec.skills {

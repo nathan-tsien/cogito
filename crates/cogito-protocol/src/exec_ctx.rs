@@ -17,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ids::{SessionId, TurnId};
 use crate::subagent::BrainSpawner;
+use crate::workspace::Workspace;
 
 /// Per-invocation execution context. Tools and hooks receive this by value
 /// and decide whether to honor `deadline` / `cancel`.
@@ -44,6 +45,11 @@ pub struct ExecCtx {
     /// Recursive Brain spawner (ADR-0011). `Some` when the Runtime wired a
     /// `BrainSpawner`; `None` otherwise (the `delegate` tool then errors).
     pub brain_spawner: Option<Arc<dyn BrainSpawner>>,
+    /// Session working tree (ADR-0030 / ADR-0031). `Some` when the Runtime or
+    /// session wired a `Workspace`; `None` otherwise (file tools then return a
+    /// structured `ToolResult::Error`, as `delegate` does without a spawner).
+    /// Per-session and swappable mid-session via `SessionSpec` (ADR-0028).
+    pub workspace: Option<Arc<dyn Workspace>>,
 }
 
 impl std::fmt::Debug for ExecCtx {
@@ -56,6 +62,7 @@ impl std::fmt::Debug for ExecCtx {
             .field("cancel", &self.cancel)
             .field("subagent_depth", &self.subagent_depth)
             .field("brain_spawner", &self.brain_spawner.is_some())
+            .field("workspace", &self.workspace.is_some())
             // Maintenance: list every ExecCtx field above when one is added.
             .finish()
     }
@@ -74,6 +81,7 @@ impl ExecCtx {
             cancel: CancellationToken::new(),
             subagent_depth: 0,
             brain_spawner: None,
+            workspace: None,
         }
     }
 }

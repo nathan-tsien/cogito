@@ -462,6 +462,7 @@ async fn build_tool_provider(
     let builtin: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(
         BuiltinToolProvider::builder()
             .with_tool(Arc::new(ReadFile))
+            .with_tool(Arc::new(cogito_tools::WriteFile))
             .with_tool(Arc::new(cogito_tools::WebFetch::new(
                 cfg.tools.web_fetch.clone(),
             )))
@@ -639,6 +640,12 @@ pub async fn run(args: ChatArgs) -> Result<()> {
         // the `delegate` role into a child strategy. The concrete
         // `Arc<FsStrategyRegistry>` coerces to `Arc<dyn StrategyRegistry>`.
         .strategy_registry(Arc::clone(&registry) as Arc<dyn StrategyRegistry>);
+    // Local profile (ADR-0031): the session workspace is rooted at the
+    // project cwd — the directory `cogito chat` was launched from — so file
+    // tools (`read_file` / `write_file`) operate inside the user's project.
+    if let Ok(cwd) = std::env::current_dir() {
+        builder = builder.workspace(Arc::new(cogito_tools::LocalWorkspace::new(cwd)));
+    }
     if let Some(provider) = skills.clone() {
         builder = builder.skills(provider);
     }
