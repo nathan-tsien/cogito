@@ -170,12 +170,18 @@ redirected for SaaS.
 Define a **Skill Execution Profile** = the bundle of injected Hands a
 session runs with. Two reference profiles:
 
+Workspace provisioning, scoping, and the exec-cwd relationship are decided in
+ADR-0031: per-session ephemeral tree, injected via `SessionSpec.workspace`
+(caller-side), and the session workspace root is the default exec cwd.
+
 ### Local profile (CLI / TUI / dev)
 - Skill roots: discovered on host FS (`.cogito/skills/...`); `root` =
   real host path.
-- `Workspace` = `LocalWorkspace` rooted at the session cwd; bundled files
-  read in place.
-- `CommandExecutor` = `DirectExecutor` (`sh -c` on host).
+- `Workspace` = `LocalWorkspace` rooted at the **project cwd** (where
+  `cogito chat` launched), configurable; one ephemeral tree per session
+  (ADR-0031). Bundled files read in place.
+- `CommandExecutor` = `DirectExecutor` (`sh -c` on host), default cwd = the
+  session workspace root (ADR-0031 §5).
 - Dependencies: host-installed (python3, python-pptx, libreoffice, fonts);
   cogito best-effort preflight-checks and warns.
 - `StorageSystem`: local fs / `blob://` → local dir (v0.5).
@@ -186,8 +192,10 @@ session runs with. Two reference profiles:
 - Skill roots: per-tenant, supplied via `SessionSpec` (ADR-0028);
   **materialized** into the tenant's isolated workspace at session/turn
   start (bundle copied/mounted into the sandbox); `root` = sandbox path.
-- `Workspace` = `SandboxWorkspace` — no host FS access; rooted in the
-  tenant's scratch volume.
+- `Workspace` = `SandboxWorkspace` — no host FS access; rooted per
+  tenant/session (`<tenant>/<session>/`), one ephemeral tree per session,
+  injected via `SessionSpec.workspace` (ADR-0031); also the sandboxed exec
+  cwd. Durability is opt-in via object storage.
 - `CommandExecutor` = sandboxed executor (ADR-0012): container/microVM/
   remote; no host network except via credential proxy (ADR-0013).
 - Dependencies: a pre-baked **skill-runtime image** (python + python-pptx
