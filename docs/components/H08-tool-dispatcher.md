@@ -24,7 +24,7 @@ Hands.
 ## Dependencies
 
 **Calls (out)**:
-- `ToolProvider::invoke(name, args, ctx) -> InvokeOutcome` — the entire Hands surface (per ADR-0004; Brain never sees `Sandbox` etc.). Since Sprint 11, H08 sets `ctx.call_id = Some(<this call's id>)` before `invoke`, so tools can record parent-call linkage. The `delegate` subagent tool (`AlwaysSync`, in `cogito-core::runtime::subagent`) relies on this together with `ExecCtx.brain_spawner`. File tools (`read_file`, `write_file`, `list_dir`, `edit`) read `ExecCtx.workspace` (ADR-0030 / ADR-0031) — the per-session working tree — and return a structured error when it is `None`. Paths are workspace-relative; absolute / escaping paths surface as `ToolResult::Error { kind: InvalidArgs }`. `bash` resolves its cwd against the same workspace root (ADR-0031 §5).
+- `ToolProvider::invoke(name, args, ctx) -> InvokeOutcome` — the entire Hands surface (per ADR-0004; Brain never sees `Sandbox` etc.). Since Sprint 11, H08 sets `ctx.call_id = Some(<this call's id>)` before `invoke`, so tools can record parent-call linkage. The `delegate` subagent tool (`AlwaysSync`, in `cogito-core::runtime::subagent`) relies on this together with `ExecCtx.brain_spawner`. File tools (`read_file`, `write_file`, `list_dir`, `edit`, `grep`) read `ExecCtx.workspace` (ADR-0030 / ADR-0031) — the per-session working tree — and return a structured error when it is `None`. Paths are workspace-relative; absolute / escaping paths surface as `ToolResult::Error { kind: InvalidArgs }`. `bash` resolves its cwd against the same workspace root (ADR-0031 §5).
 - H02 Step Recorder — for `ToolDispatched`, `ToolResultRecorded`, `JobSubmitted` events
 - H09 Hook Pipeline — `pre_dispatch` hook point (may `Reject` the call)
 
