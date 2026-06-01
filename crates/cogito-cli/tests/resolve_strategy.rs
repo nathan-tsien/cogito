@@ -38,6 +38,7 @@ fn cfg_with_provider() -> RuntimeConfig {
         mcp_parse_failures: vec![],
         skills: None,
         tools: cogito_config::types::ToolsConfig::default(),
+        plugins: vec![],
     }
 }
 

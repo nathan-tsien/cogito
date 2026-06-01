@@ -94,7 +94,7 @@ pub async fn build(args: &TuiArgs) -> Result<Built> {
     let (tool_provider, mcp_banner_lines) =
         build_tools_with_banner(&cfg, Arc::clone(&job_mgr)).await?;
 
-    let skills = build_skill_provider(&cfg)?;
+    let skills = build_skill_provider(&cfg, Vec::new())?;
 
     // `Arc<LocalJobManager>` -> `Arc<dyn JobManager>` via the unsized
     // coercion impl on `Arc<T>`.

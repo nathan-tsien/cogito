@@ -377,6 +377,7 @@ dependencies = [
  "cogito-jobs",
  "cogito-mcp",
  "cogito-model",
+ "cogito-plugin",
  "cogito-protocol",
  "cogito-sandbox",
  "cogito-skills",

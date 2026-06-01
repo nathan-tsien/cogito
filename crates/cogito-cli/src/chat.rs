@@ -450,6 +450,7 @@ fn resolve_mode(args: &ChatArgs) -> Result<ChatMode> {
 async fn build_tool_provider(
     cfg: &cogito_config::RuntimeConfig,
     job_mgr: Arc<LocalJobManager>,
+    plugin_mcp_servers: Vec<cogito_mcp::McpServerConfig>,
 ) -> Result<Arc<dyn cogito_protocol::tool::ToolProvider>> {
     // Command executor for `bash`. Whether it is sandboxed is a policy
     // decision made here at the Surface layer (ADR-0027): the CLI calls
@@ -498,7 +499,9 @@ async fn build_tool_provider(
         .map_err(|e| anyhow!("compose builtin + run_tests + bash + delegate: {e}"))?,
     );
 
-    let mcp_build = cogito_mcp::build_mcp_provider(&cfg.mcp_servers).await;
+    let mut mcp_cfgs = cfg.mcp_servers.clone();
+    mcp_cfgs.extend(plugin_mcp_servers);
+    let mcp_build = cogito_mcp::build_mcp_provider(&mcp_cfgs).await;
 
     // Banner: merge parse-time + handshake-time failures.
     let all_failures: Vec<cogito_mcp::McpStartupFailure> = cfg
@@ -610,8 +613,15 @@ pub async fn run(args: ChatArgs) -> Result<()> {
     // async tool call would hang. See ADR-0008 and ADR-0025.
     let job_mgr: Arc<LocalJobManager> = LocalJobManager::new();
 
-    let tools = build_tool_provider(&cfg, Arc::clone(&job_mgr)).await?;
-    let skills = crate::chat_config::build_skill_provider(&cfg)?;
+    // Resolve declared plugins (ADR-0021) into skill roots + MCP servers,
+    // folded into the CLI's default providers below. Relative plugin paths
+    // resolve against the current dir, matching the skill-scan workspace root.
+    let config_dir = std::env::current_dir().context("reading current dir for plugin load")?;
+    let contributions = cogito_plugin::PluginSet::load(&cfg.plugins, &config_dir)
+        .map_err(|e| anyhow!("loading plugins: {e}"))?;
+
+    let tools = build_tool_provider(&cfg, Arc::clone(&job_mgr), contributions.mcp_servers).await?;
+    let skills = crate::chat_config::build_skill_provider(&cfg, contributions.skill_roots)?;
 
     // `Arc<LocalJobManager>` -> `Arc<dyn JobManager>` via the unsized
     // coercion impl on `Arc<T>`. The typed `Arc<LocalJobManager>` was
