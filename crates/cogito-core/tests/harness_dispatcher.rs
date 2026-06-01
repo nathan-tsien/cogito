@@ -50,21 +50,23 @@ fn env() -> Result<DispatchTestEnv, Box<dyn std::error::Error>> {
 
 #[tokio::test]
 async fn sync_tool_returns_sync_result() -> Result<(), Box<dyn std::error::Error>> {
-    let tmp = tempfile::NamedTempFile::new()?;
-    std::fs::write(tmp.path(), "hi")?;
-    let path = tmp
-        .path()
-        .to_str()
-        .ok_or("temp file path is not valid UTF-8")?;
+    // `read_file` reads through `ExecCtx.workspace` (ADR-0030/0031): wire a
+    // `LocalWorkspace` at a temp dir and address the file by its
+    // workspace-relative path.
+    let ws = tempfile::tempdir()?;
+    std::fs::write(ws.path().join("hi.txt"), "hi")?;
     let provider = BuiltinToolProvider::builder()
         .with_tool(Arc::new(ReadFile))
         .build();
     let inv = ToolInvocation {
         call_id: "c1".into(),
         name: "read_file".into(),
-        args: serde_json::json!({ "path": path }),
+        args: serde_json::json!({ "path": "hi.txt" }),
     };
-    let e = env()?;
+    let mut e = env()?;
+    e.exec.workspace = Some(Arc::new(cogito_tools::workspace::LocalWorkspace::new(
+        ws.path(),
+    )));
     let outcome = dispatch(
         inv,
         &provider,
