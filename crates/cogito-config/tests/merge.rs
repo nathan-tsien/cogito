@@ -17,6 +17,7 @@ fn partial_with_model(model: &str) -> RuntimeConfigPartial {
         mcp_servers: None,
         skills: None,
         tools: None,
+        plugins: None,
     }
 }
 
@@ -58,6 +59,7 @@ fn providers_array_replaces_wholesale() {
         mcp_servers: None,
         skills: None,
         tools: None,
+        plugins: None,
     };
     let layer_b = RuntimeConfigPartial {
         runtime: None,
@@ -65,6 +67,7 @@ fn providers_array_replaces_wholesale() {
         mcp_servers: None,
         skills: None,
         tools: None,
+        plugins: None,
     };
     let merged = merge_layers(vec![layer_a, layer_b]);
     assert_eq!(merged.providers.as_ref().unwrap().len(), 1);
@@ -79,6 +82,7 @@ fn finalize_fills_defaults() {
         mcp_servers: None,
         skills: None,
         tools: None,
+        plugins: None,
     };
     let cfg = partial.finalize().expect("ok");
     assert_eq!(cfg.runtime.session_root, PathBuf::from("./sessions"));
@@ -102,6 +106,7 @@ fn finalize_preserves_explicit_default_provider() {
         mcp_servers: None,
         skills: None,
         tools: None,
+        plugins: None,
     };
     let cfg = partial.finalize().expect("ok");
     assert_eq!(cfg.runtime.default_provider.as_deref(), Some("a"));
@@ -115,6 +120,7 @@ fn finalize_ambiguous_provider_errors() {
         mcp_servers: None,
         skills: None,
         tools: None,
+        plugins: None,
     };
     let err = partial.finalize().unwrap_err();
     let msg = err.to_string();

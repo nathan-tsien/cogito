@@ -11,6 +11,7 @@ members = [
     "crates/cogito-strategy",
     "crates/cogito-jobs",
     "crates/cogito-mcp",
+    "crates/cogito-plugin",
     "crates/cogito-config",
     "crates/cogito-context",
     "crates/cogito-cli",
@@ -52,6 +53,7 @@ cogito-skills = { path = "crates/cogito-skills", version = "0.1.0" }
 cogito-strategy = { path = "crates/cogito-strategy" }
 cogito-jobs = { path = "crates/cogito-jobs" }
 cogito-mcp = { path = "crates/cogito-mcp" }
+cogito-plugin = { path = "crates/cogito-plugin" }
 cogito-test-fixtures = { path = "crates/testing/cogito-test-fixtures" }
 cogito-mock-model = { path = "crates/testing/cogito-mock-model" }
 

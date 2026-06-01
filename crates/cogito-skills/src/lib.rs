@@ -6,6 +6,7 @@ pub mod metadata;
 pub mod registry;
 pub mod sigil;
 
+pub use discovery::{PluginSkillRoot, ScanConfig};
 pub use registry::{SkillRegistry, SkillRegistryError};
 
 #[cfg(test)]

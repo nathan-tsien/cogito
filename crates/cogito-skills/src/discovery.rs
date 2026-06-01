@@ -21,6 +21,21 @@ pub struct ScanConfig {
     pub user_dir: Option<PathBuf>,
     /// Include cogito-bundled (System) skills. v0.1 leaves this off.
     pub include_system: bool,
+    /// Plugin scope: plugin skill roots to register, each namespaced
+    /// `<plugin_id>:<name>`. Empty skips Plugin scope. Populated by the
+    /// Plugin loader (ADR-0021).
+    pub plugin_roots: Vec<PluginSkillRoot>,
+}
+
+/// One plugin's skills directory, contributed by the Plugin loader
+/// (ADR-0021). Skills found here are registered at Plugin scope and
+/// namespaced `<plugin_id>:<name>`.
+#[derive(Clone, Debug)]
+pub struct PluginSkillRoot {
+    /// Globally-unique plugin id (the namespace prefix).
+    pub plugin_id: String,
+    /// The plugin's `skills/` directory (contains `<name>/SKILL.md`).
+    pub dir: PathBuf,
 }
 
 /// One discovered skill — frontmatter parsed, body retained, source known.
@@ -70,6 +85,20 @@ pub fn discover_skills(config: &ScanConfig) -> Result<Vec<DiscoveredSkill>, Disc
     }
     if config.include_system {
         // v0.1: no bundled skills yet.
+    }
+    for root in &config.plugin_roots {
+        let before = out.len();
+        scan_skills_dir(
+            &root.dir,
+            &SkillSource::Plugin {
+                plugin_id: root.plugin_id.clone(),
+            },
+            &mut out,
+        )?;
+        // Namespace each newly-discovered plugin skill `<plugin_id>:<name>`.
+        for d in &mut out[before..] {
+            d.parsed.name = format!("{}:{}", root.plugin_id, d.parsed.name);
+        }
     }
     Ok(out)
 }
@@ -142,4 +171,66 @@ fn parse_one(path: &Path) -> Result<ParsedSkill, ParseError> {
     debug!(?path, "parsing SKILL.md");
     let text = fs::read_to_string(path)?;
     parse_skill_md(&text)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod plugin_scope_tests {
+    use super::*;
+
+    #[test]
+    fn discovers_plugin_skill_namespaced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skills_dir = tmp.path().join("skills");
+        let sdir = skills_dir.join("review-rust");
+        std::fs::create_dir_all(&sdir).unwrap();
+        std::fs::write(
+            sdir.join("SKILL.md"),
+            "---\nname: review-rust\ndescription: d\n---\nbody\n",
+        )
+        .unwrap();
+
+        let cfg = ScanConfig {
+            workspace_root: None,
+            user_dir: None,
+            include_system: false,
+            plugin_roots: vec![PluginSkillRoot {
+                plugin_id: "code-review".to_string(),
+                dir: skills_dir,
+            }],
+        };
+        let found = discover_skills(&cfg).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].parsed.name, "code-review:review-rust");
+        assert!(matches!(
+            found[0].source,
+            cogito_protocol::skill::SkillSource::Plugin { .. }
+        ));
+    }
+
+    #[test]
+    fn registry_registers_namespaced_plugin_skill() {
+        use cogito_protocol::skill::SkillProvider;
+        let tmp = tempfile::tempdir().unwrap();
+        let skills_dir = tmp.path().join("skills");
+        let sdir = skills_dir.join("s1");
+        std::fs::create_dir_all(&sdir).unwrap();
+        std::fs::write(
+            sdir.join("SKILL.md"),
+            "---\nname: s1\ndescription: d\n---\nb\n",
+        )
+        .unwrap();
+
+        let cfg = ScanConfig {
+            workspace_root: None,
+            user_dir: None,
+            include_system: false,
+            plugin_roots: vec![PluginSkillRoot {
+                plugin_id: "p1".into(),
+                dir: skills_dir,
+            }],
+        };
+        let reg = crate::registry::SkillRegistry::scan(cfg).unwrap();
+        assert!(reg.is_registered("p1:s1"));
+    }
 }

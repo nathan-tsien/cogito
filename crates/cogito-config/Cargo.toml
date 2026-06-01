@@ -18,6 +18,7 @@ file = ["dep:serde_yaml"]
 cogito-protocol = { workspace = true }
 cogito-model    = { workspace = true }
 cogito-mcp      = { workspace = true }
+cogito-plugin   = { workspace = true }
 cogito-sandbox  = { workspace = true }
 cogito-jobs     = { workspace = true }
 cogito-tools    = { workspace = true }

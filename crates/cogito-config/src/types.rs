@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use cogito_jobs::BashConfig;
 use cogito_mcp::{McpServerConfig, McpStartupFailure};
 use cogito_model::ProviderConfig;
+use cogito_plugin::PluginEntry;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_sandbox::SandboxConfig;
 use cogito_tools::WebFetchConfig;
@@ -40,6 +41,9 @@ pub struct RuntimeConfig {
     /// Unlike `skills`, `tools` has no omitted-vs-default distinction, so
     /// `finalize` collapses an absent section straight to defaults.
     pub tools: ToolsConfig,
+    /// Loaded `[[plugins]]` entries (ADR-0021). Folded into the skill
+    /// registry and MCP provider by surface code.
+    pub plugins: Vec<PluginEntry>,
 }
 
 /// `[tools]` cogito.toml section: aggregates per-tool config owned by the
@@ -82,9 +86,9 @@ pub struct RuntimeSection {
 /// layered merge.
 ///
 /// The top level intentionally does NOT use
-/// `#[serde(deny_unknown_fields)]`: reserved sections (`[plugins]`,
-/// `[[subagents]]`) deserialize silently. Inner structs do apply
-/// `deny_unknown_fields` to catch typos within a known section.
+/// `#[serde(deny_unknown_fields)]`: reserved sections (`[[subagents]]`)
+/// deserialize silently. Inner structs do apply `deny_unknown_fields`
+/// to catch typos within a known section.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RuntimeConfigPartial {
@@ -102,6 +106,10 @@ pub struct RuntimeConfigPartial {
     pub skills: Option<SkillsConfig>,
     /// Optional `[tools]` section. Whole-section replace on merge.
     pub tools: Option<ToolsConfig>,
+    /// Optional `[[plugins]]` array (ADR-0021). Stored as raw TOML values
+    /// so per-entry deserialization is deferred to finalize, mirroring
+    /// `mcp_servers`.
+    pub plugins: Option<Vec<toml::Value>>,
 }
 
 /// `[skills]` cogito.toml section.
@@ -173,6 +181,26 @@ pub(crate) fn finalize_mcp_servers(
     (ok, errs)
 }
 
+/// Per-entry try-deserialize of `[[plugins]]` raw values into typed
+/// `PluginEntry`. Unlike `mcp_servers`, a malformed plugin entry is fatal
+/// (there is no plugin startup-failure banner): the first bad entry
+/// returns `ConfigError::Validation` with its 0-based index.
+pub(crate) fn finalize_plugins(
+    raw: Option<Vec<toml::Value>>,
+) -> Result<Vec<PluginEntry>, crate::loader::ConfigError> {
+    let Some(entries) = raw else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::with_capacity(entries.len());
+    for (i, value) in entries.into_iter().enumerate() {
+        let entry: PluginEntry = value.try_into().map_err(|e| {
+            crate::loader::ConfigError::Validation(format!("invalid [[plugins]] entry {i}: {e}"))
+        })?;
+        out.push(entry);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -192,6 +220,7 @@ mod tests {
             mcp_servers: None,
             skills: None,
             tools: None,
+            plugins: None,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: RuntimeConfigPartial = serde_json::from_str(&s).unwrap();
@@ -213,20 +242,21 @@ mod tests {
         assert!(p.mcp_servers.is_none());
         assert!(p.skills.is_none());
         assert!(p.tools.is_none());
+        assert!(p.plugins.is_none());
     }
 
     #[test]
     fn unknown_top_level_section_does_not_error() {
-        // [plugins] is a reserved section; Sprint 4.5 must accept and
-        // ignore it.
+        // [[subagents]] is a reserved section that must deserialize silently.
+        // [[plugins]] is now a real field; use a valid entry.
         let toml_str = r#"
             [[plugins]]
-            name = "future-plugin"
-            other = "x"
+            path = "./plugins/future-plugin"
         "#;
         let p: RuntimeConfigPartial = toml::from_str(toml_str).expect("parse");
         assert!(p.runtime.is_none());
         assert!(p.providers.is_none());
+        assert!(p.plugins.is_some());
     }
 
     #[test]
@@ -339,5 +369,23 @@ mod tests {
         let (ok, errs) = finalize_mcp_servers(partial.mcp_servers);
         assert!(ok.is_empty());
         assert!(errs.is_empty());
+    }
+
+    #[test]
+    fn parses_plugins_section() {
+        let toml_src = r#"
+[[plugins]]
+path = "./plugins/code-review"
+
+[[plugins]]
+path = "./plugins/sql"
+enabled = false
+"#;
+        let partial: RuntimeConfigPartial = toml::from_str(toml_src).unwrap();
+        let cfg = partial.finalize().unwrap();
+        assert_eq!(cfg.plugins.len(), 2);
+        assert_eq!(cfg.plugins[0].path, "./plugins/code-review");
+        assert!(cfg.plugins[0].enabled);
+        assert!(!cfg.plugins[1].enabled);
     }
 }

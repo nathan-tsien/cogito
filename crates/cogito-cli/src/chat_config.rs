@@ -91,6 +91,7 @@ fn cli_inputs_to_partial(inputs: &ChatConfigInputs) -> RuntimeConfigPartial {
         mcp_servers: None,
         skills: None,
         tools: None,
+        plugins: None,
     }
 }
 
@@ -191,11 +192,17 @@ pub fn select_provider(cfg: &RuntimeConfig, inputs: &ChatConfigInputs) -> Result
 /// The default when the section is absent is "enabled": Sprint 7's
 /// philosophy is that skills are a passive, opt-out feature.
 ///
+/// `plugin_roots` carries skill roots contributed by loaded plugins
+/// (ADR-0021); pass `Vec::new()` when no plugins are active.
+///
 /// # Errors
 ///
 /// Returns the `SkillRegistryError` surfaced by the registry scan,
 /// wrapped in `anyhow` for the CLI's error chain.
-pub fn build_skill_provider(cfg: &RuntimeConfig) -> Result<Option<Arc<dyn SkillProvider>>> {
+pub fn build_skill_provider(
+    cfg: &RuntimeConfig,
+    plugin_roots: Vec<cogito_skills::PluginSkillRoot>,
+) -> Result<Option<Arc<dyn SkillProvider>>> {
     let enabled = cfg.skills.as_ref().is_none_or(|s| s.enabled);
     if !enabled {
         return Ok(None);
@@ -210,6 +217,7 @@ pub fn build_skill_provider(cfg: &RuntimeConfig) -> Result<Option<Arc<dyn SkillP
             .map(PathBuf::from)
             .or_else(default_user_skills_dir),
         include_system: section.include_system,
+        plugin_roots,
     };
     let registry =
         cogito_skills::SkillRegistry::scan(scan).map_err(|e| anyhow!("scanning skills: {e}"))?;

@@ -34,6 +34,7 @@ fn discovers_repo_and_user_scopes() {
         workspace_root: Some(fixtures()),
         user_dir: Some(fixtures().join("user-home").join(".cogito").join("skills")),
         include_system: false,
+        ..Default::default()
     };
     let found = discover_skills(&cfg).unwrap();
     let names: Vec<&str> = found.iter().map(|s| s.parsed.name.as_str()).collect();
@@ -48,6 +49,7 @@ fn repo_scope_carries_source_repo() {
         workspace_root: Some(fixtures()),
         user_dir: None,
         include_system: false,
+        ..Default::default()
     };
     let found = discover_skills(&cfg).unwrap();
     let foo = found.iter().find(|s| s.parsed.name == "repo-foo").unwrap();
@@ -60,6 +62,7 @@ fn user_scope_carries_source_user() {
         workspace_root: None,
         user_dir: Some(fixtures().join("user-home").join(".cogito").join("skills")),
         include_system: false,
+        ..Default::default()
     };
     let found = discover_skills(&cfg).unwrap();
     let baz = found.iter().find(|s| s.parsed.name == "user-baz").unwrap();
@@ -72,6 +75,7 @@ fn missing_user_dir_is_not_an_error() {
         workspace_root: Some(fixtures()),
         user_dir: Some(PathBuf::from("/does/not/exist/cogito-skills-test")),
         include_system: false,
+        ..Default::default()
     };
     let _ = discover_skills(&cfg).expect("missing user dir is OK");
 }
@@ -85,6 +89,7 @@ fn registry_build_succeeds() {
         workspace_root: Some(fixtures()),
         user_dir: Some(fixtures().join("user-home").join(".cogito").join("skills")),
         include_system: false,
+        ..Default::default()
     })
     .unwrap();
     assert!(reg.is_registered("repo-foo"));
@@ -98,6 +103,7 @@ fn registry_get_returns_body() {
         workspace_root: Some(fixtures()),
         user_dir: None,
         include_system: false,
+        ..Default::default()
     })
     .unwrap();
     let content = reg.get("repo-foo").unwrap();
@@ -130,6 +136,7 @@ fn duplicate_name_in_same_dir_is_fatal() {
         workspace_root: Some(tmp.path().to_path_buf()),
         user_dir: None,
         include_system: false,
+        ..Default::default()
     })
     .unwrap_err();
     assert!(matches!(err, SkillRegistryError::DuplicateName { .. }));
@@ -171,6 +178,7 @@ fn cross_scope_repo_wins_over_user() {
         workspace_root: Some(tmp.path().join("repo")),
         user_dir: Some(tmp.path().join("user").join(".cogito").join("skills")),
         include_system: false,
+        ..Default::default()
     })
     .unwrap();
     let dual = reg.get("dual").unwrap();
@@ -183,6 +191,7 @@ fn registry_list_is_sorted_by_name() {
         workspace_root: Some(fixtures()),
         user_dir: Some(fixtures().join("user-home").join(".cogito").join("skills")),
         include_system: false,
+        ..Default::default()
     };
     let reg = SkillRegistry::scan(cfg).unwrap();
     let names: Vec<String> = reg.list().into_iter().map(|m| m.name).collect();
