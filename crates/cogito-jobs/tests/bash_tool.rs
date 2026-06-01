@@ -31,6 +31,25 @@ fn ctx() -> ExecCtx {
     ExecCtx::open_ended(SessionId::new(), TurnId::new())
 }
 
+/// `ExecCtx` whose `workspace` is a `LocalWorkspace` rooted at `root`.
+fn ctx_with_workspace(root: &std::path::Path) -> ExecCtx {
+    let mut c = ExecCtx::open_ended(SessionId::new(), TurnId::new());
+    c.workspace = Some(Arc::new(cogito_tools::workspace::LocalWorkspace::new(root)));
+    c
+}
+
+fn stdout_of(result: &ToolResult) -> String {
+    let ToolResult::Output(blocks) = result else {
+        panic!("expected Output, got {result:?}");
+    };
+    blocks[0]
+        .get("stdout")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
 fn exit_code(result: &ToolResult) -> Option<i64> {
     match result {
         ToolResult::Output(blocks) => blocks
@@ -123,6 +142,54 @@ async fn cwd_is_honored() {
     assert!(
         stdout.contains(subdir),
         "pwd should report the cwd subdir, got: {stdout:?}"
+    );
+}
+
+#[tokio::test]
+async fn no_cwd_defaults_to_workspace_root() {
+    // Executor rooted at its default (the process cwd); the session workspace
+    // is a different tempdir. With no explicit `cwd`, the command must run in
+    // the workspace root (ADR-0031 §5 exec-cwd unification), not the executor
+    // root.
+    let ws = tempfile::tempdir().unwrap();
+    let (tool, _jm) = bash(BashConfig::default());
+    let out = tool
+        .invoke(
+            "bash",
+            serde_json::json!({ "command": "pwd" }),
+            ctx_with_workspace(ws.path()),
+        )
+        .await;
+    let InvokeOutcome::Sync(result) = out else {
+        panic!("expected Sync");
+    };
+    let got = std::fs::canonicalize(stdout_of(&result)).unwrap();
+    let want = std::fs::canonicalize(ws.path()).unwrap();
+    assert_eq!(got, want, "pwd should report the workspace root");
+}
+
+#[tokio::test]
+async fn relative_cwd_resolves_against_workspace_root() {
+    // A relative `cwd` resolves under the workspace root, not the executor
+    // root: the workspace has a `sub/` dir, the executor root does not.
+    let ws = tempfile::tempdir().unwrap();
+    std::fs::create_dir(ws.path().join("sub")).unwrap();
+    let (tool, _jm) = bash(BashConfig::default());
+    let out = tool
+        .invoke(
+            "bash",
+            serde_json::json!({ "command": "pwd", "cwd": "sub" }),
+            ctx_with_workspace(ws.path()),
+        )
+        .await;
+    let InvokeOutcome::Sync(result) = out else {
+        panic!("expected Sync");
+    };
+    let got = std::fs::canonicalize(stdout_of(&result)).unwrap();
+    let want = std::fs::canonicalize(ws.path().join("sub")).unwrap();
+    assert_eq!(
+        got, want,
+        "relative cwd should resolve under the workspace root"
     );
 }
 
