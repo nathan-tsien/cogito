@@ -89,6 +89,12 @@ fn collect_skills(
     // v0.2: per-skill disable is coarse. Register the root unless every
     // skill subdir is overridden off. (Finer per-skill filtering is a
     // follow-up; SkillRegistry::scan consumes a directory, not a name list.)
+    //
+    // A `read_dir` I/O error (e.g. permissions) collapses to "no entries"
+    // here, so the root is skipped rather than failing the load. That is
+    // deliberate: the directory exists (the `is_dir` guard passed), and the
+    // authoritative skill walk runs later in `SkillRegistry::scan`, which is
+    // where a genuinely unreadable skills dir surfaces its error.
     let any_enabled = std::fs::read_dir(&skills_dir)
         .into_iter()
         .flatten()
