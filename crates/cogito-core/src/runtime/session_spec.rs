@@ -10,6 +10,7 @@ use std::sync::Arc;
 use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::tool::ToolProvider;
+use cogito_protocol::workspace::Workspace;
 
 /// Optional per-session provider overrides.
 ///
@@ -24,6 +25,9 @@ pub struct SessionSpec {
     pub skills: Option<Arc<dyn SkillProvider>>,
     /// Per-session strategy. `None` → Runtime default.
     pub strategy: Option<HarnessStrategy>,
+    /// Per-session working tree (ADR-0030 / ADR-0031). `None` → Runtime
+    /// default. Swappable mid-session via `update_session`.
+    pub workspace: Option<Arc<dyn Workspace>>,
     /// Tenant identity stamped into `SessionMeta` at open. Ignored by
     /// `update_session` (identity is fixed at open time).
     pub tenant_id: Option<String>,
@@ -38,6 +42,7 @@ impl std::fmt::Debug for SessionSpec {
             .field("tools", &self.tools.is_some())
             .field("skills", &self.skills.is_some())
             .field("strategy", &self.strategy.as_ref().map(|s| &s.name))
+            .field("workspace", &self.workspace.is_some())
             .field("tenant_id", &self.tenant_id)
             .field("user_id", &self.user_id)
             .finish()

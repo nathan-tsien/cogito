@@ -57,6 +57,10 @@ pub struct Runtime {
     /// a `delegate` role into a child `HarnessStrategy`. `None` => delegate
     /// returns `SpawnError::UnknownRole`.
     strategy_registry: Option<Arc<dyn cogito_protocol::strategy_registry::StrategyRegistry>>,
+    /// Default session working tree (ADR-0030 / ADR-0031), injected into each
+    /// session's `ExecCtx` unless a `SessionSpec` overrides it. `None` => file
+    /// tools have no workspace and return a structured error.
+    workspace: Option<Arc<dyn cogito_protocol::workspace::Workspace>>,
 }
 
 impl Runtime {
@@ -250,6 +254,7 @@ impl Runtime {
             .clone()
             .unwrap_or_else(|| Arc::clone(&self.tools));
         let session_skills = spec.skills.clone().or_else(|| self.skills.clone());
+        let session_workspace = spec.workspace.clone().or_else(|| self.workspace.clone());
 
         // Build the context pipeline once per session from `strategy.context`.
         // All turns share this same Arc; `apply_session_update` rebuilds it on a
@@ -305,6 +310,7 @@ impl Runtime {
             // Runtime).
             brain_spawner: Some(Arc::new(RuntimeSpawner(Arc::clone(self)))
                 as Arc<dyn cogito_protocol::subagent::BrainSpawner>),
+            workspace: session_workspace,
         };
 
         let mailbox_tx_for_loop = mailbox_tx.clone();
@@ -370,6 +376,7 @@ pub struct RuntimeBuilder {
     skills: Option<Arc<dyn SkillProvider>>,
     job_mgr: Option<Arc<dyn JobManager>>,
     strategy_registry: Option<Arc<dyn cogito_protocol::strategy_registry::StrategyRegistry>>,
+    workspace: Option<Arc<dyn cogito_protocol::workspace::Workspace>>,
 }
 
 impl RuntimeBuilder {
@@ -405,6 +412,16 @@ impl RuntimeBuilder {
     #[must_use]
     pub fn tools(mut self, tools: Arc<dyn ToolProvider>) -> Self {
         self.tools = Some(tools);
+        self
+    }
+
+    /// Inject the default session working tree (ADR-0030 / ADR-0031). Optional;
+    /// when set, every session's `ExecCtx` carries it unless a `SessionSpec`
+    /// overrides it. Surface code (CLI/TUI) typically passes a `LocalWorkspace`
+    /// rooted at the project cwd.
+    #[must_use]
+    pub fn workspace(mut self, workspace: Arc<dyn cogito_protocol::workspace::Workspace>) -> Self {
+        self.workspace = Some(workspace);
         self
     }
 
@@ -488,6 +505,7 @@ impl RuntimeBuilder {
             skills: self.skills,
             job_mgr,
             strategy_registry: self.strategy_registry,
+            workspace: self.workspace,
         }))
     }
 }
