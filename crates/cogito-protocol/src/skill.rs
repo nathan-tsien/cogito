@@ -62,13 +62,20 @@ pub struct SkillContent {
     pub source: SkillSource,
     /// SKILL.md body with frontmatter stripped (already validated UTF-8).
     pub body: String,
-    /// Absolute path to the skill's own directory (the folder containing
+    /// Path to the skill's own directory (the folder containing
     /// `SKILL.md`), so the model can resolve relative references in the
-    /// body (`scripts/`, `references/`, `assets/`). `None` for skills with
-    /// no on-disk bundle (e.g. future embedded `System` or virtual
-    /// providers). See ADR-0029. This is resolved fresh from the live
-    /// provider at injection time and is deliberately NOT persisted in the
-    /// event log (absolute paths are machine-specific; ADR-0007).
+    /// body (`scripts/`, `references/`, `assets/`). Absolute when the
+    /// provider's configured roots are absolute (the registry does not
+    /// canonicalize). `None` for skills with no on-disk bundle (e.g. future
+    /// embedded `System` or virtual providers). See ADR-0029.
+    ///
+    /// This field itself is not part of any persisted event. Note, however,
+    /// that `SkillInjector` renders it into the system-prompt suffix, and
+    /// that suffix *is* persisted in the `SystemPromptInjected` event and
+    /// replayed on resume. So a concrete (machine-specific) path does reach
+    /// the event log indirectly. That is fine for single-machine resume;
+    /// machine-independent multi-replica resume (v0.4) will need the path
+    /// re-resolved at prompt-build time rather than frozen into the suffix.
     pub root: Option<PathBuf>,
 }
 
