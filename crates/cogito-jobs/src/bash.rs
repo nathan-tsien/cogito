@@ -5,6 +5,7 @@
 //! `ToolProvider` directly (not `BuiltinTool`) because Adaptive dispatch
 //! returns either `InvokeOutcome::Sync` or `Async` per call.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -83,13 +84,35 @@ impl BashTool {
         }
     }
 
-    fn spec(&self, args: &BashArgs, timeout: Duration) -> CommandSpec {
+    fn spec(&self, args: &BashArgs, timeout: Duration, base: Option<&Path>) -> CommandSpec {
         CommandSpec {
             command: args.command.clone(),
-            cwd: args.cwd.as_ref().map(std::path::PathBuf::from),
+            cwd: resolve_cwd(args.cwd.as_deref(), base),
             timeout,
             max_output_bytes: self.cfg.max_output_bytes,
         }
+    }
+}
+
+/// Resolve the effective working directory for a `bash` call, unifying it on
+/// the session workspace root (ADR-0031 §5). `base` is the workspace root when
+/// a `Workspace` is wired into `ExecCtx`, else `None`.
+///
+/// - explicit absolute `cwd` -> used as-is in the Local profile; the isolating
+///   executor (ADR-0012) confines it under the sandboxed profile;
+/// - explicit relative `cwd` with a workspace -> resolved under the root;
+/// - explicit relative `cwd` without a workspace -> passed through so the
+///   executor resolves it against its own configured root (pre-unification
+///   behavior, preserved);
+/// - no `cwd` with a workspace -> the workspace root;
+/// - no `cwd` without a workspace -> `None` (executor uses its configured root).
+fn resolve_cwd(arg_cwd: Option<&str>, base: Option<&Path>) -> Option<PathBuf> {
+    match (arg_cwd, base) {
+        (Some(c), _) if Path::new(c).is_absolute() => Some(PathBuf::from(c)),
+        (Some(c), Some(base)) => Some(base.join(c)),
+        (Some(c), None) => Some(PathBuf::from(c)),
+        (None, Some(base)) => Some(base.to_path_buf()),
+        (None, None) => None,
     }
 }
 
@@ -158,7 +181,8 @@ impl ToolProvider for BashTool {
 impl BashTool {
     async fn invoke_sync(&self, args: BashArgs, ctx: ExecCtx) -> InvokeOutcome {
         let timeout = Duration::from_secs(args.timeout_secs.unwrap_or(self.cfg.sync_timeout_secs));
-        let spec = self.spec(&args, timeout);
+        let base = ctx.workspace.as_ref().map(|w| w.root().to_path_buf());
+        let spec = self.spec(&args, timeout, base.as_deref());
         let result = match self.executor.run(spec, ctx).await {
             Ok(o) if o.timed_out => ToolResult::Error {
                 kind: ToolErrorKind::Timeout,
@@ -191,7 +215,8 @@ impl BashTool {
     }
     async fn invoke_background(&self, args: BashArgs, ctx: ExecCtx) -> InvokeOutcome {
         let timeout = Duration::from_secs(self.cfg.background_deadline_secs);
-        let spec = self.spec(&args, timeout);
+        let base = ctx.workspace.as_ref().map(|w| w.root().to_path_buf());
+        let spec = self.spec(&args, timeout, base.as_deref());
         let executor = Arc::clone(&self.executor);
         // Background commands carry the turn's cancel token so a session
         // shutdown / cancel still kills the child.
