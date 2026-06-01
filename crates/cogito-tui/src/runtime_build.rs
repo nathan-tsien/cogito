@@ -25,7 +25,7 @@ use cogito_protocol::strategy_registry::StrategyRegistry;
 use cogito_protocol::tool::ToolProvider;
 use cogito_store::JsonlStore;
 use cogito_tools::{
-    BuiltinToolProvider, CompositeToolProvider, ListDir, NamingPolicy, ReadFile, WebFetch,
+    BuiltinToolProvider, CompositeToolProvider, Edit, ListDir, NamingPolicy, ReadFile, WebFetch,
     WriteFile,
 };
 
@@ -295,6 +295,7 @@ async fn build_tools_with_banner(
             .with_tool(Arc::new(ReadFile))
             .with_tool(Arc::new(WriteFile))
             .with_tool(Arc::new(ListDir))
+            .with_tool(Arc::new(Edit))
             .with_tool(Arc::new(WebFetch::new(cfg.tools.web_fetch.clone())))
             .build(),
     );
