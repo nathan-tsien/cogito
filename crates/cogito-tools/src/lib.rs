@@ -8,7 +8,9 @@
 pub mod builtins;
 pub mod composite;
 pub mod provider;
+pub mod workspace;
 
 pub use builtins::{ReadFile, WebFetch, WebFetchConfig};
 pub use composite::{CompositeToolProvider, NamingPolicy};
 pub use provider::{BuiltinTool, BuiltinToolProvider, BuiltinToolProviderBuilder};
+pub use workspace::LocalWorkspace;
