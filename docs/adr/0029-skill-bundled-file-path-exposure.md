@@ -2,7 +2,13 @@
 
 ## Status
 
-Proposed (draft, 2026-06-01).
+Accepted — implemented 2026-06-01 (Phase 0 of the complete-skill-support
+design). `SkillContent.root` added; `SkillRegistry` populates it from the
+discovered skill directory; `SkillInjector` emits a `root="..."` attribute
+plus a one-line resolution hint when present. Tests:
+`cogito-skills::registry_get_carries_skill_own_directory_as_root`,
+`cogito-context::injected_block_carries_skill_root_path` (and the `None`-path
+guard in `user_channel_activates_from_turn_started`).
 
 Scopes a narrow, additive fix that is a **precondition** for ADR-0023
 (bundled-script execution) and for any script-bearing skill (e.g. the
@@ -71,19 +77,21 @@ exposure only; execution policy stays in ADR-0023.
    `SkillProvider::get` returns it. Additive field; no event-schema impact
    (see point 4).
 
-2. **Inject a one-line path header.** When `SkillInjector` injects a skill
-   body whose `root` is `Some`, it prepends a single resolvable-path line
-   ahead of the body, e.g.:
+2. **Surface the path on the `<skill>` block.** When `SkillInjector` injects
+   a skill body whose `root` is `Some`, it adds a `root="..."` attribute to
+   the existing `<skill>` opening tag plus a one-line resolution hint, e.g.:
 
    ```
-   Skill "pptx" files are rooted at: /abs/.../.cogito/skills/pptx/
-   Resolve any relative path in the instructions below (scripts/, references/,
-   assets/) against this root.
+   <skill name="pptx" source="repo" root="/abs/.../.cogito/skills/pptx">
+   Bundled files for this skill live under the root path above; resolve any
+   relative path in the instructions below against it.
+   ... SKILL.md body ...
+   </skill>
    ```
 
    This is the minimum that turns the SKILL.md's relative references into
    something `read_file` / `bash` can act on. Skills with `root: None` get
-   no header (behavior unchanged).
+   no attribute and no hint (behavior unchanged).
 
 3. **Do not change `bash`'s default cwd.** `bash` keeps resolving `cwd`
    against the workspace root (`crates/cogito-jobs/src/bash.rs:54-56`). The
@@ -92,14 +100,24 @@ exposure only; execution policy stays in ADR-0023.
    unambiguous "the skill cwd" to default to; an explicit absolute path is
    unambiguous.
 
-4. **Keep absolute paths out of the event log.** Do **not** add the root to
-   the `SkillActivated` event payload (ADR-0020 §6) nor to `SkillMetadata`.
-   The event log is a portable, cross-language, cross-machine contract
-   (ADR-0007); absolute host paths are machine-specific and would poison
-   resume/replay across environments. The root is resolved from the live
-   registry at injection time, not replayed from events. `SkillMetadata`
-   stays path-free so discovery (progressive disclosure, name+description
-   only) remains cheap and location-independent.
+4. **Keep the path out of the *durable identity* of a skill.** Do **not**
+   add the root to the `SkillActivated` event payload (ADR-0020 §6) nor to
+   `SkillMetadata`. The event log is a portable, cross-language,
+   cross-machine contract (ADR-0007); machine-specific host paths must not
+   become part of how a skill is identified or replayed. The root is
+   resolved from the live registry at injection time. `SkillMetadata` stays
+   path-free so discovery (progressive disclosure, name+description only)
+   remains cheap and location-independent.
+
+   **Caveat (be precise):** the `SkillContent.root` *field* is not itself a
+   persisted event, but `SkillInjector` renders it into the system-prompt
+   suffix, and that suffix **is** persisted in `SystemPromptInjected` and
+   reused on resume (the injector is idempotent and reuses the existing
+   event). So a concrete path does reach the event log *indirectly*, frozen
+   into the rendered suffix. This is acceptable for single-machine resume
+   (v0.1–v0.3). For machine-independent multi-replica resume (v0.4), the
+   path must be re-resolved at prompt-build time instead of replayed from
+   the frozen suffix — tracked as a v0.4 follow-up, not solved here.
 
 5. **Scope precedence and `SkillSource::Repo.dir` are unchanged.** The
    workspace-root semantics of `SkillSource::Repo.dir` are load-bearing for
@@ -125,9 +143,12 @@ assertion actually true, and is the cheapest enabler of ADR-0023 Position A
   test fixtures must populate it.
 - Injected context grows by ~1-2 lines per active skill (negligible vs. the
   existing per-skill body + 1024-char description cap).
-- The model now sees an absolute host path — minor host-layout disclosure.
+- The model now sees a host path — minor host-layout disclosure.
   Acceptable: the model already runs `bash` on the host via `DirectExecutor`
   (ADR-0027), so this leaks nothing it could not already enumerate.
+- A concrete path is frozen into the persisted `SystemPromptInjected` suffix
+  (see Decision point 4 caveat); fine for single-machine resume, a tracked
+  v0.4 follow-up for multi-replica.
 
 **Given up**:
 - Nothing structural. This is a strict superset of current behavior gated on
@@ -149,6 +170,12 @@ assertion actually true, and is the cheapest enabler of ADR-0023 Position A
 4. Should the header also list the actual bundled subdirectories
    (`scripts/`, `references/`, `assets/`) that exist, so the model does not
    guess? Costs a `read_dir` at injection time; possibly worth it.
+5. Attribute escaping. The path is interpolated into the `root="..."`
+   pseudo-XML attribute unescaped. A skill directory name containing `"`,
+   `>`, or a newline would break the tag and inject text into the system
+   prompt. Trusted for operator-authored dirs in v0.1 (a `TODO` marks the
+   site); must be escaped or rejected at discovery before skill roots become
+   tenant-controlled in the SaaS profile (Phase 3).
 
 ## References
 

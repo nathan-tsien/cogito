@@ -240,7 +240,35 @@ fn build_body_blocks(provider: &dyn SkillProvider, names: &[String]) -> String {
         };
         // Writing into a `String` via `fmt::Write` is infallible; the
         // `Result` can be safely discarded.
-        let _ = write!(out, "\n<skill name=\"{name}\" source=\"{source_kind}\">\n");
+        //
+        // ADR-0029: when the skill has an on-disk bundle, surface its root
+        // directory as a `root="..."` attribute plus a one-line resolution
+        // hint, so the model can locate bundled files (`scripts/`,
+        // `references/`, `assets/`) referenced relatively in the body.
+        // Skills with no on-disk bundle (`root: None`) emit no path.
+        //
+        // TODO(ADR-0029): the path is interpolated into the pseudo-XML
+        // attribute unescaped. Operator-authored skill dirs are trusted in
+        // v0.1, but a directory name containing `"`, `>`, or a newline would
+        // break the tag and inject text into the system prompt. Escape (or
+        // reject at discovery) before skill roots become tenant-controlled
+        // in the SaaS profile (Phase 3).
+        match content.root.as_deref().map(std::path::Path::display) {
+            Some(root) => {
+                let _ = write!(
+                    out,
+                    "\n<skill name=\"{name}\" source=\"{source_kind}\" root=\"{root}\">\n"
+                );
+                let _ = writeln!(
+                    out,
+                    "Bundled files for this skill live under the root path above; \
+                     resolve any relative path in the instructions below against it."
+                );
+            }
+            None => {
+                let _ = write!(out, "\n<skill name=\"{name}\" source=\"{source_kind}\">\n");
+            }
+        }
         out.push_str(&content.body);
         out.push_str("\n</skill>\n");
     }

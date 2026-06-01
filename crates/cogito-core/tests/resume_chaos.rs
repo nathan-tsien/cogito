@@ -1131,6 +1131,7 @@ impl cogito_protocol::skill::SkillProvider for StaticFooSkillProvider {
                 name: "foo".into(),
                 source: cogito_protocol::skill::SkillSource::User,
                 body: FOO_BODY.into(),
+                root: None,
             })
         } else {
             None

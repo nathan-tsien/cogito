@@ -64,6 +64,14 @@ suffix. Cross-turn dedup is anchored on `(session_id, skill_name)`. See
 `docs/superpowers/specs/2026-05-23-sprint-7-skill-loader-design.md` for the
 end-to-end design.
 
+Each activated skill is injected as a `<skill name="..." source="...">` block
+wrapping its SKILL.md body. Per ADR-0029, when `SkillContent.root` is `Some`
+(any on-disk skill) the block also carries a `root="<abs-dir>"` attribute and a
+one-line hint, so the model can resolve relative references in the body
+(`scripts/`, `references/`, `assets/`) against the skill's own directory. The
+path is resolved fresh from the `SkillProvider` at injection time and is never
+persisted in the event log (absolute paths are machine-specific; ADR-0007).
+
 ### Orchestration order
 
 Each `ContextManaged` transition H11 runs in this fixed order:

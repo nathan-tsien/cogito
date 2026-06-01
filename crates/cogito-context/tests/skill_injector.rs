@@ -27,6 +27,7 @@ impl SkillProvider for StaticProvider {
                     name: m.name.clone(),
                     source: m.source.clone(),
                     body: body.clone(),
+                    root: None,
                 })
             } else {
                 None
@@ -191,6 +192,11 @@ async fn user_channel_activates_from_turn_started() {
             } => {
                 assert!(suffix.contains("<skill name=\"invoice-parser\""));
                 assert!(suffix.contains("# Invoice parser body"));
+                // root is None for this provider — no path attribute emitted.
+                assert!(
+                    !suffix.contains("root=\""),
+                    "no root attribute when SkillContent.root is None"
+                );
                 assert_eq!(contributors, &vec!["invoice-parser".to_string()]);
                 saw_injected = true;
             }
@@ -198,6 +204,76 @@ async fn user_channel_activates_from_turn_started() {
         }
     }
     assert!(saw_activated && saw_injected);
+}
+
+#[tokio::test]
+async fn injected_block_carries_skill_root_path() {
+    // ADR-0029: when SkillContent.root is Some, the injected <skill> block
+    // must surface the absolute path so the model can resolve bundled-file
+    // references (scripts/, references/, assets/) against it.
+    struct RootProvider;
+    impl SkillProvider for RootProvider {
+        fn list(&self) -> Vec<SkillMetadata> {
+            vec![SkillMetadata {
+                name: "pptx".into(),
+                description: "deck builder".into(),
+                source: SkillSource::User,
+                disable_model_invocation: false,
+                user_invocable: true,
+                version: None,
+            }]
+        }
+        fn get(&self, name: &str) -> Option<SkillContent> {
+            (name == "pptx").then(|| SkillContent {
+                name: "pptx".into(),
+                source: SkillSource::User,
+                body: "# pptx body".into(),
+                root: Some(std::path::PathBuf::from("/abs/skills/pptx")),
+            })
+        }
+        fn is_registered(&self, name: &str) -> bool {
+            name == "pptx"
+        }
+    }
+
+    let mut recorder = InMemoryRecorder::default();
+    let strategy = HarnessStrategy::default_with_model("test");
+    let session_id = SessionId::new();
+    let turn_id = TurnId::new();
+    let exec_ctx = ExecCtx::open_ended(session_id, turn_id);
+    let history = vec![make_event(
+        0,
+        turn_id,
+        EventPayload::TurnStarted {
+            user_input: vec![],
+            activate_skills: vec!["pptx".into()],
+        },
+    )];
+    let input = InjectionInput {
+        session_id,
+        turn_id,
+        strategy: &strategy,
+        history: &history,
+        exec_ctx: &exec_ctx,
+        recorder: &mut recorder,
+    };
+    let _ = SkillInjector::new(Arc::new(RootProvider))
+        .inject(input)
+        .await
+        .unwrap();
+
+    let injected = recorder
+        .events
+        .iter()
+        .find_map(|(_, p)| match p {
+            EventPayload::SystemPromptInjected { suffix, .. } => Some(suffix.clone()),
+            _ => None,
+        })
+        .expect("a SystemPromptInjected event");
+    assert!(
+        injected.contains("/abs/skills/pptx"),
+        "injected block must surface the skill root path; got:\n{injected}"
+    );
 }
 
 #[tokio::test]

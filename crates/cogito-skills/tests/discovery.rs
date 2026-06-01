@@ -111,6 +111,23 @@ fn registry_get_returns_body() {
 }
 
 #[test]
+fn registry_get_carries_skill_own_directory_as_root() {
+    // ADR-0029: SkillContent.root must point at the skill's OWN directory
+    // (the folder containing SKILL.md), not the workspace root, so the
+    // model can resolve relative references in the body (scripts/, etc.).
+    let reg = SkillRegistry::scan(ScanConfig {
+        workspace_root: Some(fixtures()),
+        user_dir: None,
+        include_system: false,
+        ..Default::default()
+    })
+    .unwrap();
+    let content = reg.get("repo-foo").unwrap();
+    let expected = fixtures().join(".cogito").join("skills").join("repo-foo");
+    assert_eq!(content.root, Some(expected));
+}
+
+#[test]
 fn duplicate_name_in_same_dir_is_fatal() {
     use std::fs;
     use tempfile::tempdir;

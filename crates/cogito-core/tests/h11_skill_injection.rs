@@ -71,6 +71,7 @@ impl SkillProvider for StaticFooProvider {
                 name: "foo".into(),
                 source: SkillSource::User,
                 body: FOO_BODY.into(),
+                root: None,
             })
         } else {
             None
