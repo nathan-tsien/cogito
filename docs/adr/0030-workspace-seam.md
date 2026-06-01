@@ -122,6 +122,11 @@ profile redirect them. This ADR records the choice; the field + `read_file`
 migration ship in the consuming increment to keep this PR a clean seam-only
 change.
 
+**Provisioning, scoping, lifetime, and the exec-cwd relationship are decided
+in ADR-0031** (per-session ephemeral; `SessionSpec.workspace`; project cwd
+locally / per-tenant sandbox root in SaaS; session root as the default exec
+cwd).
+
 ## Consequences
 
 **Easier**:
