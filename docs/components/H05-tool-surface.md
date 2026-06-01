@@ -67,6 +67,21 @@ CompositeToolProvider {
 H05 sees only the composite — it doesn't know or care that the catalog
 came from multiple sources.
 
+### Per-session and mutable providers (ADR-0028)
+
+The `ToolProvider` H05 queries is **per-session**, not necessarily the
+Runtime-global one: `Runtime::open_session_with(id, mode, spec)` may
+inject a session-specific provider (e.g. a SaaS server composing one
+tenant's plugin MCP servers into the catalog). It may also **change
+during the session** — `SessionHandle::update_session` swaps the active
+`ToolProvider`, and because `TurnDeps` (which carries H05's provider) is
+rebuilt per turn, the new catalog is the one H05 surfaces on the **next**
+turn. H05 itself is unchanged: it stays a pure, deterministic filter over
+whatever `provider.list()` returns this turn; it neither knows nor cares
+that the provider was injected per-session or swapped between turns. See
+ARCHITECTURE.md §"Per-session provider injection" and
+[ADR-0028](../adr/0028-per-session-provider-injection.md).
+
 ## Open design questions
 
 - Should H05 expose its filter logic to a hook (`pre_prompt`) so policies can inject per-turn modifications? Initial answer: no — keep H05 pure; if a hook wants to modify the surface, it goes through `HookDecision::Modify(strategy)` and the surface is rebuilt deterministically. Strategy is the only knob.

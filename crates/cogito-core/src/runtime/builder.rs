@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::handle::{SessionHandle, SessionShared};
 use super::session_loop::{SessionDeps, SessionState, record_session_started_with_meta};
+use super::session_spec::SessionSpec;
 use super::types::{OpenMode, SessionId};
 use crate::harness::step_recorder::StepRecorder;
 
@@ -80,8 +81,30 @@ impl Runtime {
         id: SessionId,
         mode: OpenMode,
     ) -> Result<SessionHandle, RuntimeError> {
-        let strategy = self.strategy.clone();
-        self.open_inner(id, mode, strategy, None, 0, true).await
+        self.open_session_with(id, mode, SessionSpec::default())
+            .await
+    }
+
+    /// Open (or resume) a session with per-session provider overrides.
+    ///
+    /// Each `Some` field of `spec` replaces the corresponding Runtime
+    /// default for this session only. `tenant_id` / `user_id` are stamped
+    /// into the session's `SessionMeta`. See ADR-0028.
+    ///
+    /// # Errors
+    /// Same as [`Runtime::open_session`].
+    pub async fn open_session_with(
+        self: &Arc<Self>,
+        id: SessionId,
+        mode: OpenMode,
+        spec: SessionSpec,
+    ) -> Result<SessionHandle, RuntimeError> {
+        let strategy = spec
+            .strategy
+            .clone()
+            .unwrap_or_else(|| self.strategy.clone());
+        self.open_inner(id, mode, strategy, spec, None, 0, true)
+            .await
     }
 
     /// Internal open path shared by [`Runtime::open_session`] (top-level,
@@ -103,6 +126,7 @@ impl Runtime {
         id: SessionId,
         mode: OpenMode,
         strategy: HarnessStrategy,
+        spec: SessionSpec,
         meta_override: Option<cogito_protocol::SessionMeta>,
         subagent_depth: u32,
         register: bool,
@@ -195,6 +219,8 @@ impl Runtime {
                 cogito_version: env!("CARGO_PKG_VERSION").into(),
                 strategy: Some(strategy.name.clone()),
                 model: Some(strategy.model_params.model.clone()),
+                tenant_id: spec.tenant_id.clone(),
+                user_id: spec.user_id.clone(),
                 ..Default::default()
             });
             record_session_started_with_meta(&recorder, id, meta).await;
@@ -213,12 +239,25 @@ impl Runtime {
             ),
         );
 
+        // Per-session provider resolution: spec field wins, else Runtime
+        // default. Resolved *before* the context pipeline is built so the
+        // `SkillInjector` embedded in the pipeline gets the session's
+        // `SkillProvider`, not the Runtime default (ADR-0028: a per-session
+        // skills override must reach H11 system-prompt injection, not only the
+        // live sigil-detection path that reads `TurnDeps.skills`).
+        let session_tools = spec
+            .tools
+            .clone()
+            .unwrap_or_else(|| Arc::clone(&self.tools));
+        let session_skills = spec.skills.clone().or_else(|| self.skills.clone());
+
         // Build the context pipeline once per session from `strategy.context`.
-        // All turns share this same Arc; no per-turn rebuild is needed.
-        // `build_pipeline_v2` threads the optional `SkillProvider` into the
-        // pipeline so the `SkillInjector` (when selected) gets its handle.
+        // All turns share this same Arc; `apply_session_update` rebuilds it on a
+        // mid-session skills/strategy swap. `build_pipeline_v2` threads the
+        // session `SkillProvider` into the pipeline so the `SkillInjector`
+        // (when selected) gets its handle.
         let context_pipeline = Arc::new(
-            cogito_context::build_pipeline_v2(&strategy.context, self.skills.clone()).map_err(
+            cogito_context::build_pipeline_v2(&strategy.context, session_skills.clone()).map_err(
                 |e| RuntimeError::ResumeFailed {
                     id,
                     reason: e.to_string(),
@@ -246,14 +285,14 @@ impl Runtime {
             hooks,
             metrics,
             context_pipeline,
-            skills: self.skills.clone(),
+            skills: session_skills,
             pending_user_input: None,
             subagent_depth,
         };
 
         let deps = SessionDeps {
             model: Arc::clone(&self.model),
-            tools: Arc::clone(&self.tools),
+            tools: session_tools,
             job_mgr: Arc::clone(&self.job_mgr),
             // Every session (top-level and child) carries a spawner so a child
             // can itself delegate up to the depth limit (enforced by the
@@ -544,6 +583,7 @@ impl cogito_protocol::subagent::BrainSpawner for RuntimeSpawner {
                 child_id,
                 OpenMode::New,
                 strategy,
+                SessionSpec::default(),
                 Some(meta),
                 req.parent_depth + 1,
                 false,

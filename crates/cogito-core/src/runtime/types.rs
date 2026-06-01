@@ -60,6 +60,12 @@ pub enum SessionCommand {
     /// fires) land additively per ADR-0016 + ADR-0007 track B.
     Trigger(TurnTrigger),
 
+    /// Replace one or more per-session providers; effective next turn.
+    /// See ADR-0028. `tenant_id` / `user_id` on the spec are ignored
+    /// (session identity is fixed at open time). Boxed because
+    /// `SessionSpec` is large relative to the other variants.
+    UpdateSession(Box<crate::runtime::SessionSpec>),
+
     /// Synthesized by the actor after receiving a `JobCompletionEvent` on
     /// the `job_completion` channel. Re-spawns `TurnDriver` with resume state.
     JobCompleted {

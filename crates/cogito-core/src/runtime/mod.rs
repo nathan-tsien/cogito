@@ -17,11 +17,13 @@
 pub mod builder;
 pub mod handle;
 pub mod session_loop;
+mod session_spec;
 pub mod store_writer;
 pub mod subagent;
 pub mod types;
 
 pub use builder::{Runtime, RuntimeBuilder, RuntimeError};
 pub use handle::{SessionError, SessionHandle};
+pub use session_spec::SessionSpec;
 pub use subagent::{DEFAULT_MAX_SUBAGENT_DEPTH, DELEGATE_TOOL_NAME, DelegateToolProvider};
 pub use types::{OpenMode, SessionCommand, SessionId, ShutdownOutcome, TurnTrigger};

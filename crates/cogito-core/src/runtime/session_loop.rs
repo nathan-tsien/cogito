@@ -43,6 +43,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::types::{SessionCommand, ShutdownOutcome, TurnTrigger};
 use crate::harness::hooks::CompositeHookPipeline;
+use crate::runtime::SessionSpec;
 // cogito-context is wired by the Runtime layer (not the Brain/harness layer),
 // consistent with ADR-0004: the runtime composes the pipeline from config and
 // injects it as a protocol trait object into TurnDeps.
@@ -204,7 +205,7 @@ pub(super) async fn run_session(
     mut state: SessionState,
     mut mailbox_rx: mpsc::Receiver<SessionCommand>,
     mailbox_tx: mpsc::Sender<SessionCommand>,
-    deps: SessionDeps,
+    mut deps: SessionDeps,
     initial_events: Vec<cogito_protocol::ConversationEvent>,
 ) -> ShutdownOutcome {
     // 1. Schema check (must come before replay so we never feed a
@@ -249,9 +250,13 @@ pub(super) async fn run_session(
             // Arm 2: caller commands.
             cmd = mailbox_rx.recv() => {
                 let Some(cmd) = cmd else { break; };
-                let outcome_opt = handle_command(&mut state, cmd, &mailbox_tx, &deps).await;
-                if let Some(outcome) = outcome_opt {
-                    return outcome;
+                if let SessionCommand::UpdateSession(spec) = cmd {
+                    apply_session_update(&mut state, &mut deps, *spec);
+                } else {
+                    let outcome_opt = handle_command(&mut state, cmd, &mailbox_tx, &deps).await;
+                    if let Some(outcome) = outcome_opt {
+                        return outcome;
+                    }
                 }
             }
 
@@ -515,6 +520,43 @@ fn spawn_turn_driver(
     });
 }
 
+/// Apply a mid-session provider swap (ADR-0028). Replaces only the
+/// provided Arcs; `tenant_id` / `user_id` are intentionally not changed
+/// (session identity is fixed at open). Effective at the next turn
+/// boundary because `spawn_turn_driver` rebuilds `TurnDeps` from these.
+///
+/// A skills or strategy change additionally rebuilds `state.context_pipeline`:
+/// the `SkillInjector` embedded in the pipeline captures its `SkillProvider`
+/// at build time, and the pipeline is derived from `strategy.context`, so a
+/// swap that touched either would otherwise leave H11 system-prompt injection
+/// using the open-time provider/config. If the rebuild fails (e.g. the new
+/// strategy selects `SystemPromptInjectorConfig::Skill` but the swap cleared
+/// the skills provider), the previous pipeline is kept and a warning is logged
+/// rather than tearing down the session.
+fn apply_session_update(state: &mut SessionState, deps: &mut SessionDeps, spec: SessionSpec) {
+    if let Some(tools) = spec.tools {
+        deps.tools = tools;
+    }
+    let skills_changed = spec.skills.is_some();
+    if let Some(skills) = spec.skills {
+        state.skills = Some(skills);
+    }
+    let strategy_changed = spec.strategy.is_some();
+    if let Some(strategy) = spec.strategy {
+        state.strategy = strategy;
+    }
+    if skills_changed || strategy_changed {
+        match cogito_context::build_pipeline_v2(&state.strategy.context, state.skills.clone()) {
+            Ok(pipeline) => state.context_pipeline = Arc::new(pipeline),
+            Err(e) => tracing::warn!(
+                session_id = %state.session_id,
+                error = %e,
+                "apply_session_update: context pipeline rebuild failed; keeping previous pipeline",
+            ),
+        }
+    }
+}
+
 /// Dispatch one `SessionCommand`. Returns `Some(outcome)` if the loop should
 /// exit with that `ShutdownOutcome`, or `None` to keep looping.
 ///
@@ -683,6 +725,10 @@ async fn handle_command(
                 _ => None,
             };
             let _ = reply.send(job_id);
+            None
+        }
+        SessionCommand::UpdateSession(_) => {
+            // Intercepted in run_session before dispatch; never reaches here.
             None
         }
     }

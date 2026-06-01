@@ -2,188 +2,245 @@
 
 ## Status
 
-Proposed — placeholder (finalized in v0.2 Sprint 12).
+Accepted (v0.2 Sprint 12, 2026-05-30). Supersedes the earlier
+placeholder.
 
-Captures decisions ratified in the
-[2026-05-22 roadmap rebalance spec](../superpowers/specs/2026-05-22-roadmap-rebalance-design.md)
-(§2.4 P1 + §2.7 + §3.2 Sprint 12). The full ADR — manifest schema,
-loader algorithm, conflict resolution rules — is finalized during
-Sprint 12.
+Finalizes the v0.2 tier of the
+[2026-05-22 roadmap rebalance](../superpowers/specs/2026-05-22-roadmap-rebalance-design.md)
+(§2.4 P1 + §2.7 + §3.2). Full design + implementation mechanism:
+[Sprint 12 spec](../superpowers/specs/2026-05-30-sprint-12-saas-session-plugin-design.md).
+
+**v0.2 scope was narrowed during Sprint 12 brainstorming to Skills +
+MCP servers.** Hooks, subagent roles (`agents/`), and slash commands
+(`commands/`) are deferred (see §2 and §8); the placeholder's
+`agents/*.yaml` shape was stale and is corrected here.
 
 ## Context
 
-The rebalance turns v0.2 into the **Extensibility** theme: pack
-Skills + Subagents + Hooks + MCP servers into a single shippable
-**Plugin** so team members can ship domain capabilities as one unit,
-not as scattered config edits.
+The rebalance makes v0.2 the **Extensibility** theme: pack a team's
+domain capabilities into a single shippable directory rather than
+scattered `cogito.toml` edits.
 
 Three precedents surveyed:
 
-- **Claude Code** — fully formed plugin model:
-  `.claude-plugin/plugin.json` manifest; bundles slash commands,
-  subagents, skills, hooks, MCP servers; distributed via marketplaces
-  (Git / local / HTTP); installed with `/plugin install`.
-- **Codex** — reuses `.claude-plugin/plugin.json` schema directly (see
-  `core-skills/src/plugin_namespace.rs`); plugins discovered from
-  `~/.codex/plugins/` etc.; no separate marketplace concept.
-- **Manus** — no public plugin bundle model beyond MCP connector
-  attachment + Skill Library upload.
+- **Claude Code** — `.claude-plugin/plugin.json`; bundles slash
+  commands, subagents, skills, hooks, MCP servers; marketplace
+  distribution.
+- **Codex** — reuses Claude Code's `plugin.json` schema directly;
+  signals industry convergence on the manifest.
+- **Manus** — no bundle model beyond MCP connectors + skill upload.
 
-Claude Code is the strongest precedent. Codex's reuse of Claude Code's
-manifest signals industry convergence on the schema. cogito should
-**not invent a new schema** — being readable from Claude Code-format
+cogito should **not invent a new schema**; reading Claude Code-format
 plugins lets the same plugin work across runtimes.
 
-Distribution scope is tiered (rebalance spec §2.4 P4):
-- **v0.2 (this ADR)** — local path only (`[[plugins]] path = "..."`)
-- **v0.3** — git fetch + lock file (see ADR-0022)
-- **v0.6+** — marketplace, signing (see future ADR-0023+)
+Two scoping forces shaped the final v0.2 decision:
+
+1. **Hooks don't fit as data yet.** A cogito `HookHandler` is a pure,
+   synchronous, no-I/O policy gate (ADR-0004 §6, H09). Claude Code's
+   hooks are shell commands — incompatible with that contract.
+   Expressing a hook as data (a declarative match-DSL) or as a
+   host-registered Rust factory is a real design fork whose right
+   answer depends on the consumer's product form (notably SaaS). It is
+   therefore deferred rather than rushed.
+2. **SaaS needs per-session, mutable surfaces.** The motivating
+   consumer runs a multi-tenant API server and needs each session's
+   tools/skills chosen per request and changeable mid-session. That is
+   a Runtime/session change, captured separately in **ADR-0028**; this
+   ADR's loader is the producer of the providers ADR-0028 injects.
+
+Distribution is tiered (rebalance §2.4 P4): **v0.2 = local path only**
+(this ADR); v0.3 = git fetch + lock (ADR-0022); v0.6+ = marketplace.
 
 ## Decision
 
-### 1. Manifest format: TOML primary + Claude-plugin JSON compatible
+### 1. Manifest: TOML primary + Claude-plugin JSON metadata fallback
 
-Primary: `.cogito-plugin/plugin.toml` (TOML, matching cogito's
-config-file convention from ADR-0017).
+Primary `.cogito-plugin/plugin.toml`:
 
 ```toml
 [plugin]
-id = "code-review"
-version = "0.1.0"
-description = "Rust + SQL code review skills"
-authors = ["nathan@example.com"]
+id          = "code-review"          # required; the namespace; [a-z0-9-]+
+version     = "0.1.0"                # optional
+description = "Rust + SQL review skills"  # optional
 
-# Default artifact paths (all optional, default values shown):
+# Artifact paths (optional; defaults shown):
 # skills_dir   = "skills"
-# agents_dir   = "agents"
-# hooks_file   = "hooks/hooks.toml"
 # mcp_file     = "mcp.toml"
-# commands_dir = "commands"
+# agents_dir   = "agents"     # reserved, not loaded in v0.2
+# hooks_file   = "hooks/hooks.toml"  # reserved, not loaded in v0.2
+# commands_dir = "commands"   # reserved, not loaded in v0.2
 ```
 
-Compatible read of `.claude-plugin/plugin.json` (JSON, Claude Code
-format). When both files are present in the same plugin directory,
-TOML wins. When only JSON is present, loader translates to internal
-manifest model.
+If `.cogito-plugin/plugin.toml` is absent, the loader falls back to
+`.claude-plugin/plugin.json` and reads **metadata only** (id / version
+/ description). Artifact discovery still uses cogito's default
+directory layout. When both files exist, TOML wins. (Full directory-
+layout mapping of the Claude-plugin format is out of scope for v0.2.)
 
-### 2. Bundled artifacts (v0.2 scope)
+### 2. Bundled artifacts — v0.2 scope: Skills + MCP only
 
-| Artifact | Path (default) | Bundled into |
-|---|---|---|
-| Skills | `skills/<name>/SKILL.md` | `SkillProvider` |
-| Subagents | `agents/<role>.yaml` | strategy registry (v0.2 minimal Subagent reads role YAML) |
-| Hooks | `hooks/hooks.toml` | `HookProvider` |
-| MCP servers | `mcp.toml` (subset of cogito.toml `[[mcp_servers]]`) | `McpToolProvider` |
-| Slash commands | `commands/<name>.md` | CLI / TUI command registry |
+| Artifact | Default path | v0.2 | Bundled into |
+|---|---|---|---|
+| Skills | `skills/<name>/SKILL.md` | ✅ loaded | `SkillRegistry` (Plugin scope) |
+| MCP servers | `mcp.toml` | ✅ loaded | `build_mcp_provider` input |
+| Subagent roles | `agents/<role>.md` | ⏸ deferred | (strategy registry, later sprint) |
+| Hooks | `hooks/hooks.toml` | ⏸ deferred | (see ADR-0004 §6 / H09 constraint) |
+| Slash commands | `commands/<name>.md` | ⏸ deferred | (no command registry exists yet) |
 
-Each plugin contributes one `SkillProvider` / one `HookProvider` / one
-`McpToolProvider` (etc.), composed by the runtime via existing
-provider-aggregation patterns (`CompositeToolProvider` etc.).
+Deferred artifact directories are **reserved**: their presence in a
+plugin is not an error; the loader ignores them and may warn. When a
+later sprint lifts them, plugins already written keep working.
 
-### 3. Namespace: `<plugin_id>:<artifact_name>` for all bundled artifacts
+`agents/` is corrected to **markdown + frontmatter** (the shipped
+strategy format, ADR-0026), not the placeholder's `.yaml`; a plugin
+subagent role will be a Plugin-scoped strategy resolved by the
+`delegate` tool's `role` argument.
 
-Skill `review-rust` from plugin `code-review` is registered as
-`code-review:review-rust`. Same prefix rule applies to:
+### 3. Namespace: `<plugin_id>:<artifact_name>` for everything
 
-- subagent roles (`code-review:critic`)
-- hook ids (`code-review:bash-audit`)
-- MCP servers (`code-review:github`)
-- slash commands (`code-review:review`)
+- **Skills** register as `<plugin_id>:<name>` via the existing
+  `SkillSource::Plugin { plugin_id }` variant. The sigil regex already
+  admits `:` (ADR-0020 closure note: `\$([A-Za-z][A-Za-z0-9_:-]{0,63})`),
+  so `$code-review:review-rust` activates with no change. Bare-name
+  repo/user skills never collide with namespaced plugin skills.
+- **MCP servers** are renamed `<plugin_id>:<server>`. Downstream
+  qualified tool naming `mcp__<server>__<tool>` sanitizes `:`→`_`
+  (ADR-0018), e.g. `mcp__code-review_github__list_prs`. Because
+  `plugin_id` is globally unique (§5), the namespaced server name is
+  unique too, so ADR-0018's existing dedup-by-name suffices.
 
-This eliminates cross-plugin name collisions structurally. Bare-name
-skills from Repo/User scope never collide with plugin-namespaced ones
-(see ADR-0020 §2).
-
-### 4. Per-project enable/disable + per-artifact override
+### 4. Per-plugin enable/disable + per-artifact override
 
 ```toml
 # cogito.toml
 [[plugins]]
-path = "./plugins/code-review"
+path = "./plugins/code-review"      # abs, or relative to cogito.toml
 
-# disable an entire plugin without removing it from cogito.toml:
 [[plugins]]
 path = "./plugins/sql-tools"
-enabled = false
+enabled = false                     # whole-plugin off, kept declared
 
-# fine-grained per-artifact override:
-[[plugins.artifact_overrides]]
+[[plugins.artifact_overrides]]      # fine-grained
 plugin = "code-review"
-artifact_kind = "skill"
-artifact_name = "sql-explain"
+kind   = "skill"                    # skill | mcp  (v0.2)
+name   = "sql-explain"
 enabled = false
 ```
 
-Plugin loader applies overrides after loading the plugin manifest; an
-artifact disabled via override does not register with its provider.
+Overrides are applied during load; an overridden-off artifact never
+enters `PluginContributions` (§7).
 
-### 5. Plugin id uniqueness
+### 5. Plugin id uniqueness — fatal
 
-`plugin.id` must be globally unique across all `[[plugins]]` entries.
-Loader fails at runtime startup if two plugins declare the same id,
-with an error pointing to both plugin paths. (Same shape as MCP server
-name uniqueness in ADR-0018.)
+`plugin.id` must be globally unique across all `[[plugins]]`. A
+duplicate is a **fatal** startup error naming both paths. (Stricter
+than MCP's warn-and-skip because plugins are explicitly declared by the
+operator, not auto-discovered.)
 
-### 6. v0.2 distribution scope: local path only
+### 6. v0.2 distribution: local path only
 
-`[[plugins]] path = "..."` accepts absolute paths and paths relative
-to the `cogito.toml` file. **No git, no HTTP, no marketplace in v0.2.**
+`path` accepts absolute paths and paths relative to the `cogito.toml`
+that declared them. No git, no HTTP, no marketplace. A missing path or
+malformed manifest is **fatal** (explicit operator config → fail
+loud). Git fetch lands in v0.3 (ADR-0022).
 
-Rationale: Plugin manifest schema needs real usage feedback before any
-distribution layer is built. P2 (git fetch) lands in v0.3 under
-ADR-0022; P3 (marketplace) is v0.6+ spike.
+### 7. Loader shape: produce contributions, don't own cross-scope merge
 
-### 7. Crate layout
+`cogito-plugin` does **not** build standalone providers. Skills and
+strategies have cross-scope precedence (Repo > User > Plugin > System,
+ADR-0020) owned by the existing registries; a separate plugin-built
+provider would fork that logic. Instead the loader resolves manifests
+into contributions that the caller folds into the existing registries:
 
-New crate `cogito-plugin` in the Hands layer:
+```rust
+// cogito-plugin
+pub fn PluginSet::load(
+    entries: &[PluginEntry], config_dir: &Path,
+) -> Result<PluginContributions, PluginError>;
+
+pub struct PluginContributions {
+    pub skill_roots:  Vec<PluginSkillRoot>, // (plugin_id, abs_dir) → SkillRegistry Plugin scope
+    pub mcp_servers:  Vec<McpServerConfig>, // namespaced → concatenated before build_mcp_provider
+}
+```
+
+Type ownership follows the MCP precedent (verified:
+`cogito-config` depends on `cogito-mcp` for `McpServerConfig`):
+**`PluginEntry` is defined in `cogito-plugin`; `cogito-config`
+depends on `cogito-plugin` to aggregate the `[[plugins]]` section.**
+The section promotes from "Reserved" to "Locked" in the config
+taxonomy — an additive serde change (no `SCHEMA_VERSION` impact;
+the top level already omits `deny_unknown_fields`).
+
+### 8. Composition + wiring (consumes ADR-0028)
+
+The surface (CLI/TUI) or the consumer's API server, per session:
+
+1. `let c = PluginSet::load(&cfg.plugins, config_dir)?;`
+2. Tools: `CompositeToolProvider::new([builtin, build_mcp_provider(cfg.mcp_servers ++ c.mcp_servers)])`
+3. Skills: `SkillRegistry::scan(ScanConfig { plugin_roots: c.skill_roots, ..base })`
+4. Inject via **ADR-0028** `open_session_with(id, mode, SessionSpec { tools, skills, .. })`.
+
+In a SaaS server this runs per request with the tenant's plugin set; a
+mid-session `/add-plugin`-style command recomposes and calls
+`update_session` (ADR-0028 §3).
+
+### 9. Crate layout
+
+New crate `cogito-plugin` (Hands; pre-approved in ROADMAP Sprint 12):
 
 ```
 cogito-plugin/
   src/
-    lib.rs            # PluginLoader, PluginConfig
+    lib.rs              # PluginSet::load, PluginEntry, PluginContributions
     manifest/
-      toml.rs         # .cogito-plugin/plugin.toml parser
-      claude_json.rs  # .claude-plugin/plugin.json compat reader
-    discovery.rs      # path resolution, scan
-    composition.rs    # provider aggregation
+      toml.rs           # .cogito-plugin/plugin.toml
+      claude_json.rs    # .claude-plugin/plugin.json metadata fallback
+    discovery.rs        # path resolution, artifact scan, namespacing
+    overrides.rs        # enable/disable + per-artifact override
 ```
 
-## Open questions (for Sprint 12)
-
-- Plugin load ordering: alphabetical by id, declaration order in
-  `cogito.toml`, or explicit `priority` field?
-- Hot-reload: do plugin changes during a session trigger reload, or
-  only at session start? (Recommendation: session-start only for v0.2;
-  Claude Code's mid-session reload pattern is a v0.3+ candidate.)
-- MCP server config inheritance: does a plugin's `mcp.toml` get the
-  same `bearer_token_env_var` interpolation as the top-level
-  `[[mcp_servers]]`? (Likely yes; verify with ADR-0017 author.)
+Depends on `cogito-protocol`, `cogito-mcp` (`McpServerConfig`), and the
+skill-root type from `cogito-skills`. Does **not** depend on
+`cogito-core` (Brain/Runtime).
 
 ## Consequences
 
 **Easier**:
-- Team members ship a self-contained capability bundle as one directory
-- Same plugin can target both cogito and Claude Code (read both
-  manifests)
-- Per-project enable/disable + per-artifact override give product teams
-  fine-grained control without per-deployment forks
+- A capability ships as one directory; same plugin can target cogito
+  and Claude Code (read both manifests).
+- Cross-plugin collisions impossible by construction (`<id>:` prefix).
+- Cleanly feeds ADR-0028's per-session, mutable surface for SaaS.
 
 **Harder**:
-- Plugin lifecycle interacts with Hook / Skill / MCP / Subagent — four
-  separate provider patterns must compose cleanly; Sprint 12 validates
-  this through integration tests
-- Conflicting MCP server ports / Subagent roles within one project's
-  plugin set need explicit reporting
+- `SkillRegistry::scan` and `ScanConfig` gain an explicit plugin-roots
+  input (plugin dirs are declared, not convention-discovered).
+- Two crate edges added: `cogito-config → cogito-plugin`,
+  `cogito-plugin → cogito-skills`/`cogito-mcp`.
 
-**Given up**:
-- Git / HTTP fetch (deferred to ADR-0022 / v0.3)
-- Signing / verification (deferred indefinitely; no current threat model)
-- Marketplace UX (`/plugin install`, `/plugin search`) — v0.6+
+**Given up (this version)**:
+- Hooks / subagent-role / slash-command bundling (deferred; dirs
+  reserved).
+- Git / HTTP / marketplace distribution (ADR-0022 / v0.6+).
+- Signing / verification (no current threat model).
+
+## Integration test (acceptance)
+
+One local plugin directory with `skills/` (1 skill) + `mcp.toml` (1
+server) → opened via `open_session_with` with a `SessionSpec` built
+from `PluginSet::load` → assert: the plugin skill activates via
+`$<plugin_id>:<name>`, and the plugin's MCP tool appears in the turn's
+tool surface under `mcp__<plugin_id>_<server>__<tool>`. Plus a
+mid-session `update_session` adding a second plugin MCP server,
+asserting the new tool is visible on the next turn.
 
 ## References
 
-- Rebalance spec: [`docs/superpowers/specs/2026-05-22-roadmap-rebalance-design.md`](../superpowers/specs/2026-05-22-roadmap-rebalance-design.md) §2.4 + §2.7 + §3.2 + §5.2
-- ADR-0017 (config model) — `cogito.toml` layered merge baseline
-- ADR-0018 (MCP integration) — naming + uniqueness pattern reused
+- Sprint 12 spec:
+  [`docs/superpowers/specs/2026-05-30-sprint-12-saas-session-plugin-design.md`](../superpowers/specs/2026-05-30-sprint-12-saas-session-plugin-design.md)
+- ADR-0028 (per-session provider injection) — how plugins reach a session
+- ADR-0017 (config model) — `[[plugins]]` section, layered merge
+- ADR-0018 (MCP integration) — naming, dedup, `McpServerConfig` ownership precedent
+- ADR-0020 (skill loader) — Plugin scope, `SkillSource::Plugin`, sigil regex
+- ADR-0022 (plugin distribution) — v0.3 git fetch this builds toward
 - Claude Code plugins: https://docs.claude.com/en/docs/claude-code/plugins
-- Codex plugin source: `codex-rs/utils/plugins/`

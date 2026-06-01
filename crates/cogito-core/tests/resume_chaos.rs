@@ -47,7 +47,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use cogito_core::runtime::{OpenMode, Runtime, SessionHandle, ShutdownOutcome};
+use cogito_core::runtime::{OpenMode, Runtime, SessionHandle, SessionSpec, ShutdownOutcome};
 use cogito_mock_model::{InputMatcher, OutputScript, ScriptedMockModel};
 use cogito_protocol::ExecCtx;
 use cogito_protocol::content::ContentBlock;
@@ -2140,4 +2140,434 @@ async fn paused_async_job() {
             assert_tool_mapping_equivalent(&golden.events, &resumed);
         }
     }
+}
+
+// === ADR-0028 Task 4: session_spec_mutated_then_resume ======================
+//
+// Plan: docs/adr/ADR-0028 (per-session-provider-injection).
+//
+// Goal: a session whose provider surface was swapped mid-run (via
+// `SessionHandle::update_session`) must still resume correctly when the
+// caller re-supplies the mutated spec on
+// `open_session_with(id, OpenMode::Resume, spec_b)`.
+//
+// Shape (two-turn flow, both turns plain TEXT — no tool calls):
+//
+//   1. Phase 1 opens with spec_a (`MockToolProvider`, 1 tool) via
+//      `open_session_with(id, New, spec_a)`.
+//   2. Turn 1 runs to completion (a plain "say hi" text turn).
+//   3. `handle.update_session(spec_b)` swaps the live tool provider to
+//      `TwoToolMockProvider` (2 tools). The swap is effective next turn.
+//   4. Turn 2 ("follow up", also plain text) runs; the crash is injected
+//      here. With spec_b active, turn 2's `PromptComposed.surface_size`
+//      reflects the 2-tool surface (vs. 1 for turn 1) — the observable
+//      footprint of the mid-session swap.
+//   5. Phase 2 resumes in a FRESH Runtime sharing the same on-disk store
+//      via `open_session_with(id, Resume, spec_b)` — the caller re-supplies
+//      the CURRENT spec, exactly as a SaaS server would after reloading a
+//      persisted per-session config.
+//
+// Why both turns are plain text: per the file-level narrowing, only
+// boundaries that resolve to `ResumeFromModelCompleted` are exercisable
+// (the `ResumeFromToolDispatching` ordering bug and the
+// `RestartCurrentTurn` -> `FreshTurn` downgrade are out of scope). A
+// plain-text turn's only `ModelCallCompleted` carries `stop_reason=EndTurn`,
+// so the crash boundary chosen for turn 2 (its `ModelCallCompleted`)
+// resolves to `ResumeFromModelCompleted`. The provider swap changes the
+// tool *surface* (observable in `PromptComposed.surface_size`), but the
+// turn itself completes via text, keeping us on the supported resume lane.
+//
+// Oracles: the same 4 chaos oracles (prefix-immutable, terminal-equivalent,
+// tool-mapping-equivalent, final-text-equivalent) plus a dedicated
+// surface-size check proving the swap survived the resume: turn 2's
+// `PromptComposed.surface_size == 2` on BOTH golden and resumed runs.
+
+/// Build the two-turn, plain-text scripted model used by this scenario.
+/// Three logical model calls would be wrong — there is exactly one model
+/// call per turn (no tool round-trips), so two scripts total. Matchers are
+/// first-match-wins:
+///
+/// 1. `LastUserTextContains("follow up")` -> turn 2 reply (plain text).
+/// 2. `LastUserTextContains("say hi")`    -> turn 1 reply (plain text).
+fn build_spec_swap_model() -> ScriptedMockModel {
+    use cogito_protocol::gateway::{ModelEvent, StopReason, Usage};
+    let turn1 = vec![
+        ModelEvent::TextDelta {
+            block_index: 0,
+            chunk: "Hi.".into(),
+        },
+        ModelEvent::TextBlockCompleted {
+            block_index: 0,
+            text: "Hi.".into(),
+        },
+        ModelEvent::MessageCompleted {
+            stop_reason: StopReason::EndTurn,
+            usage: Usage {
+                input_tokens: 5,
+                output_tokens: 2,
+            },
+        },
+    ];
+    let turn2 = vec![
+        ModelEvent::TextDelta {
+            block_index: 0,
+            chunk: "Following up.".into(),
+        },
+        ModelEvent::TextBlockCompleted {
+            block_index: 0,
+            text: "Following up.".into(),
+        },
+        ModelEvent::MessageCompleted {
+            stop_reason: StopReason::EndTurn,
+            usage: Usage {
+                input_tokens: 7,
+                output_tokens: 3,
+            },
+        },
+    ];
+    ScriptedMockModel::new(vec![
+        (
+            InputMatcher::LastUserTextContains("follow up".into()),
+            OutputScript { events: turn2 },
+        ),
+        (
+            InputMatcher::LastUserTextContains("say hi".into()),
+            OutputScript { events: turn1 },
+        ),
+    ])
+}
+
+/// `spec_a`: the build-time default surface (single `read_file` tool). The
+/// `tools` override is `Some(MockToolProvider)` to make the contrast with
+/// `spec_b` explicit and self-documenting (it is functionally identical to
+/// the Runtime default, but we want the open to flow through the spec path).
+fn spec_a() -> SessionSpec {
+    SessionSpec {
+        tools: Some(Arc::new(MockToolProvider) as Arc<dyn ToolProvider>),
+        ..Default::default()
+    }
+}
+
+/// `spec_b`: the post-swap surface. `TwoToolMockProvider` advertises BOTH
+/// `read_file` and `write_file`, so turn 2's `PromptComposed.surface_size`
+/// is 2 (vs. 1 for turn 1 under `spec_a`). This is the observable footprint
+/// of the mid-session `update_session` swap.
+fn spec_b() -> SessionSpec {
+    SessionSpec {
+        tools: Some(Arc::new(TwoToolMockProvider) as Arc<dyn ToolProvider>),
+        ..Default::default()
+    }
+}
+
+/// Wire a `Runtime` for the spec-swap scenario. The build-time tool
+/// provider is the single-tool `MockToolProvider`; per-session specs swap
+/// it. The model is the two-turn plain-text script.
+fn build_spec_swap_runtime(store: Arc<dyn ConversationStore>) -> Arc<Runtime> {
+    let mock = Arc::new(build_spec_swap_model());
+    let tools = Arc::new(MockToolProvider);
+    Runtime::builder()
+        .store(store)
+        .model(mock as Arc<dyn ModelGateway>)
+        .tools(tools as Arc<dyn ToolProvider>)
+        .strategy(HarnessStrategy::default_with_model("mock"))
+        .build()
+        .expect("runtime builds")
+}
+
+/// Collect the `PromptComposed.surface_size` for each turn, in order. With
+/// the two-turn plain-text flow there is exactly one `PromptComposed` per
+/// turn, so `[turn1_size, turn2_size]`.
+fn surface_sizes(events: &[ConversationEvent]) -> Vec<u32> {
+    events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::PromptComposed { surface_size, .. } => Some(*surface_size),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Oracle: the mid-session swap is observable and survives resume. Turn 1
+/// composed its prompt under `spec_a` (1 tool); turn 2 under `spec_b` (2
+/// tools). The full sequence must therefore be `[1, 2, ...]` with the
+/// LAST entry (turn 2) equal to 2.
+fn assert_spec_swap_observed(events: &[ConversationEvent]) {
+    let sizes = surface_sizes(events);
+    assert!(
+        sizes.len() >= 2,
+        "expected at least two PromptComposed events (one per turn); saw {sizes:?}"
+    );
+    assert_eq!(
+        sizes[0], 1,
+        "turn 1 should compose under spec_a (1 tool); saw {sizes:?}"
+    );
+    assert_eq!(
+        *sizes.last().expect("non-empty"),
+        2,
+        "turn 2 should compose under spec_b (2 tools) after update_session; saw {sizes:?}"
+    );
+}
+
+/// Drive both turns to completion with the mid-turn `update_session`
+/// swap, no faults. Returns the full golden log.
+async fn spec_swap_run_to_completion() -> GoldenRun {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let runtime = build_spec_swap_runtime(Arc::clone(&store));
+
+    let session_id = SessionId::new();
+    // Open with spec_a (single-tool surface).
+    let handle = runtime
+        .open_session_with(session_id, OpenMode::New, spec_a())
+        .await
+        .expect("open New with spec_a");
+    let _events_rx = handle.subscribe();
+
+    // Turn 1: plain text under spec_a.
+    handle
+        .submit_user_text("say hi")
+        .await
+        .expect("submit turn 1");
+    wait_for_turn_completed_twice(&handle).await;
+
+    // Swap providers between turns. Effective at the next turn boundary.
+    handle
+        .update_session(spec_b())
+        .await
+        .expect("update_session spec_b");
+
+    // Turn 2: plain text under spec_b (2-tool surface).
+    handle
+        .submit_user_text("follow up")
+        .await
+        .expect("submit turn 2");
+    wait_for_turn_completed_twice(&handle).await;
+
+    let events = read_log(store.as_ref(), session_id).await;
+    let terminal = terminal_payload(&events).clone();
+
+    let out = handle
+        .shutdown(Duration::from_secs(5))
+        .await
+        .expect("shutdown");
+    assert!(
+        matches!(out, ShutdownOutcome::Clean { .. }),
+        "expected Clean shutdown, got {out:?}"
+    );
+    drop(tmp);
+    GoldenRun { events, terminal }
+}
+
+/// Y-path crash + resume runner for the spec-swap scenario. Phase 1 runs
+/// turn 1, swaps to `spec_b`, then runs turn 2 with a `PanicAt(crash_after_n)`
+/// fault armed so the crash lands inside turn 2's appends. Phase 2 resumes
+/// in a fresh Runtime sharing the same on-disk store, re-supplying `spec_b`
+/// on `open_session_with(id, Resume, spec_b)`.
+///
+/// `turn1_total` is the golden turn-1 prefix length (through the first
+/// `TurnCompleted`); the fault is only armed for boundaries past it, so the
+/// crash always lands in turn 2.
+async fn spec_swap_run_with_y_fault(
+    crash_after_n: u64,
+    turn1_total: u64,
+) -> Vec<ConversationEvent> {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let session_id = SessionId::new();
+
+    // ----- Phase 1: turn 1, swap, then turn 2 (crash mid-turn-2). -----
+    let inner1: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let wrapper1: Arc<FaultInjectingStore<JsonlStore>> =
+        Arc::new(FaultInjectingStore::new(Arc::clone(&inner1)));
+    let store1: Arc<dyn ConversationStore> = Arc::clone(&wrapper1) as Arc<dyn ConversationStore>;
+    let runtime1 = build_spec_swap_runtime(store1);
+    let handle1 = runtime1
+        .open_session_with(session_id, OpenMode::New, spec_a())
+        .await
+        .expect("open New with spec_a");
+
+    // Turn 1 runs cleanly (no fault armed yet). Drive it to terminal on
+    // disk before swapping providers.
+    handle1
+        .submit_user_text("say hi")
+        .await
+        .expect("submit turn 1");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if log_has_terminal(inner1.as_ref(), session_id).await {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    // Allow the actor's on_turn_complete hook to release the in-flight guard.
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // Swap to spec_b, then arm the fault for turn 2. `crash_after_n` is
+    // 1-indexed against turn-event seq; the trigger fires after
+    // `crash_after_n + 1` total appends (the +1 accounts for the seq=0
+    // SessionStarted already written at open).
+    debug_assert!(
+        crash_after_n > turn1_total,
+        "spec-swap fault must target turn 2"
+    );
+    let _ = turn1_total;
+    handle1
+        .update_session(spec_b())
+        .await
+        .expect("update_session spec_b");
+    wrapper1
+        .set_trigger(FaultTrigger::PanicAt {
+            event_no: crash_after_n + 1,
+            message: "spec-swap chaos fault",
+        })
+        .await;
+
+    handle1
+        .submit_user_text("follow up")
+        .await
+        .expect("submit turn 2");
+
+    // Spin until the panic fires (write count passes the boundary) or
+    // turn 2 reaches a terminal (degenerate: resumed log == golden).
+    let deadline2 = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let events = read_log(inner1.as_ref(), session_id).await;
+        let turns_started = events
+            .iter()
+            .filter(|e| matches!(e.payload, EventPayload::TurnStarted { .. }))
+            .count();
+        let terminal_count = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.payload,
+                    EventPayload::TurnCompleted { .. }
+                        | EventPayload::TurnFailed { .. }
+                        | EventPayload::TurnPaused { .. }
+                )
+            })
+            .count();
+        // Both turns done = >= 2 TurnStarted and >= 4 terminals (each turn
+        // writes a TurnCompleted twice via the FSM-emit + actor-hook dance).
+        let both_done = turns_started >= 2 && terminal_count >= 4;
+        if both_done || wrapper1.written_count() > crash_after_n {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    drop(handle1);
+    drop(runtime1);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // ----- Phase 2: fresh Runtime, same store, Resume with spec_b. -----
+    let inner2: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let store2: Arc<dyn ConversationStore> = inner2.clone();
+    let runtime2 = build_spec_swap_runtime(Arc::clone(&store2));
+
+    // Caller re-supplies the CURRENT (mutated) spec on resume — exactly the
+    // SaaS reload-then-resume path ADR-0028 Task 4 is proving.
+    let handle2 = runtime2
+        .open_session_with(session_id, OpenMode::Resume, spec_b())
+        .await
+        .expect("open Resume with spec_b");
+
+    wait_for_terminal_with_store(&handle2, store2.as_ref(), session_id).await;
+
+    // If turn 2 had not begun on disk (crash landed before its TurnStarted),
+    // re-submit "follow up" so the resumed run observes the same two-turn
+    // flow as the golden.
+    let mid_events = read_log(store2.as_ref(), session_id).await;
+    let turns_started = mid_events
+        .iter()
+        .filter(|e| matches!(e.payload, EventPayload::TurnStarted { .. }))
+        .count();
+    if turns_started < 2 {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let _ = handle2.submit_user_text("follow up").await;
+        let deadline3 = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let events = read_log(store2.as_ref(), session_id).await;
+            let ts = events
+                .iter()
+                .filter(|e| matches!(e.payload, EventPayload::TurnStarted { .. }))
+                .count();
+            let tc = events
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e.payload,
+                        EventPayload::TurnCompleted { .. }
+                            | EventPayload::TurnFailed { .. }
+                            | EventPayload::TurnPaused { .. }
+                    )
+                })
+                .count();
+            if ts >= 2 && tc >= 4 {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline3 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    let events = read_log(store2.as_ref(), session_id).await;
+    let _ = handle2.shutdown(Duration::from_secs(5)).await;
+    drop(tmp);
+    events
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_spec_mutated_then_resume() {
+    let golden = spec_swap_run_to_completion().await;
+    let total = golden.events.len() as u64;
+    let turn1_total = turn1_event_count(&golden.events);
+
+    // Turn 2's crash boundary: the LAST `ModelCallCompleted` in the log.
+    // Since both turns are plain text, every `ModelCallCompleted` carries
+    // `stop_reason=EndTurn`, so this boundary resolves to
+    // `ResumeFromModelCompleted` (the only supported lane).
+    let boundaries = resumable_boundaries(&golden.events);
+    eprintln!(
+        "scenario=session_spec_mutated_then_resume golden_events={total} \
+         turn1_total={turn1_total} resumable_boundaries={boundaries:?}"
+    );
+    let turn2_boundary = boundaries
+        .iter()
+        .copied()
+        .filter(|&b| b > turn1_total)
+        .max()
+        .expect("turn 2 must contribute a ResumeFromModelCompleted boundary");
+    assert!(
+        turn2_boundary < total.saturating_sub(1),
+        "turn 2 boundary {turn2_boundary} lands too close to the end; \
+         no resume work would happen (golden_len={total})"
+    );
+
+    // Golden already exercises the swap; assert before crashing.
+    assert_spec_swap_observed(&golden.events);
+
+    let resumed = spec_swap_run_with_y_fault(turn2_boundary, turn1_total).await;
+    eprintln!(
+        "  spec-swap chaos: crash_after_n={turn2_boundary} resumed_len={} (golden_len={total})",
+        resumed.len()
+    );
+
+    assert_context_managed_pairing(&resumed);
+    assert_prefix_immutable(&golden.events, &resumed, turn2_boundary);
+    assert_terminal_equivalent(&golden.terminal, terminal_payload(&resumed));
+    assert_tool_mapping_equivalent(&golden.events, &resumed);
+    assert_final_text_equivalent(&golden.events, &resumed);
+
+    // The crux: the resumed log carries the SAME mutated-surface footprint
+    // as the golden — turn 2 still composed under spec_b's 2-tool surface
+    // even though the resume re-supplied the spec into a fresh Runtime.
+    assert_spec_swap_observed(&resumed);
 }

@@ -101,6 +101,26 @@ impl SessionHandle {
             })
     }
 
+    /// Replace one or more of this session's providers. Each `Some` field
+    /// of `spec` swaps the corresponding live provider; the change takes
+    /// effect at the next turn boundary. `tenant_id` / `user_id` are
+    /// ignored (identity is fixed at open time). See ADR-0028.
+    ///
+    /// # Errors
+    /// Returns `SessionError::SessionClosed` if the actor has exited.
+    pub async fn update_session(
+        &self,
+        spec: crate::runtime::SessionSpec,
+    ) -> Result<(), SessionError> {
+        self.shared
+            .mailbox_tx
+            .send(SessionCommand::UpdateSession(Box::new(spec)))
+            .await
+            .map_err(|_| SessionError::SessionClosed {
+                session_id: self.shared.session_id,
+            })
+    }
+
     /// Submit a user-typed text message; the actor will spawn a `TurnDriver`.
     /// Awaits (mailbox backpressure) if the actor is overwhelmed.
     ///
