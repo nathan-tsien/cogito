@@ -29,8 +29,10 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 
 #[tokio::test]
 async fn tool_call_completes_via_second_model_call() -> Result<(), Box<dyn std::error::Error>> {
-    let tmp_file = tempfile::NamedTempFile::new()?;
-    std::fs::write(tmp_file.path(), "answer 42")?;
+    // `read_file` reads through `ExecCtx.workspace` (ADR-0030/0031): the file
+    // lives in the session workspace and is addressed by its relative path.
+    let ws = tempfile::tempdir()?;
+    std::fs::write(ws.path().join("answer.txt"), "answer 42")?;
 
     let tmp_dir = tempfile::tempdir()?;
     let store: Arc<dyn cogito_protocol::store::ConversationStore> =
@@ -50,11 +52,6 @@ async fn tool_call_completes_via_second_model_call() -> Result<(), Box<dyn std::
     let mock: Arc<MockModelGateway> = Arc::new(MockModelGateway::new());
 
     // First call: model issues a read_file tool call.
-    let path_str = tmp_file
-        .path()
-        .to_str()
-        .ok_or("non-utf8 temp path")?
-        .to_owned();
     mock.push_reply(vec![
         ModelEvent::ToolUseStarted {
             block_index: 0,
@@ -65,7 +62,7 @@ async fn tool_call_completes_via_second_model_call() -> Result<(), Box<dyn std::
             block_index: 0,
             call_id: "c1".into(),
             tool_name: "read_file".into(),
-            args: serde_json::json!({ "path": path_str }),
+            args: serde_json::json!({ "path": "answer.txt" }),
         },
         ModelEvent::MessageCompleted {
             stop_reason: StopReason::ToolUse,
@@ -114,10 +111,14 @@ async fn tool_call_completes_via_second_model_call() -> Result<(), Box<dyn std::
         job_completion_tx,
     };
 
+    let mut exec_ctx = ExecCtx::open_ended(session_id, turn_id);
+    exec_ctx.workspace = Some(Arc::new(cogito_tools::workspace::LocalWorkspace::new(
+        ws.path(),
+    )));
     let ctx = TurnCtx {
         session_id,
         turn_id,
-        exec_ctx: ExecCtx::open_ended(session_id, turn_id),
+        exec_ctx,
         strategy: HarnessStrategy::default_with_model("mock"),
         consecutive_tool_errors: 0,
     };

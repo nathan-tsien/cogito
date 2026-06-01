@@ -9,10 +9,14 @@ use std::sync::Arc;
 use cogito_protocol::ExecCtx;
 use cogito_protocol::ids::{SessionId, TurnId};
 use cogito_protocol::tool::{InvokeOutcome, ToolProvider, ToolResult};
+use cogito_tools::workspace::LocalWorkspace;
 use cogito_tools::{BuiltinToolProvider, CompositeToolProvider, NamingPolicy, ReadFile};
 
-fn ctx() -> ExecCtx {
-    ExecCtx::open_ended(SessionId::new(), TurnId::new())
+/// `ExecCtx` with a `LocalWorkspace` rooted at `root`.
+fn ctx_with_workspace(root: &std::path::Path) -> ExecCtx {
+    let mut c = ExecCtx::open_ended(SessionId::new(), TurnId::new());
+    c.workspace = Some(Arc::new(LocalWorkspace::new(root)));
+    c
 }
 
 #[test]
@@ -49,8 +53,8 @@ fn prefixed_namespaces_tools() {
 
 #[tokio::test]
 async fn prefixed_invokes_through_namespace() -> Result<(), Box<dyn std::error::Error>> {
-    let tmp = tempfile::NamedTempFile::new()?;
-    std::fs::write(tmp.path(), "ok")?;
+    let tmp = tempfile::TempDir::new()?;
+    std::fs::write(tmp.path().join("note.txt"), "ok")?;
     let a = Arc::new(
         BuiltinToolProvider::builder()
             .with_tool(Arc::new(ReadFile))
@@ -61,8 +65,8 @@ async fn prefixed_invokes_through_namespace() -> Result<(), Box<dyn std::error::
     let outcome = composite
         .invoke(
             "b/read_file",
-            serde_json::json!({ "path": tmp.path().to_str().expect("utf8 path") }),
-            ctx(),
+            serde_json::json!({ "path": "note.txt" }),
+            ctx_with_workspace(tmp.path()),
         )
         .await;
     assert!(matches!(

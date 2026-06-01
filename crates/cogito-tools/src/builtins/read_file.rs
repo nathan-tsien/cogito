@@ -1,9 +1,13 @@
-//! `read_file` — UTF-8 text file reader with a 1 MiB cap per v0.1 class B
-//! truncation compromise (see ARCHITECTURE.md §"Tool execution classes").
+//! `read_file` — UTF-8 text file reader through the injected
+//! `ExecCtx.workspace` (ADR-0030 / ADR-0031), with a 1 MiB cap per the v0.1
+//! class B truncation compromise (see ARCHITECTURE.md §"Tool execution
+//! classes"). Paths are workspace-relative; absolute / escaping paths and the
+//! absent-workspace case surface as structured `ToolResult::Error`.
 
 use async_trait::async_trait;
 use cogito_protocol::ExecCtx;
 use cogito_protocol::tool::{ExecutionClass, ToolDescriptor, ToolErrorKind, ToolResult};
+use cogito_protocol::workspace::WorkspaceError;
 use serde::Deserialize;
 
 use crate::provider::BuiltinTool;
@@ -25,13 +29,13 @@ impl BuiltinTool for ReadFile {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "read_file".into(),
-            description: "Read a UTF-8 text file. Returns up to 1 MiB; longer files are truncated with a marker.".into(),
+            description: "Read a UTF-8 text file from the workspace. The path is relative to the workspace root; absolute paths and paths escaping the root are rejected. Returns up to 1 MiB; longer files are truncated with a marker.".into(),
             schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Absolute path or path relative to the workspace root."
+                        "description": "Path relative to the workspace root. Absolute paths and paths escaping the root are rejected."
                     }
                 },
                 "required": ["path"],
@@ -42,7 +46,7 @@ impl BuiltinTool for ReadFile {
         }
     }
 
-    async fn invoke(&self, args: serde_json::Value, _ctx: ExecCtx) -> ToolResult {
+    async fn invoke(&self, args: serde_json::Value, ctx: ExecCtx) -> ToolResult {
         let Args { path } = match serde_json::from_value(args) {
             Ok(a) => a,
             Err(e) => {
@@ -53,29 +57,45 @@ impl BuiltinTool for ReadFile {
                 };
             }
         };
-        match tokio::fs::read(&path).await {
-            Ok(mut bytes) => {
-                let truncated = bytes.len() > MAX_BYTES;
+        let Some(workspace) = ctx.workspace else {
+            return ToolResult::Error {
+                kind: ToolErrorKind::InvocationFailed,
+                message: "read_file: no workspace is configured for this session".into(),
+                retryable: false,
+            };
+        };
+        let mut bytes = match workspace.read(&path).await {
+            Ok(b) => b,
+            // A path that escapes the root is bad input the model can fix.
+            Err(e @ WorkspaceError::PathEscapesRoot(_)) => {
+                return ToolResult::Error {
+                    kind: ToolErrorKind::InvalidArgs,
+                    message: format!("read_file: {e}"),
+                    retryable: false,
+                };
+            }
+            Err(e) => {
+                return ToolResult::Error {
+                    kind: ToolErrorKind::InvocationFailed,
+                    message: format!("read_file: {e}"),
+                    retryable: false,
+                };
+            }
+        };
+        let truncated = bytes.len() > MAX_BYTES;
+        if truncated {
+            bytes.truncate(MAX_BYTES);
+        }
+        match String::from_utf8(bytes) {
+            Ok(mut s) => {
                 if truncated {
-                    bytes.truncate(MAX_BYTES);
+                    s.push_str("\n\n[truncated at 1 MiB]\n");
                 }
-                match String::from_utf8(bytes) {
-                    Ok(mut s) => {
-                        if truncated {
-                            s.push_str("\n\n[truncated at 1 MiB]\n");
-                        }
-                        ToolResult::text(s)
-                    }
-                    Err(e) => ToolResult::Error {
-                        kind: ToolErrorKind::InvocationFailed,
-                        message: format!("read_file: non-utf8 content in {path}: {e}"),
-                        retryable: false,
-                    },
-                }
+                ToolResult::text(s)
             }
             Err(e) => ToolResult::Error {
                 kind: ToolErrorKind::InvocationFailed,
-                message: format!("read_file: cannot read {path}: {e}"),
+                message: format!("read_file: non-utf8 content in {path}: {e}"),
                 retryable: false,
             },
         }
