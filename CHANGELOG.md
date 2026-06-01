@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint 12 · Per-session injection (ADR-0028) + plugin loader (ADR-0021) — v0.2 (2026-05-31)
+
+**Added**
+
+- **Per-session provider injection** (ADR-0028). `SessionSpec`
+  (`tools` / `skills` / `strategy` / `tenant_id` / `user_id`, all optional)
+  plus `Runtime::open_session_with(id, mode, spec)`; the legacy
+  `open_session` delegates to an all-`None` spec (byte-for-byte equivalent
+  for existing callers). One process can now serve many tenants, each with
+  its own tool/skill/strategy surface.
+- `SessionHandle::update_session(spec)` swaps live providers mid-session via
+  `SessionCommand::UpdateSession`, effective at the next turn boundary (each
+  turn rebuilds `TurnDeps`). A skills or strategy swap also rebuilds the
+  session context pipeline so H11 system-prompt skill injection uses the new
+  provider, not only the live sigil-detection path.
+- `tenant_id` / `user_id` from the spec are stamped into `SessionMeta` on a
+  fresh session. Resume re-supplies the current `SessionSpec`; the core never
+  persists provider identity (a provider is code, not state).
+- **`cogito-plugin`** (new Hands crate, ADR-0021): local-path plugin loader.
+  Parses `.cogito-plugin/plugin.toml` (primary) or `.claude-plugin/plugin.json`
+  (metadata-only fallback), discovers bundled Skills + MCP servers, namespaces
+  every artifact `<plugin_id>:<name>`, applies per-plugin / per-artifact
+  enable/disable overrides, and treats a duplicate plugin id as fatal.
+  `PluginSet::load → PluginContributions { skill_roots, mcp_servers }` — the
+  loader produces contributions; the existing registries keep cross-scope
+  precedence. Hooks / `agents/` / `commands/` directories are reserved but
+  not loaded.
+- `cogito-skills`: `PluginSkillRoot` + `ScanConfig.plugin_roots`; a Plugin
+  discovery scope that namespaces each skill `<plugin_id>:<name>`.
+- `cogito-config`: `[[plugins]]` section (Reserved → Locked) parsed into
+  `RuntimeConfig.plugins`; `PluginEntry` is owned by `cogito-plugin` and
+  aggregated by `cogito-config` (mirrors the `cogito-config → cogito-mcp`
+  edge). A malformed `[[plugins]]` entry is fatal at finalize.
+- `cogito-cli chat`: loads the plugin set once per run and folds plugin skill
+  roots + namespaced MCP servers into the Runtime's default providers.
+
+**Notes**
+
+- Brain (H01–H11) is unchanged; all of ADR-0028 lives in the runtime layer,
+  and `cogito-core` gains no dependency on `cogito-plugin` (layer-check
+  enforced). All additions are additive — no `ConversationEvent`
+  `SCHEMA_VERSION` bump.
+- ADR-0028 pulls one slice of the v0.4 "SaaS-ready" theme forward on explicit
+  consumer direction; fully self-describing multi-replica resume remains v0.4.
+- Deferred follow-up: `plugin.id` format (`[a-z0-9-]+`, ADR-0021 §1) is not
+  yet enforced in the manifest parser.
+
 ### Sprint 11 · Subagent (S2 minimal) — v0.2 (2026-05-30)
 
 **Added**
