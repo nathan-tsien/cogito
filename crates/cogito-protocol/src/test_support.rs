@@ -24,3 +24,4 @@
 
 pub mod contract_command_executor;
 pub mod contract_job_manager;
+pub mod contract_workspace;

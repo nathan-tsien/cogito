@@ -56,6 +56,7 @@ pub mod test_support;
 pub mod tool;
 pub mod turn;
 pub mod turn_trigger;
+pub mod workspace;
 
 pub use command::{CommandError, CommandExecutor, CommandOutcome, CommandSpec};
 pub use content::ContentBlock;
@@ -85,3 +86,4 @@ pub use tool::{
     ExecutionClass, InvokeOutcome, ToolDescriptor, ToolErrorKind, ToolProvider, ToolResult,
 };
 pub use turn_trigger::TurnTrigger;
+pub use workspace::{DirEntry, Workspace, WorkspaceError};

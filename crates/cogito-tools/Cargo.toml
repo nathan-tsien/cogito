@@ -20,6 +20,7 @@ tracing = { workspace = true }
 schemars = { workspace = true }
 
 [dev-dependencies]
+cogito-protocol = { workspace = true, features = ["test-support"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
 
