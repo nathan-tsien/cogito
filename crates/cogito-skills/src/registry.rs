@@ -33,6 +33,10 @@ struct SkillRecord {
     metadata: SkillMetadata,
     body: String,
     source: SkillSource,
+    /// The skill's own directory (folder containing `SKILL.md`). Surfaced
+    /// as `SkillContent.root` so the model can resolve bundled-file
+    /// references (ADR-0029).
+    root: std::path::PathBuf,
 }
 
 /// Eager `SkillProvider`. Built once at Runtime construction; full bodies
@@ -127,6 +131,7 @@ impl SkillRegistry {
                     metadata,
                     body: d.parsed.body,
                     source: d.source,
+                    root: d.dir,
                 }),
             );
         }
@@ -192,6 +197,7 @@ impl SkillProvider for SkillRegistry {
             name: r.metadata.name.clone(),
             source: r.source.clone(),
             body: r.body.clone(),
+            root: Some(r.root.clone()),
         })
     }
 

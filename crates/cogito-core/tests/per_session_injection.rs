@@ -89,6 +89,7 @@ impl SkillProvider for OneSkillProvider {
             name: self.name.into(),
             source: SkillSource::User,
             body: format!("## {}\n\nbody for {}", self.name, self.name),
+            root: None,
         })
     }
 

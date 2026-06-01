@@ -62,6 +62,14 @@ pub struct SkillContent {
     pub source: SkillSource,
     /// SKILL.md body with frontmatter stripped (already validated UTF-8).
     pub body: String,
+    /// Absolute path to the skill's own directory (the folder containing
+    /// `SKILL.md`), so the model can resolve relative references in the
+    /// body (`scripts/`, `references/`, `assets/`). `None` for skills with
+    /// no on-disk bundle (e.g. future embedded `System` or virtual
+    /// providers). See ADR-0029. This is resolved fresh from the live
+    /// provider at injection time and is deliberately NOT persisted in the
+    /// event log (absolute paths are machine-specific; ADR-0007).
+    pub root: Option<PathBuf>,
 }
 
 /// Where a skill was discovered. Forward-compatible with v0.2 plugins.

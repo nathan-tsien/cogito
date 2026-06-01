@@ -53,6 +53,7 @@ fn skill_content_is_constructible() {
         name: "x".into(),
         source: SkillSource::User,
         body: "# heading".into(),
+        root: None,
     };
     assert_eq!(c.body, "# heading");
 }

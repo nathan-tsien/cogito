@@ -2,7 +2,13 @@
 
 ## Status
 
-Proposed (draft, 2026-06-01).
+Accepted — implemented 2026-06-01 (Phase 0 of the complete-skill-support
+design). `SkillContent.root` added; `SkillRegistry` populates it from the
+discovered skill directory; `SkillInjector` emits a `root="..."` attribute
+plus a one-line resolution hint when present. Tests:
+`cogito-skills::registry_get_carries_skill_own_directory_as_root`,
+`cogito-context::injected_block_carries_skill_root_path` (and the `None`-path
+guard in `user_channel_activates_from_turn_started`).
 
 Scopes a narrow, additive fix that is a **precondition** for ADR-0023
 (bundled-script execution) and for any script-bearing skill (e.g. the
