@@ -18,7 +18,7 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use crate::app::App;
 use crate::keymap::{Action, dispatch};
-use crate::slash;
+use crate::slash::{self, DispatchResult};
 use crate::ui::{RenderInputs, render};
 
 /// Drive the TUI to completion. Returns when the user quits, the
@@ -149,12 +149,26 @@ async fn handle_action(app: &mut App, action: Action) -> Result<()> {
         }
         Action::SubmitSlash(raw) => {
             let parsed = slash::parse(&raw);
-            if let Some(cmd) = parsed
-                && let Some(prompt) = slash::dispatch(app, cmd)
-                && let Err(err) = app.handle.submit_user_text(prompt).await
-            {
-                app.chat
-                    .push_notice(format!("[error] failed to send: {err}"));
+            if let Some(cmd) = parsed {
+                match slash::dispatch(app, cmd) {
+                    Some(DispatchResult::Text(prompt)) => {
+                        if let Err(err) = app.handle.submit_user_text(prompt).await {
+                            app.chat
+                                .push_notice(format!("[error] failed to send: {err}"));
+                        }
+                    }
+                    Some(DispatchResult::SkillActivation { name, user_text }) => {
+                        let trigger = cogito_protocol::turn_trigger::TurnTrigger::SkillActivation {
+                            names: vec![name],
+                            user_text: Some(user_text),
+                        };
+                        if let Err(err) = app.handle.submit(trigger).await {
+                            app.chat
+                                .push_notice(format!("[error] failed to send: {err}"));
+                        }
+                    }
+                    None => {}
+                }
             }
             Ok(())
         }
