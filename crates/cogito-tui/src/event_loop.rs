@@ -157,10 +157,10 @@ async fn handle_action(app: &mut App, action: Action) -> Result<()> {
                                 .push_notice(format!("[error] failed to send: {err}"));
                         }
                     }
-                    Some(DispatchResult::SkillActivation { name, user_text }) => {
+                    Some(DispatchResult::SkillActivation { name }) => {
                         let trigger = cogito_protocol::turn_trigger::TurnTrigger::SkillActivation {
                             names: vec![name],
-                            user_text: Some(user_text),
+                            user_text: None,
                         };
                         if let Err(err) = app.handle.submit(trigger).await {
                             app.chat

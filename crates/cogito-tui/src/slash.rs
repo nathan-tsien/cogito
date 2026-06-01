@@ -36,8 +36,6 @@ pub enum DispatchResult {
     SkillActivation {
         /// Skill name to activate.
         name: String,
-        /// User-facing prompt text (e.g. "Activate skill: foo").
-        user_text: String,
     },
 }
 
@@ -68,13 +66,14 @@ pub fn dispatch(app: &mut App, cmd: SlashCommand) -> Option<DispatchResult> {
     match cmd {
         SlashCommand::Skill { name } => {
             app.chat.push_notice(format!("[skill] activating: {name}"));
-            // The CLI's parse_slash_skill formats the message as
-            // "Activate skill: <name>". We mirror that here so the
-            // model sees the same prompt.
-            Some(DispatchResult::SkillActivation {
-                name: name.clone(),
-                user_text: format!("Activate skill: {name}"),
-            })
+            // Bare `/skill <name>` carries no user text: the activation
+            // routes through `TurnTrigger::SkillActivation` with
+            // `user_text = None`, so the injected skill content is the
+            // only turn input. This mirrors the CLI, whose
+            // `parse_slash_skill` leaves `user_text` empty for a bare
+            // activation rather than fabricating an "Activate skill: …"
+            // user message.
+            Some(DispatchResult::SkillActivation { name })
         }
         SlashCommand::Unknown { raw } => {
             app.chat
@@ -118,10 +117,7 @@ mod tests {
         let out = dispatch(&mut app, SlashCommand::Skill { name: "foo".into() });
         assert_eq!(
             out,
-            Some(DispatchResult::SkillActivation {
-                name: "foo".into(),
-                user_text: "Activate skill: foo".into(),
-            })
+            Some(DispatchResult::SkillActivation { name: "foo".into() })
         );
         assert_eq!(app.chat.lines.len(), 1);
     }
