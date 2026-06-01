@@ -24,7 +24,10 @@ use cogito_protocol::job::{JobManager, LocalJobSubmitter};
 use cogito_protocol::strategy_registry::StrategyRegistry;
 use cogito_protocol::tool::ToolProvider;
 use cogito_store::JsonlStore;
-use cogito_tools::{BuiltinToolProvider, CompositeToolProvider, NamingPolicy, ReadFile, WebFetch};
+use cogito_tools::{
+    BuiltinToolProvider, CompositeToolProvider, ListDir, NamingPolicy, ReadFile, WebFetch,
+    WriteFile,
+};
 
 use crate::app::App;
 use crate::cli::{TuiArgs, TuiMode};
@@ -107,6 +110,14 @@ pub async fn build(args: &TuiArgs) -> Result<Built> {
         .job_manager(job_mgr_dyn);
     if let Some(provider) = skills {
         builder = builder.skills(provider);
+    }
+    // Local profile (ADR-0031): the session workspace is rooted at the project
+    // cwd — the directory the TUI was launched from — so the workspace-backed
+    // file tools (`read_file` / `write_file` / `list_dir`) and `bash` operate
+    // inside the user's project. Without this, `read_file` (migrated onto the
+    // `Workspace` seam, ADR-0030) has no workspace and errors.
+    if let Ok(cwd) = std::env::current_dir() {
+        builder = builder.workspace(Arc::new(cogito_tools::LocalWorkspace::new(cwd)));
     }
     let runtime = builder.build().context("building runtime")?;
 
@@ -282,6 +293,8 @@ async fn build_tools_with_banner(
     let builtin: Arc<dyn ToolProvider> = Arc::new(
         BuiltinToolProvider::builder()
             .with_tool(Arc::new(ReadFile))
+            .with_tool(Arc::new(WriteFile))
+            .with_tool(Arc::new(ListDir))
             .with_tool(Arc::new(WebFetch::new(cfg.tools.web_fetch.clone())))
             .build(),
     );

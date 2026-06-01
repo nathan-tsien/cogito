@@ -463,6 +463,7 @@ async fn build_tool_provider(
         BuiltinToolProvider::builder()
             .with_tool(Arc::new(ReadFile))
             .with_tool(Arc::new(cogito_tools::WriteFile))
+            .with_tool(Arc::new(cogito_tools::ListDir))
             .with_tool(Arc::new(cogito_tools::WebFetch::new(
                 cfg.tools.web_fetch.clone(),
             )))
