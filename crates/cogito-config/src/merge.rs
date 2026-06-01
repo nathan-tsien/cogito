@@ -34,6 +34,9 @@ fn merge_into(mut acc: RuntimeConfigPartial, next: RuntimeConfigPartial) -> Runt
     if let Some(tools_next) = next.tools {
         acc.tools = Some(tools_next);
     }
+    if let Some(plugins_next) = next.plugins {
+        acc.plugins = Some(plugins_next);
+    }
     acc
 }
 
@@ -92,6 +95,8 @@ impl RuntimeConfigPartial {
         let (mcp_servers, mcp_parse_failures) =
             crate::types::finalize_mcp_servers(self.mcp_servers);
 
+        let plugins = crate::types::finalize_plugins(self.plugins)?;
+
         Ok(RuntimeConfig {
             runtime: RuntimeSection {
                 session_root: rt
@@ -110,6 +115,7 @@ impl RuntimeConfigPartial {
             mcp_parse_failures,
             skills: self.skills,
             tools: self.tools.unwrap_or_default(),
+            plugins,
         })
     }
 }

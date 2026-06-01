@@ -50,6 +50,7 @@ impl ConfigLoader for EnvConfigLoader {
             mcp_servers: None,
             skills: None,
             tools: None,
+            plugins: None,
         };
         Ok(partial)
     }
