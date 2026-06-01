@@ -524,15 +524,36 @@ fn spawn_turn_driver(
 /// provided Arcs; `tenant_id` / `user_id` are intentionally not changed
 /// (session identity is fixed at open). Effective at the next turn
 /// boundary because `spawn_turn_driver` rebuilds `TurnDeps` from these.
+///
+/// A skills or strategy change additionally rebuilds `state.context_pipeline`:
+/// the `SkillInjector` embedded in the pipeline captures its `SkillProvider`
+/// at build time, and the pipeline is derived from `strategy.context`, so a
+/// swap that touched either would otherwise leave H11 system-prompt injection
+/// using the open-time provider/config. If the rebuild fails (e.g. the new
+/// strategy selects `SystemPromptInjectorConfig::Skill` but the swap cleared
+/// the skills provider), the previous pipeline is kept and a warning is logged
+/// rather than tearing down the session.
 fn apply_session_update(state: &mut SessionState, deps: &mut SessionDeps, spec: SessionSpec) {
     if let Some(tools) = spec.tools {
         deps.tools = tools;
     }
+    let skills_changed = spec.skills.is_some();
     if let Some(skills) = spec.skills {
         state.skills = Some(skills);
     }
+    let strategy_changed = spec.strategy.is_some();
     if let Some(strategy) = spec.strategy {
         state.strategy = strategy;
+    }
+    if skills_changed || strategy_changed {
+        match cogito_context::build_pipeline_v2(&state.strategy.context, state.skills.clone()) {
+            Ok(pipeline) => state.context_pipeline = Arc::new(pipeline),
+            Err(e) => tracing::warn!(
+                session_id = %state.session_id,
+                error = %e,
+                "apply_session_update: context pipeline rebuild failed; keeping previous pipeline",
+            ),
+        }
     }
 }
 

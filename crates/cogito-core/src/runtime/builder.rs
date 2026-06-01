@@ -239,25 +239,31 @@ impl Runtime {
             ),
         );
 
+        // Per-session provider resolution: spec field wins, else Runtime
+        // default. Resolved *before* the context pipeline is built so the
+        // `SkillInjector` embedded in the pipeline gets the session's
+        // `SkillProvider`, not the Runtime default (ADR-0028: a per-session
+        // skills override must reach H11 system-prompt injection, not only the
+        // live sigil-detection path that reads `TurnDeps.skills`).
+        let session_tools = spec
+            .tools
+            .clone()
+            .unwrap_or_else(|| Arc::clone(&self.tools));
+        let session_skills = spec.skills.clone().or_else(|| self.skills.clone());
+
         // Build the context pipeline once per session from `strategy.context`.
-        // All turns share this same Arc; no per-turn rebuild is needed.
-        // `build_pipeline_v2` threads the optional `SkillProvider` into the
-        // pipeline so the `SkillInjector` (when selected) gets its handle.
+        // All turns share this same Arc; `apply_session_update` rebuilds it on a
+        // mid-session skills/strategy swap. `build_pipeline_v2` threads the
+        // session `SkillProvider` into the pipeline so the `SkillInjector`
+        // (when selected) gets its handle.
         let context_pipeline = Arc::new(
-            cogito_context::build_pipeline_v2(&strategy.context, self.skills.clone()).map_err(
+            cogito_context::build_pipeline_v2(&strategy.context, session_skills.clone()).map_err(
                 |e| RuntimeError::ResumeFailed {
                     id,
                     reason: e.to_string(),
                 },
             )?,
         );
-
-        // Per-session provider resolution: spec field wins, else Runtime default.
-        let session_tools = spec
-            .tools
-            .clone()
-            .unwrap_or_else(|| Arc::clone(&self.tools));
-        let session_skills = spec.skills.clone().or_else(|| self.skills.clone());
 
         let state = SessionState {
             session_id: id,
