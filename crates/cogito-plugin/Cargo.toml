@@ -1,0 +1,25 @@
+[package]
+name = "cogito-plugin"
+description = "Local-path plugin loader for the cogito Agent Runtime: manifest parsing, artifact discovery, and provider contributions (Skills + MCP) for v0.2."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cogito-protocol = { workspace = true }
+cogito-mcp      = { workspace = true }
+cogito-skills   = { workspace = true }
+
+serde      = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+toml       = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

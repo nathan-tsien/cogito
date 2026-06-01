@@ -561,6 +561,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cogito-plugin"
+version = "0.1.0"
+dependencies = [
+ "cogito-mcp",
+ "cogito-protocol",
+ "cogito-skills",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "cogito-protocol"
 version = "0.1.0"
 dependencies = [
