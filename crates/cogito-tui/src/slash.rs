@@ -25,6 +25,20 @@ pub enum SlashCommand {
     },
 }
 
+/// Result of dispatching a slash command. Distinguishes skill activation
+/// (which must route through `TurnTrigger::SkillActivation`) from plain
+/// text (which routes through `TurnTrigger::UserText`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DispatchResult {
+    /// Plain text — submit via `SessionHandle::submit_user_text`.
+    Text(String),
+    /// Skill activation — submit via `SessionHandle::submit(TurnTrigger::SkillActivation)`.
+    SkillActivation {
+        /// Skill name to activate.
+        name: String,
+    },
+}
+
 /// Parse a slash command. Returns `None` if the input doesn't begin
 /// with `/`; the caller should treat that case as a normal user
 /// message.
@@ -45,19 +59,21 @@ pub fn parse(input: &str) -> Option<SlashCommand> {
     }
 }
 
-/// Dispatch a parsed slash command against the App. Returns the text
-/// (if any) that the App should submit to the model in lieu of a
-/// user message — `Some(text)` for skill activation (`/skill foo`
-/// becomes the prompt `Activate skill: foo`), `None` for unknowns
-/// (already rendered as a notice).
-pub fn dispatch(app: &mut App, cmd: SlashCommand) -> Option<String> {
+/// Dispatch a parsed slash command against the App. Returns the
+/// payload (if any) that the caller should submit to the session.
+/// `None` for unknown commands (already rendered as a notice).
+pub fn dispatch(app: &mut App, cmd: SlashCommand) -> Option<DispatchResult> {
     match cmd {
         SlashCommand::Skill { name } => {
             app.chat.push_notice(format!("[skill] activating: {name}"));
-            // The CLI's parse_slash_skill formats the message as
-            // "Activate skill: <name>". We mirror that here so the
-            // model sees the same prompt.
-            Some(format!("Activate skill: {name}"))
+            // Bare `/skill <name>` carries no user text: the activation
+            // routes through `TurnTrigger::SkillActivation` with
+            // `user_text = None`, so the injected skill content is the
+            // only turn input. This mirrors the CLI, whose
+            // `parse_slash_skill` leaves `user_text` empty for a bare
+            // activation rather than fabricating an "Activate skill: …"
+            // user message.
+            Some(DispatchResult::SkillActivation { name })
         }
         SlashCommand::Unknown { raw } => {
             app.chat
@@ -96,10 +112,13 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_skill_returns_activation_prompt() {
+    fn dispatch_skill_returns_activation_result() {
         let (mut app, _td) = crate::app::tests::app_for_pure_test();
         let out = dispatch(&mut app, SlashCommand::Skill { name: "foo".into() });
-        assert_eq!(out, Some("Activate skill: foo".into()));
+        assert_eq!(
+            out,
+            Some(DispatchResult::SkillActivation { name: "foo".into() })
+        );
         assert_eq!(app.chat.lines.len(), 1);
     }
 
