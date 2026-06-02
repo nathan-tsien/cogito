@@ -1,4 +1,4 @@
-# ADR-0032: Skill-bundle materialization into the workspace
+# ADR-0032: Skill-bundle reachability via a read-only skill-root scope
 
 ## Status
 
@@ -6,203 +6,202 @@ Proposed (2026-06-02). Opens Phase 2 of the complete-skill-support path
 (`docs/superpowers/specs/2026-06-01-complete-skill-support-design.md` §5.2/§6).
 Builds on ADR-0029 (bundled-file path exposure), ADR-0030 (`Workspace` seam),
 ADR-0031 (workspace provisioning + exec-cwd unification), and ADR-0028
-(per-session provider injection). Resolves the materialization question
-ADR-0030 flagged as a "Phase-2/3 concern".
+(per-session provider injection). Resolves the reachability question ADR-0030
+flagged as a "Phase-2/3 concern".
+
+> Supersedes this ADR's own first draft, which proposed **copying** bundles
+> into the workspace ("materialization"). Investigation of the reference
+> implementations (see Context) showed neither copies; this revision adopts a
+> read-only scope instead. "Materialization" (physical placement) survives
+> only as the **SaaS** mechanism, deferred to Phase 3.
 
 ## Context
 
 A Skill is a directory: `SKILL.md` plus bundled `scripts/`, `references/`,
-`assets/`. Today (ADR-0029) the loader carries the skill's **absolute host
-directory** in `SkillContent.root` and the injector renders it into the
-`<skill ... root="...">` header with a one-line "resolve relative paths
-against this root" hint. The model reaches bundled files by that absolute
-path via `bash` / `read_file`.
+`assets/`, possibly nested several levels deep. ADR-0029 surfaces the skill's
+**absolute host directory** in the `<skill ... root="...">` header.
 
-That works in the Local profile because `DirectExecutor` and the host
-filesystem can see the skill directory. It **breaks in the SaaS profile**:
-the per-tenant sandbox (ADR-0012, v0.4) has its own filesystem and cannot see
-the host's skill directory, so an absolute host path is unreachable. ADR-0030
-explicitly deferred reconciling "model sees absolute skill paths" with
-"`Workspace` takes root-relative paths", noting: *"when bundled files are
-materialized into the workspace, the model will reference them by their
-workspace-relative path."* This ADR decides how.
+Two Phase-1 changes broke reachability of the *bundled* files:
 
-Two further forces:
+- **`read_file` (and `grep`/`glob`/`list_dir`/`edit`) became workspace-confined**
+  (PR #41): absolute paths and `..`-escapes are rejected. A bundle living
+  outside the workspace root is no longer readable by these tools — a
+  regression against ADR-0029's premise that "the model reads bundled files
+  via `read_file`/`bash`".
+- **The SaaS sandbox has an isolated filesystem**: it cannot see the host's
+  skill directory at all, so an absolute host path is meaningless there.
 
-- **Phase 1 unified the exec cwd on the session workspace root** (ADR-0031
-  §5): `bash`, `read_file`, `write_file`, `list_dir`, `edit`, `grep`, `glob`
-  all operate against one rooted, confined working tree per session. A skill
-  bundle that lives *inside* that tree is reachable by every one of those
-  tools with no special-casing.
-- **The thesis is zero Brain delta** (spec §1). Materialization must be a
-  Hands-level capability, injected per session; H01-H11 and the skill bundle
-  stay identical across profiles.
+`bash` is unaffected in the **Local** profile (its `DirectExecutor` is not
+confined and reaches absolute host paths), but is confined in SaaS.
+
+**How the reference implementations handle multi-level bundles.** Both Claude
+Code and OpenAI Codex use **progressive disclosure + read-in-place**, and
+**neither copies/materializes** the bundle:
+
+- Only each skill's `name`/`description` (and, in Codex, its path) is loaded up
+  front. The `SKILL.md` body loads on activation; nested files load on demand.
+- **Claude Code** *injects* the `SKILL.md` body into context on trigger, and the
+  model reaches nested files **in place** via the `Read`/`Bash`/`Glob` tools,
+  resolving relative paths against the skill dir (`${CLAUDE_SKILL_DIR}`).
+- **Codex** is more tool-driven: the model reads the `SKILL.md` and nested files
+  via its file-read tool from the exposed path. Its local sandbox reaches
+  out-of-workspace skill roots via `sandbox_workspace_write.writable_roots` /
+  a "runtime extra skill roots" API — i.e. an **allowed-roots set**, not a copy.
+
+**Where cogito already sits.** cogito follows the Claude Code split: the
+`SkillRegistry` reads `SKILL.md` once at scan time into `SkillRecord.body`, and
+`SkillInjector` injects that body into the system-prompt suffix. **The body
+never goes through `read_file`.** Only the *nested* bundled files
+(`scripts/`/`references/`/…) are reached on demand via `read_file`/`bash`.
+
+So the gap to close is narrow and specific: let the read-class file tools reach
+the **nested bundled files** of registered skills, in place, without copying —
+exactly the Codex "extra skill roots" shape, layered on top of cogito's
+(stricter than CC/Codex) Phase-1 confinement.
 
 ## Decision
 
-### 1. Materialize bundles into the workspace, both profiles
+### 1. A read-only skill-root scope, injected per session (zero Brain delta)
 
-On activation, a skill's bundled files are copied into the session workspace
-under a reserved prefix:
-
-```
-<workspace-root>/.cogito/run/skills/<activation-name>/…
-```
-
-`<activation-name>` is the registered name (`pptx`, or `myplugin:pptx` for a
-plugin skill — `:` is path-safe). `SKILL.md` itself is **not** copied (its
-body is already injected); everything else under the skill directory is copied
-recursively.
-
-The injected `root` then becomes that **workspace-relative path**
-(`.cogito/run/skills/pptx`), identical in shape across profiles:
-
-- **Local**: `<cwd>/.cogito/run/skills/pptx/…` — under the project cwd
-  (ADR-0031 §3). The `.cogito/run/` prefix is reserved scratch; the loader
-  ensures `.cogito/run/.gitignore` (`*`) exists so materialized bundles never
-  pollute the user's VCS.
-- **SaaS**: `<tenant-sandbox>/.cogito/run/skills/pptx/…` — inside the tenant
-  workspace, reachable by the sandboxed `bash`.
-
-Same `root="…"` value, same relative structure, same model-visible behavior —
-the spec §4 parity requirement holds *literally*, not just structurally.
-
-Rejected alternatives: see "Alternatives considered".
-
-### 2. Mechanism: a `MaterializingSkillProvider` decorator (zero Brain delta)
-
-Materialization is a `SkillProvider` decorator living in a Hands crate
-(`cogito-skills`), wrapping the base provider and holding the session
-`Arc<dyn Workspace>`:
+Carry the registered skills' on-disk directories as a read-only set on
+`ExecCtx`, alongside `workspace`:
 
 ```rust
-pub struct MaterializingSkillProvider {
-    inner: Arc<dyn SkillProvider>,
-    workspace: Arc<dyn Workspace>,
-}
+/// Read-only roots the read-class file tools may resolve into, in addition to
+/// the writable `workspace` (ADR-0032). Each is an absolute skill directory.
+pub skill_roots: Vec<PathBuf>,   // empty when no skills / no bundles
 ```
 
-On `get(name)` it (a) fetches the base `SkillContent` (host `root`), (b) copies
-the bundle into `.cogito/run/skills/<name>/` through `Workspace::write`
-(confined by construction), and (c) returns a `SkillContent` whose `root` is
-the workspace-relative staged path. `list` / `is_registered` / `get_metadata`
-pass through unchanged.
+It is composed **caller-side per session** (ADR-0028), exactly like
+`workspace` (ADR-0031) — the Surface knows both the skill provider and the
+skill roots. H01–H11, the `SkillProvider` trait, and the injector are
+unchanged; the model only ever sees tool results. **The `Workspace` trait and
+its single-root confinement (ADR-0030) are untouched** — the scope lives
+*beside* the workspace, not inside it (no multi-root `Workspace`).
 
-It is composed **caller-side and per session** (ADR-0028): the Surface builds
-`MaterializingSkillProvider::new(base, session_workspace)` and injects it via
-`SessionSpec.skills`. The Brain only ever sees `dyn SkillProvider`; the
-injector renders whatever `root` it is handed; **no H01-H11 change, no injector
-change, no new Brain-facing trait.** A session without a workspace (or whose
-base `root` is `None`) gets a pass-through — the decorator simply isn't
-wrapped, or returns the base content unchanged.
+### 2. Read-class tools resolve into the scope; nothing is copied
 
-### 3. `SkillProvider::get` becomes async
+`read_file`, `list_dir`, and `exists` accept a path whose canonicalized
+absolute form falls **within a registered `skill_roots` entry**, as a
+**read-only** access; otherwise they keep the Phase-1 workspace-confined
+behavior. `bash` is unchanged (Local already reaches absolute roots). The
+bundle is **read in place** — matching Claude Code / Codex.
 
-Copying is I/O, but `get` is synchronous today. Both call sites
-(`SkillInjector::inject` and `build_body_blocks`) already run in `async fn`s,
-so `get` is changed to:
+The model addresses bundled files by the absolute root from the
+`<skill root="...">` header (ADR-0029) plus the relative path from `SKILL.md`,
+e.g. `read_file "<root>/scripts/html2pptx.py"`. Deep trees need no special
+handling: `SKILL.md` is the index, and the model navigates with
+`read_file`/`list_dir` (and `bash`), as in the reference tools.
 
-```rust
-async fn get(&self, name: &str) -> Option<SkillContent>;
-```
+### 3. Scope is the nested bundle only; body injection unchanged
 
-This is a contained `cogito-protocol` change (the trait is runtime-only, not a
-wire/event type, so no `SCHEMA_VERSION` impact). `list` / `is_registered` /
-`get_metadata` stay synchronous — the H06 sigil filter and the registry block
-must remain cheap and need no I/O. Materialization is therefore **lazy**: only
-activated skills are copied, not every registered one.
+The `SKILL.md` body stays **injected** by `SkillInjector` (the Claude Code
+pattern cogito already uses) — the read-scope serves only the on-demand reads
+of nested files. Moving the body to a model-read (Codex style) is out of scope.
 
-### 4. Idempotent, materialize-once-per-session
+### 4. Which tools get the scope, and which deliberately do not
 
-`get` is called per turn for each active skill; the copy must be idempotent.
-The decorator skips copying when the destination already exists for the
-session (a skill activated in turn 3 and re-referenced in turn 5 is copied
-once). Re-materialization across a *crash/resume* is harmless (overwrite) but
-the existing injector idempotency (a `SystemPromptInjected` event already
-present for the turn short-circuits injection) means `get` is not even called
-on a resumed turn.
+- **In scope (read-only):** `read_file`, `list_dir`, `exists`.
+- **Not in scope:** `write_file`, `edit`, `remove` (bundles are read-only — you
+  cannot mutate a skill's own files), and `grep`/`glob` (these search/enumerate
+  the *working tree*; recursing them into skill roots is a later opt-in, not a
+  v0.2 need). Keeping the surface small bounds the trust widening below.
 
-### 5. Event-log / resume
+### 5. Granularity: all registered skills' roots, session-stable
 
-The materialized `root` (`.cogito/run/skills/pptx`) is **workspace-relative and
-machine-independent**, so the `SystemPromptInjected.suffix` that persists it
-(ADR-0029 decision-point 4) no longer freezes a host-absolute path into the
-log. This is a strict improvement over Phase 0 for the v0.4 multi-replica case:
-a replica re-resolves the same relative path against its own workspace root.
+Whitelist every **registered** skill's directory for the session (not only the
+per-turn *activated* ones). They are operator/loader-controlled and read-only,
+so the marginal risk over "activated only" is negligible, and a session-stable
+set avoids per-turn churn in the injected `ExecCtx`.
+
+### 6. SaaS: physical placement deferred to Phase 3
+
+In SaaS the sandbox cannot see host skill dirs, so the read-scope abstraction
+must be **backed by physical placement** — copy or read-only mount of the
+bundle into the tenant sandbox (the Codex `writable_roots` story, but across an
+isolation boundary). This ADR defines the **seam** (`ExecCtx.skill_roots`); the
+**Local** profile realizes it with **zero copy**; the **SaaS** realization
+(placement + roots pointing inside the sandbox) is Phase 3 / ADR-0012 work.
 
 ## Consequences
 
 **Easier**:
-- One reachability model: bundled files live in the workspace, reachable by
-  every Phase-1 file tool and by `bash` (shared cwd), in both profiles.
-- SaaS skill execution becomes possible at all (the sandbox can now see the
-  bundle) with zero Brain change — just a different injected `Workspace`.
-- The persisted skill root stops being a host-absolute path (resume-friendly).
+- Matches the reference implementations (read-in-place, progressive
+  disclosure); no Local copy, no project-tree pollution.
+- The `Workspace` seam, its contract suite, and the loader→registry→injector
+  body-injection chain are all **untouched**.
+- Restores `read_file` access to bundled files that Phase-1 confinement removed,
+  cheaply and with a small, explicit trust widening.
 
 **Harder**:
-- `SkillProvider::get` gains `async` — a `cogito-protocol` trait change that
-  touches `SkillRegistry`, the injector call sites, and any test doubles.
-- Local sessions write a hidden `.cogito/run/skills/…` tree into the project
-  cwd. Mitigated by the reserved prefix + auto-`.gitignore`; users wanting
-  full isolation point `--workspace` at a scratch dir (ADR-0031 §3).
-- Copy cost on first activation (bounded: bundles are scripts/templates, not
-  dependency trees — runtimes/packages are ADR-0033's concern, not copied).
+- **`read_file`'s contract widens**: "absolute paths rejected" becomes
+  "rejected unless resolved within a registered read-only skill root." Its
+  tests change; the SaaS safety claim becomes "cannot read outside workspace
+  ∪ skill_roots" rather than "outside workspace".
+- A new `ExecCtx` field plus a second resolution branch in three tools.
+- **SaaS still needs physical placement** (Phase 3) — the seam is defined now,
+  the SaaS body is scheduled.
+- Symlink/canonicalize hardening of the scope is required before skill roots
+  become tenant-controlled (Phase 3).
 
 **Given up**:
-- Activating a skill is no longer pure prompt-assembly; it has a file-I/O side
-  effect. That side effect is confined to a Hands impl behind the
-  `SkillProvider` seam, so the layering rule holds.
+- **Path uniformity across profiles** and the **resume-path improvement** that
+  copying would have bought. Local keeps the absolute host `root=` (ADR-0029),
+  so the persisted `SystemPromptInjected.suffix` still carries an absolute
+  path and ADR-0029's v0.4 multi-replica "re-resolve at prompt-build" caveat
+  **remains open** (a copy-to-workspace approach would have closed it). Accepted
+  in exchange for matching the reference tools and not copying.
 
 ## Alternatives considered
 
-1. **SaaS-only materialization; Local keeps the absolute host root.** Avoids
-   touching the Local project tree, but diverges the literal `root=` value by
-   profile and keeps two reachability models. Rejected: undercuts the spec §4
-   "same skill, same behavior" thesis and leaves the Phase-0 absolute-path
-   resume caveat in place for Local.
-2. **Session staging dir outside the project, exposed as a second read root.**
-   Keeps the Local project clean and unifies paths, but breaks the
-   single-rooted `Workspace` invariant (ADR-0030/0031) by introducing a second
-   mount/root. Rejected for v0.2: a large complication to the seam for a
-   hygiene gain the reserved `.cogito/run/` prefix already mostly buys.
-3. **A dedicated `SkillMaterializer` Hands trait invoked by the Turn Driver.**
-   Explicit, but adds a call from H01 → Brain delta. Rejected: the decorator
-   achieves the same with zero Brain change.
-4. **Eager materialization of all skills at session open** (keeps `get` sync).
-   Avoids the trait change but copies every registered skill — wasteful with
-   many plugin skills, and pays the cost even for sessions that activate none.
-   Rejected in favor of lazy + async `get`.
+1. **Copy/materialize the bundle into the workspace** (this ADR's first draft).
+   Uniform workspace-relative paths, resume-friendly, file tools untouched —
+   but duplicates files, writes a hidden tree into the Local project cwd, and
+   diverges from how Claude Code / Codex actually work (neither copies).
+   **Rejected for Local**; **retained as the SaaS placement mechanism**
+   (Phase 3).
+2. **Read-only mounts inside the `Workspace` trait** (multi-root Workspace).
+   Tools untouched, but loosens the just-locked single-root `Workspace`
+   contract and its contract suite. Rejected: a bigger disturbance to the
+   Phase-1 seam than widening `read_file`.
+3. **Symlink / bind-mount the bundle into the workspace at a uniform path.**
+   Would give uniform paths and `bash` reach without copying, but a Local
+   symlink escaping root is rejected by our own confinement guard (ADR-0030
+   Q4) and bind-mounts need privileges. Rejected for Local v0.2; revisit as a
+   SaaS placement option.
+4. **SaaS-only; Local on absolute paths via `bash` alone (no read-scope).**
+   Leaves Local `read_file` unable to read bundled files (the ADR-0029
+   regression). Rejected — the read-scope restores `read_file` parity cheaply.
 
 ## Open questions
 
-1. Pseudo-XML attribute escaping (ADR-0029 TODO): still deferred. Skill
-   directories remain operator/loader-authored in Phase 2; tenant-controlled
-   skill roots (Phase 3) require escaping the `root="…"` attribute regardless
-   of materialization.
-2. Symlinks inside a bundle: copy-follow vs copy-as-link. v0.2: follow and
-   copy file contents (the destination is a flat confined tree); revisit if a
-   skill legitimately ships symlinks.
-3. Cleanup: materialized trees are ephemeral with the session (ADR-0031 §1) in
-   SaaS; locally they persist under `.cogito/run/` until the user clears it.
-   A `cogito` housekeeping command is out of scope here.
-4. Cross-session caching of identical bundles (content-addressed staging) is a
-   later optimization, not a v0.2 need.
+1. `grep`/`glob` into skill roots: excluded in v0.2 (search = working tree).
+   Revisit if skills want searchable references.
+2. Pseudo-XML `root="…"` attribute escaping (ADR-0029 TODO): still deferred to
+   Phase 3, when skill roots become tenant-controlled.
+3. Symlink/canonicalize hardening of `skill_roots` resolution: required before
+   Phase 3.
+4. SaaS physical-placement mechanism (copy vs read-only mount): Phase 3 /
+   ADR-0012.
 
 ## References
 
-- ADR-0029 — skill bundled-file path exposure (the absolute-root header this
-  refines into a workspace-relative one)
-- ADR-0030 — `Workspace` seam (the "materialize into the workspace" note this
-  answers)
-- ADR-0031 — workspace provisioning + exec-cwd unification (why an in-workspace
-  bundle is reachable by `bash` and the file tools)
-- ADR-0028 — per-session provider injection (the caller-side composition the
-  decorator reuses)
+- ADR-0029 — skill bundled-file path exposure (the absolute-root header the
+  read-scope makes reachable again)
+- ADR-0030 — `Workspace` seam (single-root confinement, left intact)
+- ADR-0031 — workspace provisioning + exec-cwd unification (`bash` already
+  reaches absolute roots in Local)
+- ADR-0028 — per-session provider injection (caller-side composition reused for
+  `skill_roots`)
 - ADR-0023 — bundled-script execution (Position A: read/run scripts via
-  `read_file`/`bash`; materialization is what makes those reads/runs reachable)
+  `read_file`/`bash`; the read-scope is what makes those reads reachable)
+- Reference implementations: Claude Code Agent Skills
+  (progressive disclosure, `${CLAUDE_SKILL_DIR}`, read-in-place) and OpenAI
+  Codex skills (file-read tool, `sandbox_workspace_write.writable_roots` /
+  runtime extra skill roots — the read-scope precedent)
 - Complete-skill-support design §4 (profiles), §5.2 (workspace + tools), §6
   (Phase 2 row)
-- Skill machinery touched: `cogito-protocol/src/skill.rs` (`SkillProvider`,
-  `SkillContent.root`); `cogito-skills/src/registry.rs`,
-  `crates/cogito-skills/src/discovery.rs`; `cogito-context/src/injector/skill.rs`
-  (`build_body_blocks`); `cogito-protocol/src/workspace.rs`
+- Skill machinery touched: `cogito-protocol/src/exec_ctx.rs` (new
+  `skill_roots`); `cogito-tools/src/builtins/{read_file,list_dir}.rs`;
+  unchanged: `cogito-protocol/src/skill.rs`, `cogito-skills/src/registry.rs`,
+  `cogito-context/src/injector/skill.rs`, `cogito-protocol/src/workspace.rs`
