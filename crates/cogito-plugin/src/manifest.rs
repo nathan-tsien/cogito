@@ -22,6 +22,25 @@ pub struct PluginManifest {
     pub mcp_file: String,
 }
 
+/// Validate a plugin id against ADR-0021 §1: `[a-z0-9-]+` (non-empty,
+/// lowercase ASCII letters, digits, and hyphens only). The id becomes the
+/// `<plugin_id>:<artifact>` namespace prefix, so a tight character set keeps
+/// namespaced names predictable across skills, MCP servers, and sigils.
+fn validate_id(id: &str, plugin_dir: &Path) -> Result<(), PluginError> {
+    let ok = !id.is_empty()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    if ok {
+        Ok(())
+    } else {
+        Err(PluginError::InvalidId {
+            id: id.to_string(),
+            path: plugin_dir.to_path_buf(),
+        })
+    }
+}
+
 fn default_skills_dir() -> String {
     "skills".to_string()
 }
@@ -72,6 +91,7 @@ impl PluginManifest {
                     path: toml_path.clone(),
                     source: Box::new(e),
                 })?;
+            validate_id(&parsed.plugin.id, plugin_dir)?;
             return Ok(Self {
                 id: parsed.plugin.id,
                 version: parsed.plugin.version,
@@ -92,6 +112,7 @@ impl PluginManifest {
                     path: json_path.clone(),
                     source: Box::new(e),
                 })?;
+            validate_id(&parsed.name, plugin_dir)?;
             return Ok(Self {
                 id: parsed.name,
                 version: parsed.version,

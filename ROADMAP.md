@@ -9,12 +9,19 @@
 > **v0.1 · Foundation — complete; tagged `v0.1.0` (2026-05-29).** All
 > sprints 0–10 done. One tracked deferral carried forward: the Sprint 4
 > live-server MCP happy-path integration test (see the Sprint 4 closure
-> note); candidate for a v0.2 task once an in-process MCP test-server
-> fixture exists.
-> **v0.2 · Extensibility — Sprints 11–12 shipped.** Sprint 11 (Subagent
-> S2 minimal); Sprint 12 (per-session provider injection — ADR-0028 — and
-> the local-path plugin loader for Skills + MCP — ADR-0021). Next:
-> Sprint 13 (v0.2 硬化 + tag `v0.2.0`).
+> note); it was a v0.2 candidate but no in-process MCP test-server fixture
+> materialized, so it is now carried forward to v0.3.
+> **v0.2 · Extensibility — Sprints 11–12 shipped; Skill-support /
+> Workspace workstream shipped; Sprint 13 in progress.** Sprint 11
+> (Subagent S2 minimal); Sprint 12 (per-session provider injection —
+> ADR-0028 — and the local-path plugin loader for Skills + MCP —
+> ADR-0021). An unplanned but coherent **Complete Skill Support +
+> Workspace seam** workstream then landed (PRs #35–#52, spec
+> `docs/superpowers/specs/2026-06-01-complete-skill-support-design.md`):
+> the Workspace seam (ADR-0030/0031), the builtin file/search tool catalog
+> (`write_file` / `list_dir` / `edit` / `grep` / `glob`), and skill-bundle
+> reachability + dependency descriptor (ADR-0029/0032/0033, ADR-0023
+> finalized). Now: Sprint 13 (v0.2 硬化 + tag `v0.2.0`).
 
 ## Version plan
 
@@ -295,12 +302,39 @@ needs multi-tenant, single-process, per-request (and mid-session
 mutable) tool/skill surfaces now. The v0.4 entry below is correspondingly
 narrowed to the remaining multi-replica / TenantContext / store work.
 
+#### Skill-support + Workspace seam (unplanned; landed between Sprint 12 and 13)
+
+**Not in the original v0.2 plan.** A coherent workstream that closed the
+gap between "a Skill injects instructions" and "a Skill can reach its
+bundled files, run scripts, and write artifacts" across the Local
+(CLI/TUI) and SaaS profiles. Design:
+`docs/superpowers/specs/2026-06-01-complete-skill-support-design.md`.
+Recorded here after the fact for an accurate v0.2 release picture (specs
+fragment the picture over time — durable docs must carry the decision).
+
+- [x] **ADR-0029**: skill bundled-file path exposure — `SkillContent.root` points at the skill's own directory so the model can resolve relative references (PR #37)
+- [x] **ADR-0030**: Workspace seam — lock the `Workspace` trait + `LocalWorkspace` (Phase 1, PRs #38/#40)
+- [x] **ADR-0031**: Workspace provisioning & scoping (TUI vs SaaS); bash exec cwd unified on the session workspace root (§5, PR #42)
+- [x] `read_file` migrated onto the Workspace seam; `write_file` tool wired through `ExecCtx` (PRs #40/#41)
+- [x] Builtin file/search tool catalog over the Workspace seam: `list_dir` (#43), `edit` (#44), `grep` (#45), `glob` (#46); file tools wired into the TUI
+- [x] **ADR-0032**: skill-bundle reachability via a read-only skill-root scope — `ExecCtx.skill_roots` + `read_file`/`list_dir` read-only skill scope, turned on (PRs #47/#48/#49)
+- [x] **ADR-0033**: skill runtime dependencies — no custom descriptor (Phase 2, PR #50); ADR-0023 (bundled-script execution) finalized + script-bearing-skill e2e (PR #51)
+- [x] Duplicate skill name is non-fatal, resolved by precedence (PR #52)
+
 #### Sprint 13 · v0.2 硬化 + tag v0.2.0 (1 day)
 
-- [ ] Cross-scope same-name collision tests (Repo-skill vs Plugin-namespaced skill)
-- [ ] Resume-chaos: new scenario `plugin_skill_then_tool` — crash injection while a plugin-loaded skill is mid-activation
+- [x] Cross-scope same-name collision test (Repo-skill vs Plugin-namespaced skill): plugin skills are namespaced `<plugin_id>:<name>` (ADR-0021 §3), so a repo `review` and plugin `acme:review` coexist rather than collide — pinned by `repo_and_plugin_same_name_coexist_via_namespace` in `cogito-skills/tests/discovery.rs`. Same-scope duplicates resolve by precedence, non-fatal (`cogito-plugin` PR #52; `duplicate_name_in_same_dir_resolves_by_precedence_not_fatal`)
+- [x] `plugin.id` format validation (`[a-z0-9-]+`, ADR-0021 §1) enforced in the manifest parser — closes the Sprint 12 deferred follow-up (`PluginError::InvalidId`)
+- [x] Resume-chaos: new scenario `plugin_skill_then_tool` — crash injection while a plugin-loaded skill is mid-activation; all 4 oracles pass at both boundaries
 - [ ] CHANGELOG.md v0.2 entry
 - [ ] Tag `v0.2.0`
+
+**Sprint 13 carry-forward to v0.3:** the Sprint 4 MCP happy-path
+integration test (live streamable-HTTP MCP server with bearer auth,
+asserting `tools/list` + `tools/call` end-to-end through `cogito chat`)
+remains deferred — it needs an in-process MCP test-server fixture that
+does not yet exist. Resilience invariants are already covered
+(`crates/cogito-mcp/tests/integration.rs`).
 
 ### v0.3 · Distributed Collaboration
 
@@ -316,6 +350,7 @@ covers both the Subagent full upgrade AND Plugin git distribution.
 - [ ] `cogito-plugin`: git fetch + cache layout (`~/.cache/cogito/plugins/<content-hash>/`)
 - [ ] `cogito-cli`: `cogito plugin sync` + `cogito plugin sync --check` + `cogito plugin list` + `cogito plugin update <id>`
 - [ ] Lock-file schema (TOML)
+- [ ] **Carried forward from v0.1/v0.2:** Sprint 4 MCP happy-path integration test — build an in-process streamable-HTTP MCP test-server fixture, then assert `tools/list` + `tools/call` end-to-end through `cogito chat` with bearer auth
 - [ ] Tag `v0.3.0`
 
 ### v0.4 · SaaS-ready

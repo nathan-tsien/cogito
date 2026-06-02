@@ -23,6 +23,37 @@ fn parses_toml_manifest_with_defaults() {
 }
 
 #[test]
+fn rejects_id_with_invalid_chars() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join("bad");
+    fs::create_dir_all(plugin_dir.join(".cogito-plugin")).unwrap();
+    // Uppercase + underscore violate the `[a-z0-9-]+` rule (ADR-0021 §1).
+    fs::write(
+        plugin_dir.join(".cogito-plugin/plugin.toml"),
+        "[plugin]\nid = \"Code_Review\"\n",
+    )
+    .unwrap();
+
+    let err = PluginManifest::load_from_dir(&plugin_dir).unwrap_err();
+    assert!(matches!(err, cogito_plugin::PluginError::InvalidId { .. }));
+}
+
+#[test]
+fn rejects_empty_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join("empty");
+    fs::create_dir_all(plugin_dir.join(".cogito-plugin")).unwrap();
+    fs::write(
+        plugin_dir.join(".cogito-plugin/plugin.toml"),
+        "[plugin]\nid = \"\"\n",
+    )
+    .unwrap();
+
+    let err = PluginManifest::load_from_dir(&plugin_dir).unwrap_err();
+    assert!(matches!(err, cogito_plugin::PluginError::InvalidId { .. }));
+}
+
+#[test]
 fn falls_back_to_claude_json_metadata() {
     let dir = tempfile::tempdir().unwrap();
     let plugin_dir = dir.path().join("legacy");
