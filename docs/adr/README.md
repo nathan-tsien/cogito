@@ -27,6 +27,15 @@ recording an architectural decision and its context.
 - [0022](./0022-plugin-distribution.md) — Plugin distribution (git URL + commit/tag pin, `cogito.lock` file, `cogito plugin sync` command, network-failure-non-fatal-if-cached semantics, marketplace/signing out-of-scope) — **placeholder, finalized in v0.3**
 - [0023](./0023-bundled-script-execution.md) — Bundled-script execution in Skills (**deliberately deferred**; records the deferral and design space — Codex-style implicit invocation, Claude-Code-style `` !`cmd` `` substitution, or auto-tool-registration; revisit when concrete use case surfaces or Subagent v0.3 lands)
 - [0024](./0024-crate-naming-consolidation.md) — Crate naming consolidation (crate names label layers / roles, not backend implementations; `cogito-store-jsonl` → `cogito-store --features jsonl|postgres|...`; same pattern adopted by `cogito-context`; Accepted ADRs containing old names not modified — historical-name map maintained here) — **Accepted (2026-05-29)**
+- [0025](./0025-hands-sublayer-boundary.md) — Hands sub-layer boundary (`JobManager` / `ToolProvider` / internal primitive split inside the Hands layer) — **Accepted (2026-05-26)**
+- [0026](./0026-strategy-registry.md) — Strategy registry (`cogito-strategy`, declarative agent modes) — **Accepted (2026-05-28)**
+- [0027](./0027-command-executor-seam-and-builtin-scope.md) — `CommandExecutor` seam and the deliberately-small builtin tool set — **Accepted (2026-05-29)**
+- [0028](./0028-per-session-provider-injection.md) — Per-session provider injection (`SessionSpec` overrides for store/model/tools/skills/workspace per session) — **Accepted (2026-05-30)**
+- [0029](./0029-skill-bundled-file-path-exposure.md) — Expose the activated skill's bundled-file root to the model (`SkillContent.root` + `<skill root="...">` header) — **Accepted, implemented 2026-06-01 (skill-support Phase 0)**
+- [0030](./0030-workspace-seam.md) — `Workspace` seam (rooted, sandboxable working tree; `read`/`write`/`list`/`exists`/`remove`; single-root confinement) — **Accepted 2026-06-01 (skill-support Phase 1)**
+- [0031](./0031-workspace-provisioning-and-scoping.md) — Workspace provisioning + scoping (per-session ephemeral workspace, Local root = project cwd, exec-cwd unification) — **Accepted 2026-06-01 (skill-support Phase 1)**
+- [0032](./0032-skill-bundle-reachability.md) — Skill-bundle reachability via a read-only skill-root scope (`ExecCtx.skill_roots`; `read_file`/`list_dir` resolve into registered skill dirs; no Local copy; SaaS placement deferred to Phase 3) — **Accepted, implemented (skill-support Phase 2)**
+- [0033](./0033-skill-dependency-descriptor.md) — Skill runtime dependencies: **no custom descriptor** (Agent Skills standard defines no `runtime`/`requires` — only free-text `compatibility`); Local = agent self-heal via `bash` (ADR-0023 Position A); SaaS = pre-baked runtime image + optional activation fast-fail; safe controlled auto-install deferred to Phase 3 (sandbox); no code change in v0.2 — **Proposed (skill-support Phase 2)**
 
 ## Template
 
