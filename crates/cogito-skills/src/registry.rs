@@ -4,25 +4,21 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use cogito_protocol::skill::{SkillContent, SkillMetadata, SkillProvider, SkillSource};
 
 use crate::discovery::{DiscoveryError, ScanConfig, discover_skills};
 
 /// Errors from `SkillRegistry::scan`.
+///
+/// Note: a duplicate skill *name* is deliberately **not** an error. Name
+/// collisions are resolved by precedence (one skill wins; see `scan`) and
+/// never fail the build — a skill clash must not crash the runtime, mirroring
+/// the non-fatal MCP duplicate-name handling (ADR-0018).
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum SkillRegistryError {
-    /// Two skills declared the same `name` inside one directory (or the
-    /// directory chain visited as a single dir scan).
-    #[error("duplicate skill name '{name}' in scope {scope}")]
-    DuplicateName {
-        /// The colliding skill name.
-        name: String,
-        /// Human-readable scope label ("repo", "user", "plugin", "system").
-        scope: &'static str,
-    },
     /// Walker-level failure.
     #[error("discovery failed: {0}")]
     Discovery(#[from] DiscoveryError),
@@ -49,11 +45,23 @@ pub struct SkillRegistry {
 impl SkillRegistry {
     /// Scan filesystem according to `config` and build the registry.
     ///
+    /// Name collisions never fail the build; they resolve by precedence and
+    /// exactly one skill wins:
+    /// - across scopes, higher precedence wins (Repo > User > Plugin > System);
+    /// - within one scope, the first in walk order wins — for Repo, the closer
+    ///   (deeper) ancestor dir; within a single `.cogito/skills/` directory, the
+    ///   alphabetically-first skill folder (discovery sorts by file name).
+    ///
+    /// A shadowed same-scope duplicate is logged at `warn`; a cross-scope shadow
+    /// (intentional layering, e.g. a repo skill overriding a user default) at
+    /// `debug`. The same physical skill discovered via two overlapping scopes
+    /// (e.g. `user_dir` pointing at the repo `.cogito/skills`) is treated as the
+    /// cross-scope shadow case, not a collision.
+    ///
     /// # Errors
     ///
-    /// Returns `Err(SkillRegistryError::DuplicateName)` if two skills
-    /// within the same scope class declare the same `name`. Higher-scope
-    /// shadowing across classes (Repo > User > Plugin > System) is silent.
+    /// Returns `Err(SkillRegistryError::Discovery)` only on a walker-level I/O
+    /// failure. Duplicate names are not errors.
     // Builder-style by-value API: callers compose a `ScanConfig` literal
     // and hand it off; the registry is the only consumer.
     #[allow(clippy::needless_pass_by_value)]
@@ -86,15 +94,14 @@ impl SkillRegistry {
                 _ => false,
             };
             if same_scope_seen {
-                // Repo monorepo walk: closer dir wins; emit debug + skip.
-                // Strict fatal only for explicit collision (which v0.1
-                // hard-defines as "same scope label"). For Repo walk-up,
-                // the deeper dir already populated by_name; treat the
-                // later (shallower) dup as a closer-wins case.
-                debug!(
+                // Same-scope name collision: the earlier entry in walk order
+                // already won (closer dir for Repo; alphabetically-first folder
+                // within one `.cogito/skills/`). Drop this one and warn so the
+                // clash is visible — but never fail the build.
+                warn!(
                     name = %d.parsed.name,
                     scope = scope_label,
-                    "duplicate within scope dropped (closer dir already won)"
+                    "duplicate skill name within scope; keeping the first, dropping this one"
                 );
                 continue;
             }
@@ -135,49 +142,10 @@ impl SkillRegistry {
                 }),
             );
         }
-        // Same-directory duplicate (file-system level): two SKILL.md files in
-        // the same `skills/<dir>/` cannot occur (only one SKILL.md per dir).
-        // Two skill dirs declaring the same `name` is what we want to surface
-        // as fatal — that's the "same-dir" case in the spec. The check is
-        // factored out so the main pass stays focused on building the table.
-        check_same_dir_duplicates(&config)?;
-
         Ok(Self {
             by_name: Arc::new(by_name),
         })
     }
-}
-
-/// Same-directory duplicate detection. Two skill dirs that are direct
-/// children of the same `.cogito/skills/` directory and that both declare
-/// the same `name` are surfaced as a fatal `DuplicateName` error.
-fn check_same_dir_duplicates(config: &ScanConfig) -> Result<(), SkillRegistryError> {
-    let mut found = discover_skills(config)?;
-    let mut by_dir: HashMap<std::path::PathBuf, HashSet<String>> = HashMap::new();
-    for d in found.drain(..) {
-        let parent = d
-            .dir
-            .parent()
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_default();
-        let names = by_dir.entry(parent).or_default();
-        if names.contains(&d.parsed.name) {
-            let scope_label = match d.source {
-                SkillSource::Repo { .. } => "repo",
-                SkillSource::User => "user",
-                SkillSource::Plugin { .. } => "plugin",
-                SkillSource::System => "system",
-                // See note in `SkillRegistry::scan`; non_exhaustive.
-                _ => "unknown",
-            };
-            return Err(SkillRegistryError::DuplicateName {
-                name: d.parsed.name.clone(),
-                scope: scope_label,
-            });
-        }
-        names.insert(d.parsed.name.clone());
-    }
-    Ok(())
 }
 
 impl SkillProvider for SkillRegistry {

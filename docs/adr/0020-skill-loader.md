@@ -87,6 +87,24 @@ precedence (high → low):
 Higher scope's bare-name skill shadows lower scope's; plugin-namespaced
 skills never conflict with bare-name skills by construction.
 
+**Amendment (2026-06-02) — duplicate names are never fatal.** A skill-name
+collision MUST NOT fail `SkillRegistry::scan` (a skill clash crashing the whole
+runtime is too brittle, and inconsistent with the non-fatal MCP duplicate
+handling in ADR-0018 §3). Collisions resolve by precedence and exactly one
+skill wins:
+
+- across scopes, higher precedence wins (Repo > User > Plugin > System);
+- within a single scope, the first in walk order wins — for Repo the closer
+  (deeper) ancestor `.cogito/skills/`; within one `.cogito/skills/` directory,
+  the alphabetically-first skill folder (discovery sorts entries by file name).
+
+A shadowed same-scope duplicate is logged at `warn`; an intentional cross-scope
+shadow at `debug`. The same physical skill discovered via two overlapping
+scopes (e.g. a configured `user_dir` pointing at the repo's own
+`.cogito/skills/`) is the cross-scope shadow case, not a collision. This
+supersedes the original implementation's fatal same-directory `DuplicateName`
+error (removed; the `SkillRegistryError::DuplicateName` variant is gone).
+
 ### 3. SKILL.md frontmatter schema
 
 Required fields:

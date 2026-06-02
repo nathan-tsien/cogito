@@ -81,7 +81,7 @@ fn missing_user_dir_is_not_an_error() {
 }
 
 use cogito_protocol::skill::SkillProvider;
-use cogito_skills::{SkillRegistry, SkillRegistryError};
+use cogito_skills::SkillRegistry;
 
 #[test]
 fn registry_build_succeeds() {
@@ -128,7 +128,12 @@ fn registry_get_carries_skill_own_directory_as_root() {
 }
 
 #[test]
-fn duplicate_name_in_same_dir_is_fatal() {
+fn duplicate_name_in_same_dir_resolves_by_precedence_not_fatal() {
+    // Two skill folders in the SAME scope declaring the same name must NOT
+    // fail the build (a skill collision should never crash the runtime —
+    // mirrors the non-fatal MCP duplicate handling, ADR-0018). Exactly one
+    // wins; within a scope the tie-break is the alphabetically-first skill
+    // directory (`dup-a` before `dup-b`).
     use std::fs;
     use tempfile::tempdir;
 
@@ -149,14 +154,57 @@ fn duplicate_name_in_same_dir_is_fatal() {
     // Plant a .git/ so the walk-up stops here:
     fs::create_dir_all(tmp.path().join(".git")).unwrap();
 
-    let err = SkillRegistry::scan(ScanConfig {
+    let reg = SkillRegistry::scan(ScanConfig {
         workspace_root: Some(tmp.path().to_path_buf()),
         user_dir: None,
         include_system: false,
         ..Default::default()
     })
-    .unwrap_err();
-    assert!(matches!(err, SkillRegistryError::DuplicateName { .. }));
+    .expect("duplicate name must not be fatal");
+
+    assert!(
+        reg.is_registered("dup"),
+        "the winning skill stays registered"
+    );
+    let dups: Vec<_> = reg.list().into_iter().filter(|m| m.name == "dup").collect();
+    assert_eq!(dups.len(), 1, "exactly one same-named skill is effective");
+    assert!(
+        reg.get("dup").unwrap().body.starts_with("body-a"),
+        "alphabetically-first directory (dup-a) wins the tie"
+    );
+}
+
+#[test]
+fn overlapping_scopes_on_same_skill_dir_is_not_fatal() {
+    // Regression: when `workspace_root` (repo scope) and `user_dir` (user
+    // scope) resolve to the SAME `.cogito/skills` directory, the one skill is
+    // discovered twice (once per scope). That must NOT be treated as a
+    // collision — it is the same physical skill. Build succeeds, one entry.
+    use std::fs;
+    use tempfile::tempdir;
+
+    let tmp = tempdir().unwrap();
+    let skills = tmp.path().join(".cogito").join("skills");
+    fs::create_dir_all(skills.join("pptx")).unwrap();
+    fs::write(
+        skills.join("pptx").join("SKILL.md"),
+        "---\nname: pptx\ndescription: decks\n---\npptx body",
+    )
+    .unwrap();
+    fs::create_dir_all(tmp.path().join("cogito.toml").parent().unwrap()).ok();
+    fs::write(tmp.path().join("cogito.toml"), "").unwrap();
+
+    let reg = SkillRegistry::scan(ScanConfig {
+        workspace_root: Some(tmp.path().to_path_buf()),
+        user_dir: Some(skills.clone()), // same dir as repo scope -> double discovery
+        include_system: false,
+        ..Default::default()
+    })
+    .expect("overlapping scopes on the same dir must not be fatal");
+
+    assert!(reg.is_registered("pptx"));
+    let n = reg.list().into_iter().filter(|m| m.name == "pptx").count();
+    assert_eq!(n, 1, "the same physical skill must register exactly once");
 }
 
 #[test]
