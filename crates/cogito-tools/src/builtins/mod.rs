@@ -2,12 +2,14 @@
 //! `BuiltinTool` trait.
 
 pub mod edit;
+pub mod grep;
 pub mod list_dir;
 pub mod read_file;
 pub mod web_fetch;
 pub mod write_file;
 
 pub use edit::Edit;
+pub use grep::Grep;
 pub use list_dir::ListDir;
 pub use read_file::ReadFile;
 pub use web_fetch::{WebFetch, WebFetchConfig};

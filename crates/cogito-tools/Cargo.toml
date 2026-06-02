@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 anyhow = { workspace = true }
 futures = { workspace = true }
 htmd = { workspace = true }
+regex = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
