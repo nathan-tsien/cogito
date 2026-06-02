@@ -10,6 +10,7 @@
 //! - ADR-0006 §"Sprint 2 protocol-layer additions" for why
 //!   `tokio_util::sync::CancellationToken` is allowed at the protocol layer
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -50,6 +51,13 @@ pub struct ExecCtx {
     /// structured `ToolResult::Error`, as `delegate` does without a spawner).
     /// Per-session and swappable mid-session via `SessionSpec` (ADR-0028).
     pub workspace: Option<Arc<dyn Workspace>>,
+    /// Read-only skill bundle roots (ADR-0032). Absolute directories of
+    /// registered skills; the read-class file tools (`read_file`, `list_dir`)
+    /// may resolve a path into one of these for a read-only access, in addition
+    /// to the writable `workspace`. Empty when no skills are wired. In the
+    /// Local profile these are host paths read in place; the sandboxed
+    /// multi-tenant realization (placement inside the sandbox) is Phase 3.
+    pub skill_roots: Arc<[PathBuf]>,
 }
 
 impl std::fmt::Debug for ExecCtx {
@@ -63,6 +71,7 @@ impl std::fmt::Debug for ExecCtx {
             .field("subagent_depth", &self.subagent_depth)
             .field("brain_spawner", &self.brain_spawner.is_some())
             .field("workspace", &self.workspace.is_some())
+            .field("skill_roots", &self.skill_roots.len())
             // Maintenance: list every ExecCtx field above when one is added.
             .finish()
     }
@@ -82,6 +91,7 @@ impl ExecCtx {
             subagent_depth: 0,
             brain_spawner: None,
             workspace: None,
+            skill_roots: Arc::from([]),
         }
     }
 }

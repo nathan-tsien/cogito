@@ -484,6 +484,8 @@ fn spawn_turn_driver(
         subagent_depth: state.subagent_depth,
         brain_spawner: deps.brain_spawner.clone(),
         workspace: deps.workspace.clone(),
+        // Wired from SessionDeps in increment 2 (ADR-0032); empty for now.
+        skill_roots: std::sync::Arc::from([]),
     };
     let ctx = TurnCtx {
         session_id: state.session_id,

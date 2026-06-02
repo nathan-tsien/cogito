@@ -4,13 +4,27 @@
 //! directories. Confinement and the absent-workspace case surface as
 //! structured `ToolResult::Error`.
 
+use std::path::Path;
+
 use async_trait::async_trait;
 use cogito_protocol::ExecCtx;
 use cogito_protocol::tool::{ExecutionClass, ToolDescriptor, ToolErrorKind, ToolResult};
-use cogito_protocol::workspace::WorkspaceError;
+use cogito_protocol::workspace::{DirEntry, WorkspaceError};
 use serde::Deserialize;
 
 use crate::provider::BuiltinTool;
+
+/// List a host directory directly (the read-only skill-root branch, ADR-0032).
+async fn read_dir_entries(dir: &Path) -> std::io::Result<Vec<DirEntry>> {
+    let mut rd = tokio::fs::read_dir(dir).await?;
+    let mut out = Vec::new();
+    while let Some(entry) = rd.next_entry().await? {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
+        out.push(DirEntry { name, is_dir });
+    }
+    Ok(out)
+}
 
 /// Stateless lister; `ListDir::default()` yields the canonical instance.
 #[derive(Debug, Default, Clone, Copy)]
@@ -55,31 +69,48 @@ impl BuiltinTool for ListDir {
                 };
             }
         };
-        let Some(workspace) = ctx.workspace else {
-            return ToolResult::Error {
-                kind: ToolErrorKind::InvocationFailed,
-                message: "list_dir: no workspace is configured for this session".into(),
-                retryable: false,
+        // Read-only skill-root scope (ADR-0032): a directory within a
+        // registered skill bundle is listed in place from the host, bypassing
+        // the workspace. Checked before the workspace branch.
+        let mut entries =
+            if let Some(abs) = crate::skill_scope::resolve_in_roots(&path, &ctx.skill_roots) {
+                match read_dir_entries(&abs).await {
+                    Ok(e) => e,
+                    Err(e) => {
+                        return ToolResult::Error {
+                            kind: ToolErrorKind::InvocationFailed,
+                            message: format!("list_dir: cannot list {path}: {e}"),
+                            retryable: false,
+                        };
+                    }
+                }
+            } else {
+                let Some(workspace) = ctx.workspace else {
+                    return ToolResult::Error {
+                        kind: ToolErrorKind::InvocationFailed,
+                        message: "list_dir: no workspace is configured for this session".into(),
+                        retryable: false,
+                    };
+                };
+                match workspace.list(&path).await {
+                    Ok(e) => e,
+                    // A path that escapes the root is bad input the model can fix.
+                    Err(e @ WorkspaceError::PathEscapesRoot(_)) => {
+                        return ToolResult::Error {
+                            kind: ToolErrorKind::InvalidArgs,
+                            message: format!("list_dir: {e}"),
+                            retryable: false,
+                        };
+                    }
+                    Err(e) => {
+                        return ToolResult::Error {
+                            kind: ToolErrorKind::InvocationFailed,
+                            message: format!("list_dir: {e}"),
+                            retryable: false,
+                        };
+                    }
+                }
             };
-        };
-        let mut entries = match workspace.list(&path).await {
-            Ok(e) => e,
-            // A path that escapes the root is bad input the model can fix.
-            Err(e @ WorkspaceError::PathEscapesRoot(_)) => {
-                return ToolResult::Error {
-                    kind: ToolErrorKind::InvalidArgs,
-                    message: format!("list_dir: {e}"),
-                    retryable: false,
-                };
-            }
-            Err(e) => {
-                return ToolResult::Error {
-                    kind: ToolErrorKind::InvocationFailed,
-                    message: format!("list_dir: {e}"),
-                    retryable: false,
-                };
-            }
-        };
         // Deterministic order: sort by name (the seam leaves order unspecified).
         entries.sort_by(|a, b| a.name.cmp(&b.name));
         let listing = entries
