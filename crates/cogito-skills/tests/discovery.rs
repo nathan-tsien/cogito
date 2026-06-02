@@ -251,6 +251,85 @@ fn cross_scope_repo_wins_over_user() {
 }
 
 #[test]
+fn repo_and_plugin_same_name_coexist_via_namespace() {
+    // Sprint 13 closure: a Repo skill and a Plugin skill that declare the SAME
+    // bare `name` must NOT collide. Plugin skills are namespaced
+    // `<plugin_id>:<name>` at discovery (ADR-0021 §3), so the repo skill stays
+    // `review` while the plugin's becomes `acme:review`. Both are independently
+    // registered and resolvable — the namespace makes a cross-scope same-name
+    // "collision" structurally impossible rather than a shadow/tie-break.
+    use cogito_skills::PluginSkillRoot;
+    use std::fs;
+    use tempfile::tempdir;
+
+    let tmp = tempdir().unwrap();
+
+    // Repo scope: .cogito/skills/review with bare name `review`.
+    let repo_skill = tmp.path().join(".cogito").join("skills").join("review");
+    fs::create_dir_all(&repo_skill).unwrap();
+    fs::write(
+        repo_skill.join("SKILL.md"),
+        "---\nname: review\ndescription: from-repo\n---\nrepo body",
+    )
+    .unwrap();
+    fs::create_dir_all(tmp.path().join(".git")).unwrap();
+
+    // Plugin scope: a separate plugin tree whose skill is ALSO named `review`.
+    let plugin_skills = tmp.path().join("acme-plugin").join("skills");
+    let plugin_review = plugin_skills.join("review");
+    fs::create_dir_all(&plugin_review).unwrap();
+    fs::write(
+        plugin_review.join("SKILL.md"),
+        "---\nname: review\ndescription: from-plugin\n---\nplugin body",
+    )
+    .unwrap();
+
+    let reg = SkillRegistry::scan(ScanConfig {
+        workspace_root: Some(tmp.path().to_path_buf()),
+        user_dir: None,
+        include_system: false,
+        plugin_roots: vec![PluginSkillRoot {
+            plugin_id: "acme".into(),
+            dir: plugin_skills,
+        }],
+    })
+    .expect("repo + plugin same-name must not be fatal");
+
+    // Both coexist under distinct effective names.
+    assert!(
+        reg.is_registered("review"),
+        "repo skill keeps its bare name"
+    );
+    assert!(
+        reg.is_registered("acme:review"),
+        "plugin skill is namespaced and coexists"
+    );
+
+    // Each resolves to its own body — neither shadows the other.
+    assert!(
+        reg.get("review").unwrap().body.starts_with("repo body"),
+        "bare name resolves to the repo skill"
+    );
+    assert!(
+        reg.get("acme:review")
+            .unwrap()
+            .body
+            .starts_with("plugin body"),
+        "namespaced name resolves to the plugin skill"
+    );
+
+    let reviews = reg
+        .list()
+        .into_iter()
+        .filter(|m| m.name.ends_with("review"))
+        .count();
+    assert_eq!(
+        reviews, 2,
+        "both same-named skills are effective, not deduped"
+    );
+}
+
+#[test]
 fn registry_list_is_sorted_by_name() {
     let cfg = ScanConfig {
         workspace_root: Some(fixtures()),

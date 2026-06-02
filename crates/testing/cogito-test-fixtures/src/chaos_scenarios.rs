@@ -40,6 +40,7 @@ pub fn all() -> Vec<ChaosScenario> {
         paused_async_job(),
         thinking_then_text_then_tool(),
         text_then_skill_then_tool(),
+        plugin_skill_then_tool(),
     ]
 }
 
@@ -331,6 +332,81 @@ pub fn text_then_skill_then_tool() -> ChaosScenario {
                 ModelEvent::TextBlockCompleted {
                     block_index: 0,
                     text: "Sure, $foo please. ".into(),
+                },
+                ModelEvent::ToolUseStarted {
+                    block_index: 1,
+                    call_id: "c1".into(),
+                    tool_name: "read_file".into(),
+                },
+                ModelEvent::ToolUseCompleted {
+                    block_index: 1,
+                    call_id: "c1".into(),
+                    tool_name: "read_file".into(),
+                    args: serde_json::json!({"path": "/etc/hostname"}),
+                },
+                ModelEvent::MessageCompleted {
+                    stop_reason: StopReason::ToolUse,
+                    usage: Usage {
+                        input_tokens: 50,
+                        output_tokens: 20,
+                    },
+                },
+            ],
+            // Call 2 (post-tool): assistant emits the final turn 1 reply,
+            // EndTurn.
+            vec![
+                ModelEvent::TextDelta {
+                    block_index: 0,
+                    chunk: "Done reading.".into(),
+                },
+                ModelEvent::TextBlockCompleted {
+                    block_index: 0,
+                    text: "Done reading.".into(),
+                },
+                ModelEvent::MessageCompleted {
+                    stop_reason: StopReason::EndTurn,
+                    usage: Usage {
+                        input_tokens: 75,
+                        output_tokens: 10,
+                    },
+                },
+            ],
+        ],
+        uses_async_job: false,
+    }
+}
+
+/// Scenario 7: identical control flow to `text_then_skill_then_tool`, but the
+/// activated skill is a **plugin-loaded** skill addressed by its namespaced
+/// name `$acme:review` (ADR-0021 §3: plugin skills register as
+/// `<plugin_id>:<name>`; the sigil regex admits `:`). The chaos runner wires a
+/// `SkillProvider` whose single skill carries `SkillSource::Plugin`, so a crash
+/// while that plugin skill is mid-activation exercises the same H06 sigil /
+/// H11 injection idempotency path with a Plugin-scoped source. Added for
+/// Sprint 13 (v0.2 hardening).
+///
+/// As with scenario 6, the runner lives inline in
+/// `cogito-core/tests/resume_chaos.rs`: `model_scripts[0]` drives turn 1 call 1
+/// (sigil text + tool use), `model_scripts[1]` drives turn 1 call 2 (after the
+/// tool result), and turn 2's single model call is scripted inline.
+#[must_use]
+pub fn plugin_skill_then_tool() -> ChaosScenario {
+    ChaosScenario {
+        name: "plugin_skill_then_tool",
+        user_input: vec![ContentBlock::Text {
+            text: "please use $acme:review".into(),
+        }],
+        model_scripts: vec![
+            // Call 1: assistant emits a namespaced-sigil text block, then a
+            // tool_use, stop_reason=tool_use.
+            vec![
+                ModelEvent::TextDelta {
+                    block_index: 0,
+                    chunk: "Sure, $acme:review please. ".into(),
+                },
+                ModelEvent::TextBlockCompleted {
+                    block_index: 0,
+                    text: "Sure, $acme:review please. ".into(),
                 },
                 ModelEvent::ToolUseStarted {
                     block_index: 1,

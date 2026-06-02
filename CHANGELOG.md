@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-02
+
+**v0.2 Extensibility.** Pack domain capabilities into shippable units and
+serve many tenants from one process. Subagents arrive in minimal form
+(synchronous `delegate`), per-session provider injection (`SessionSpec` /
+`open_session_with`) lets one process give every tenant its own
+tool/skill/strategy surface, and a local-path Plugin loader bundles Skills
++ MCP servers behind a single namespaced directory. A subsequent
+Skill-support + Workspace workstream then made Skills fully operational:
+the `Workspace` seam, a builtin file/search tool catalog
+(`write_file` / `list_dir` / `edit` / `grep` / `glob`), and skill-bundle
+reachability so an activated skill can reach its bundled files and run its
+scripts. Brain (H01–H11) stays unchanged throughout; all event-log changes
+are additive — no `ConversationEvent` `SCHEMA_VERSION` bump. See the
+per-sprint entries below.
+
+### Sprint 13 · v0.2 hardening (2026-06-02)
+
+**Added**
+
+- `cogito-plugin`: `plugin.id` format validation (`[a-z0-9-]+`, ADR-0021 §1)
+  enforced in the manifest parser via the new `PluginError::InvalidId`
+  variant (empty or out-of-charset ids are rejected for both the
+  `.cogito-plugin/plugin.toml` and `.claude-plugin/plugin.json` paths).
+  Closes the Sprint 12 deferred follow-up.
+- `cogito-skills`: `repo_and_plugin_same_name_coexist_via_namespace` test —
+  pins that a Repo skill and a Plugin skill declaring the same bare name do
+  not collide, because plugin skills are namespaced `<plugin_id>:<name>`
+  (ADR-0021 §3): a repo `review` and a plugin `acme:review` are both
+  registered and independently resolvable.
+- Resume-chaos: new `plugin_skill_then_tool` scenario — a plugin-loaded
+  skill (`SkillSource::Plugin`, addressed via the `$acme:review` namespaced
+  sigil) activates across a two-turn flow with `PanicAt` crash injection at
+  both `ModelCallCompleted` boundaries. All four oracles plus the
+  skill-activation-idempotency oracles pass, proving the H06 sigil / H11
+  injection path is source-agnostic under resume.
+
+**Notes**
+
+- The skill chaos helpers (`build_skill_runtime` / `skill_run_to_completion`
+  / `skill_run_with_y_fault` / `assert_turn2_suffix_has_skill_body`) were
+  parameterized by `SkillProvider` + skill name so the User-scope
+  (`text_then_skill_then_tool`) and Plugin-scope (`plugin_skill_then_tool`)
+  scenarios share one code path.
+- **Carried forward to v0.3:** the Sprint 4 MCP happy-path integration test
+  (live streamable-HTTP server, bearer auth, `tools/list` + `tools/call`
+  end-to-end) remains deferred — it needs an in-process MCP test-server
+  fixture that does not yet exist. Resilience invariants are already covered
+  (`crates/cogito-mcp/tests/integration.rs`).
+
+### Complete Skill Support + Workspace seam (2026-06-01)
+
+Unplanned but coherent workstream (PRs #35–#52) that closed the gap between
+"a Skill injects instructions" and "a Skill can reach its bundled files, run
+its scripts, and write artifacts" — identically across the Local (CLI/TUI)
+and SaaS profiles. Design:
+`docs/superpowers/specs/2026-06-01-complete-skill-support-design.md`.
+
+**Added**
+
+- **`Workspace` seam** (ADR-0030): the `Workspace` trait + `LocalWorkspace`
+  host-filesystem implementation, threaded through `ExecCtx`. File tools
+  read and write through the seam rather than touching the host directly,
+  so the SaaS profile can swap in an isolated per-tenant workspace.
+- **Workspace provisioning & scoping** (ADR-0031): TUI vs SaaS provisioning
+  rules; bash/job execution cwd unified on the session workspace root (§5).
+- **Builtin file/search tool catalog** over the Workspace seam: `write_file`,
+  `list_dir`, `edit`, `grep`, `glob`. `read_file` migrated onto the seam.
+  File tools wired into the TUI.
+- **Skill bundled-file path exposure** (ADR-0029): `SkillContent.root` points
+  at the activated skill's own directory so the model can resolve relative
+  references in the body (`scripts/`, etc.).
+- **Skill-bundle reachability** (ADR-0032): `ExecCtx.skill_roots` plus a
+  read-only skill-root scope for `read_file` / `list_dir`, turned on, so an
+  activated skill's bundled files are readable without widening the writable
+  workspace.
+- **Skill runtime dependencies** (ADR-0033): no custom descriptor — runtime
+  deps reuse existing mechanisms. ADR-0023 (bundled-script execution)
+  finalized with a script-bearing-skill end-to-end test.
+
+**Changed**
+
+- Duplicate skill name within a scope is non-fatal and resolved by
+  precedence (alphabetically-first directory wins the tie), mirroring the
+  non-fatal MCP duplicate handling.
+
 ### Sprint 12 · Per-session injection (ADR-0028) + plugin loader (ADR-0021) — v0.2 (2026-05-31)
 
 **Added**
@@ -51,8 +137,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SCHEMA_VERSION` bump.
 - ADR-0028 pulls one slice of the v0.4 "SaaS-ready" theme forward on explicit
   consumer direction; fully self-describing multi-replica resume remains v0.4.
-- Deferred follow-up: `plugin.id` format (`[a-z0-9-]+`, ADR-0021 §1) is not
-  yet enforced in the manifest parser.
+- Deferred follow-up: `plugin.id` format (`[a-z0-9-]+`, ADR-0021 §1) was not
+  yet enforced in the manifest parser at Sprint 12 — closed in Sprint 13
+  (see `PluginError::InvalidId` above).
 
 ### Sprint 11 · Subagent (S2 minimal) — v0.2 (2026-05-30)
 

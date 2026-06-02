@@ -1143,6 +1143,51 @@ impl cogito_protocol::skill::SkillProvider for StaticFooSkillProvider {
     }
 }
 
+/// Single-skill `SkillProvider` whose one skill is **plugin-loaded**: it
+/// registers under the namespaced name `acme:review` with
+/// `SkillSource::Plugin { plugin_id: "acme" }` (ADR-0021 §3). Drives the
+/// `plugin_skill_then_tool` chaos scenario.
+struct StaticPluginSkillProvider;
+
+const PLUGIN_SKILL_NAME: &str = "acme:review";
+const PLUGIN_SKILL_BODY: &str =
+    "## review\n\nA plugin-loaded test skill body used by the chaos scenario.";
+const PLUGIN_SKILL_DESCRIPTION: &str = "Plugin test skill 'acme:review' for chaos coverage.";
+
+impl cogito_protocol::skill::SkillProvider for StaticPluginSkillProvider {
+    fn list(&self) -> Vec<cogito_protocol::skill::SkillMetadata> {
+        vec![cogito_protocol::skill::SkillMetadata {
+            name: PLUGIN_SKILL_NAME.into(),
+            description: PLUGIN_SKILL_DESCRIPTION.into(),
+            source: cogito_protocol::skill::SkillSource::Plugin {
+                plugin_id: "acme".into(),
+            },
+            disable_model_invocation: false,
+            user_invocable: true,
+            version: None,
+        }]
+    }
+
+    fn get(&self, name: &str) -> Option<cogito_protocol::skill::SkillContent> {
+        if name == PLUGIN_SKILL_NAME {
+            Some(cogito_protocol::skill::SkillContent {
+                name: PLUGIN_SKILL_NAME.into(),
+                source: cogito_protocol::skill::SkillSource::Plugin {
+                    plugin_id: "acme".into(),
+                },
+                body: PLUGIN_SKILL_BODY.into(),
+                root: None,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn is_registered(&self, name: &str) -> bool {
+        name == PLUGIN_SKILL_NAME
+    }
+}
+
 /// Strategy with H11 `SystemPromptInjectorConfig::Skill`. Other slots are the
 /// defaults from `default_with_model("mock")`.
 fn skill_strategy() -> HarnessStrategy {
@@ -1178,7 +1223,7 @@ fn build_skill_chaos_model(scenario: &ChaosScenario) -> ScriptedMockModel {
             },
         ),
         (
-            InputMatcher::LastUserTextContains("please use $foo".into()),
+            InputMatcher::LastUserTextContains(extract_user_text(scenario)),
             OutputScript {
                 events: scenario.model_scripts[0].clone(),
             },
@@ -1218,10 +1263,10 @@ fn turn2_reply_script() -> Vec<cogito_protocol::gateway::ModelEvent> {
 fn build_skill_runtime(
     store: Arc<dyn ConversationStore>,
     scenario: &ChaosScenario,
+    skills: Arc<dyn cogito_protocol::skill::SkillProvider>,
 ) -> Arc<Runtime> {
     let mock = Arc::new(build_skill_chaos_model(scenario));
     let tools = Arc::new(MockToolProvider);
-    let skills: Arc<dyn cogito_protocol::skill::SkillProvider> = Arc::new(StaticFooSkillProvider);
     Runtime::builder()
         .store(store)
         .model(mock as Arc<dyn ModelGateway>)
@@ -1234,10 +1279,13 @@ fn build_skill_runtime(
 
 /// Drive both turns of the skill scenario to completion (no faults) and
 /// return the full event log.
-async fn skill_run_to_completion(scenario: &ChaosScenario) -> GoldenRun {
+async fn skill_run_to_completion(
+    scenario: &ChaosScenario,
+    skills: Arc<dyn cogito_protocol::skill::SkillProvider>,
+) -> GoldenRun {
     let tmp = tempfile::tempdir().expect("tempdir");
     let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
-    let runtime = build_skill_runtime(Arc::clone(&store), scenario);
+    let runtime = build_skill_runtime(Arc::clone(&store), scenario, skills);
 
     let session_id = SessionId::new();
     let handle = runtime
@@ -1248,7 +1296,7 @@ async fn skill_run_to_completion(scenario: &ChaosScenario) -> GoldenRun {
 
     // Turn 1: sigil text + tool.
     handle
-        .submit_user_text("please use $foo")
+        .submit_user_text(&extract_user_text(scenario))
         .await
         .expect("submit_user_text turn 1");
     wait_for_turn_completed_twice(&handle).await;
@@ -1316,6 +1364,7 @@ async fn skill_run_with_y_fault(
     scenario: &ChaosScenario,
     crash_after_n: u64,
     turn1_total: u64,
+    skills: Arc<dyn cogito_protocol::skill::SkillProvider>,
 ) -> Vec<ConversationEvent> {
     let tmp = tempfile::tempdir().expect("tempdir");
     let session_id = SessionId::new();
@@ -1325,7 +1374,7 @@ async fn skill_run_with_y_fault(
     let wrapper1: Arc<FaultInjectingStore<JsonlStore>> =
         Arc::new(FaultInjectingStore::new(Arc::clone(&inner1)));
     let store1: Arc<dyn ConversationStore> = Arc::clone(&wrapper1) as Arc<dyn ConversationStore>;
-    let runtime1 = build_skill_runtime(store1, scenario);
+    let runtime1 = build_skill_runtime(store1, scenario, Arc::clone(&skills));
     let handle1 = runtime1
         .open_session(session_id, OpenMode::New)
         .await
@@ -1343,7 +1392,7 @@ async fn skill_run_with_y_fault(
         .await;
 
     handle1
-        .submit_user_text("please use $foo")
+        .submit_user_text(&extract_user_text(scenario))
         .await
         .expect("submit_user_text turn 1");
 
@@ -1417,7 +1466,7 @@ async fn skill_run_with_y_fault(
     // ----- Phase 2: fresh Runtime, same on-disk JSONL, Resume mode. -----
     let inner2: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
     let store2: Arc<dyn ConversationStore> = inner2.clone();
-    let runtime2 = build_skill_runtime(Arc::clone(&store2), scenario);
+    let runtime2 = build_skill_runtime(Arc::clone(&store2), scenario, Arc::clone(&skills));
 
     let handle2 = runtime2
         .open_session(session_id, OpenMode::Resume)
@@ -1527,8 +1576,9 @@ fn turn1_event_count(events: &[ConversationEvent]) -> u64 {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn text_then_skill_then_tool() {
     let scenario = chaos_scenarios::text_then_skill_then_tool();
+    let skills: Arc<dyn cogito_protocol::skill::SkillProvider> = Arc::new(StaticFooSkillProvider);
 
-    let golden = skill_run_to_completion(&scenario).await;
+    let golden = skill_run_to_completion(&scenario, Arc::clone(&skills)).await;
     let turn1_total = turn1_event_count(&golden.events);
 
     eprintln!(
@@ -1540,7 +1590,7 @@ async fn text_then_skill_then_tool() {
     // contain exactly one SkillActivated{name=foo} and turn 2's
     // SystemPromptInjected must carry the <skill name="foo"> body.
     assert_skill_activated_once(&golden.events, "foo");
-    assert_turn2_suffix_has_skill_body(&golden.events);
+    assert_turn2_suffix_has_skill_body(&golden.events, "foo");
 
     let (b1, b2) = skill_crash_boundaries(&golden.events);
     let b1 = b1.expect("golden must contain at least one EndTurn ModelCallCompleted (turn 1)");
@@ -1556,7 +1606,9 @@ async fn text_then_skill_then_tool() {
     );
 
     for &crash_after_n in &[b1, b2] {
-        let resumed = skill_run_with_y_fault(&scenario, crash_after_n, turn1_total).await;
+        let resumed =
+            skill_run_with_y_fault(&scenario, crash_after_n, turn1_total, Arc::clone(&skills))
+                .await;
         eprintln!(
             "  skill chaos: crash_after_n={crash_after_n} resumed_len={}",
             resumed.len()
@@ -1574,7 +1626,73 @@ async fn text_then_skill_then_tool() {
         // Skill-specific oracle: the final suffix in the resumed log still
         // carries the skill body (proves SystemPromptInjected was written
         // exactly once after resume).
-        assert_turn2_suffix_has_skill_body(&resumed);
+        assert_turn2_suffix_has_skill_body(&resumed, "foo");
+    }
+}
+
+// === Sprint 13: plugin_skill_then_tool chaos scenario =======================
+//
+// Identical mechanics to `text_then_skill_then_tool`, but the activated skill
+// is plugin-loaded: it carries `SkillSource::Plugin { plugin_id: "acme" }` and
+// is addressed by its namespaced name `acme:review` via the `$acme:review`
+// sigil (ADR-0021 §3 — the sigil regex admits `:`). The same two
+// `ResumeFromModelCompleted`-compatible crash boundaries are exercised; a crash
+// while the plugin skill is mid-activation must still leave exactly one
+// `SkillActivated{acme:review}` and one skill-body `SystemPromptInjected` after
+// resume. This proves the H06 sigil / H11 injection idempotency path is
+// source-agnostic (Plugin scope behaves like User/Repo scope under resume).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plugin_skill_then_tool() {
+    let scenario = chaos_scenarios::plugin_skill_then_tool();
+    let skills: Arc<dyn cogito_protocol::skill::SkillProvider> =
+        Arc::new(StaticPluginSkillProvider);
+
+    let golden = skill_run_to_completion(&scenario, Arc::clone(&skills)).await;
+    let turn1_total = turn1_event_count(&golden.events);
+
+    eprintln!(
+        "scenario=plugin_skill_then_tool golden_events={} turn1_total={turn1_total}",
+        golden.events.len()
+    );
+
+    // Plugin-skill golden assertions: exactly one SkillActivated{acme:review}
+    // and turn 2's SystemPromptInjected carries the <skill name="acme:review">
+    // body.
+    assert_skill_activated_once(&golden.events, PLUGIN_SKILL_NAME);
+    assert_turn2_suffix_has_skill_body(&golden.events, PLUGIN_SKILL_NAME);
+
+    let (b1, b2) = skill_crash_boundaries(&golden.events);
+    let b1 = b1.expect("golden must contain at least one EndTurn ModelCallCompleted (turn 1)");
+    let b2 = b2.expect("golden must contain at least one EndTurn ModelCallCompleted (turn 2)");
+    assert_ne!(
+        b1, b2,
+        "scenario must produce two distinct EndTurn ModelCallCompleted events; got both at {b1}"
+    );
+
+    eprintln!(
+        "  plugin skill chaos boundaries: b1={b1} (post turn-1 final MCC), \
+         b2={b2} (post turn-2 final MCC)"
+    );
+
+    for &crash_after_n in &[b1, b2] {
+        let resumed =
+            skill_run_with_y_fault(&scenario, crash_after_n, turn1_total, Arc::clone(&skills))
+                .await;
+        eprintln!(
+            "  plugin skill chaos: crash_after_n={crash_after_n} resumed_len={}",
+            resumed.len()
+        );
+
+        assert_context_managed_pairing(&resumed);
+        assert_prefix_immutable(&golden.events, &resumed, crash_after_n);
+        assert_terminal_equivalent(&golden.terminal, terminal_payload(&resumed));
+        assert_tool_mapping_equivalent(&golden.events, &resumed);
+        assert_final_text_equivalent(&golden.events, &resumed);
+
+        // Plugin-skill oracles: exactly one SkillActivated{acme:review} and the
+        // skill body still injected exactly once after resume.
+        assert_skill_activated_once(&resumed, PLUGIN_SKILL_NAME);
+        assert_turn2_suffix_has_skill_body(&resumed, PLUGIN_SKILL_NAME);
     }
 }
 
@@ -1599,7 +1717,7 @@ fn assert_skill_activated_once(events: &[ConversationEvent], name: &str) {
 /// Assert that the last `SystemPromptInjected.suffix` in the log contains
 /// the XML-wrapped skill body (i.e. turn 2 successfully injected the
 /// activated skill).
-fn assert_turn2_suffix_has_skill_body(events: &[ConversationEvent]) {
+fn assert_turn2_suffix_has_skill_body(events: &[ConversationEvent], name: &str) {
     let last_suffix = events
         .iter()
         .rev()
@@ -1608,9 +1726,10 @@ fn assert_turn2_suffix_has_skill_body(events: &[ConversationEvent]) {
             _ => None,
         })
         .expect("at least one SystemPromptInjected in log");
+    let needle = format!("<skill name=\"{name}\"");
     assert!(
-        last_suffix.contains("<skill name=\"foo\""),
-        "expected final suffix to contain skill body, got: {last_suffix}"
+        last_suffix.contains(&needle),
+        "expected final suffix to contain skill body for {name}, got: {last_suffix}"
     );
 }
 

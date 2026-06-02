@@ -75,6 +75,16 @@ pub enum PluginError {
         /// Underlying parse error.
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    /// A plugin id does not match the required `[a-z0-9-]+` format.
+    #[error(
+        "invalid plugin id `{id}` at {path}: must match [a-z0-9-]+ (lowercase letters, digits, hyphens; non-empty)"
+    )]
+    InvalidId {
+        /// The offending id.
+        id: String,
+        /// Manifest directory the id was declared in.
+        path: PathBuf,
+    },
     /// Two plugins declared the same id.
     #[error("duplicate plugin id `{id}` (declared at {first} and {second})")]
     DuplicateId {

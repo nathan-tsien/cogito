@@ -368,7 +368,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cogito-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cogito-jobs",
@@ -421,7 +421,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-context"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -437,7 +437,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-jobs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cogito-core",
@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cogito-protocol",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-mock-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -543,7 +543,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cogito-mcp",
  "cogito-protocol",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -601,7 +601,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-sandbox"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cogito-protocol",
@@ -613,7 +613,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-skills"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cogito-protocol",
  "regex",
@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-strategy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cogito-protocol",
  "cogito-test-fixtures",
@@ -662,7 +662,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-test-fixtures"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -680,7 +680,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-tools"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "cogito-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
