@@ -208,4 +208,15 @@ impl SkillProvider for SkillRegistry {
     fn get_metadata(&self, name: &str) -> Option<SkillMetadata> {
         self.by_name.get(name).map(|r| r.metadata.clone())
     }
+
+    fn skill_roots(&self) -> Vec<std::path::PathBuf> {
+        // Each skill's own directory; dedup + sort for a deterministic,
+        // stable set (HashMap order is arbitrary). Distinct skills normally
+        // have distinct dirs, but dedup keeps the contract honest.
+        let mut roots: Vec<std::path::PathBuf> =
+            self.by_name.values().map(|r| r.root.clone()).collect();
+        roots.sort();
+        roots.dedup();
+        roots
+    }
 }

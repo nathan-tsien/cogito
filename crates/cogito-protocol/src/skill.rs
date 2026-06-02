@@ -32,6 +32,15 @@ pub trait SkillProvider: Send + Sync {
     fn get_metadata(&self, name: &str) -> Option<SkillMetadata> {
         self.list().into_iter().find(|m| m.name == name)
     }
+
+    /// Absolute on-disk roots of registered skills that have a bundle, deduped.
+    /// The Runtime injects these into `ExecCtx.skill_roots` (ADR-0032) so the
+    /// read-class file tools can read bundled files in place. MUST be cheap (no
+    /// I/O). Default: none — for providers whose skills carry no on-disk bundle
+    /// (e.g. embedded `System` skills). `SkillRegistry` overrides it.
+    fn skill_roots(&self) -> Vec<std::path::PathBuf> {
+        Vec::new()
+    }
 }
 
 /// Lightweight skill descriptor (no body) — used for the system-prompt
