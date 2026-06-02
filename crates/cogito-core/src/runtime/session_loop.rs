@@ -484,8 +484,13 @@ fn spawn_turn_driver(
         subagent_depth: state.subagent_depth,
         brain_spawner: deps.brain_spawner.clone(),
         workspace: deps.workspace.clone(),
-        // Wired from SessionDeps in increment 2 (ADR-0032); empty for now.
-        skill_roots: std::sync::Arc::from([]),
+        // Read-only skill bundle roots (ADR-0032), derived from the session's
+        // current skill provider (override-aware via `apply_session_update`).
+        // Empty when no skills are wired or the provider exposes none.
+        skill_roots: state.skills.as_ref().map_or_else(
+            || std::sync::Arc::from([]),
+            |s| std::sync::Arc::from(s.skill_roots()),
+        ),
     };
     let ctx = TurnCtx {
         session_id: state.session_id,
