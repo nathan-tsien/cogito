@@ -321,7 +321,13 @@ signed URL).
   registered skill dirs; no Local copy; body injection unchanged; SaaS physical
   placement deferred to Phase 3). Aligns with how Claude Code / Codex reach
   bundles in place. **Phase 2.**
-- New — skill runtime/dependency descriptor. **Phase 2.**
+- ADR-0033 (proposed) — skill runtime dependencies: decided **not** to invent
+  a custom descriptor (the Agent Skills standard defines no `runtime`/`requires`
+  — only the free-text `compatibility` field; deps live in prose). Local =
+  agent self-heal via `bash` (ADR-0023 Position A); SaaS = pre-baked runtime
+  image (popular tools + skill-declared libs, out-of-band image build) +
+  optional activation fast-fail; safe cogito-driven auto-install deferred to
+  Phase 3 (sandbox / ADR-0012). No code change in v0.2. **Phase 2.**
 - New — artifact production & delivery (`ArtifactProduced`, blob namespace,
   delivery). **Phase 4** (event可 land earlier).
 - Extend ADR-0028 — `SessionSpec` workspace + storage namespace + tenant
