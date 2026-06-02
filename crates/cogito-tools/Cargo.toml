@@ -11,6 +11,7 @@ cogito-protocol = { workspace = true }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
 futures = { workspace = true }
+globset = { workspace = true }
 htmd = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }

@@ -466,6 +466,7 @@ async fn build_tool_provider(
             .with_tool(Arc::new(cogito_tools::ListDir))
             .with_tool(Arc::new(cogito_tools::Edit))
             .with_tool(Arc::new(cogito_tools::Grep))
+            .with_tool(Arc::new(cogito_tools::Glob))
             .with_tool(Arc::new(cogito_tools::WebFetch::new(
                 cfg.tools.web_fetch.clone(),
             )))
