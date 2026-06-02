@@ -13,6 +13,7 @@ specific design hypothesis. Reports live here.
 - E06 — Hook pipeline latency impact (Sprint 6)
 - E07 — Stream interruption and reconnect (TBD)
 - E08 — Prefix cache hit rate (TBD)
+- [Skill Support — Phase 2 end-to-end](./2026-06-02-skill-support-phase2.md) — script-bearing skill (`pptx`) runs end to end; zero Brain change (2026-06-02)
 
 ## Report template
 

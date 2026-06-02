@@ -1,12 +1,19 @@
-# ADR-0023: Bundled-script execution in Skills (deferred design)
+# ADR-0023: Bundled-script execution in Skills (Position A — scripts as data)
 
 ## Status
 
-Proposed — **deliberately deferred** (target finalization: v0.3+ TBD).
+**Accepted — Position A finalized 2026-06-02** (complete-skill-support Phase 1/2;
+spec §5.3). Adopts scripts-as-data + read/run via existing tools. Position B
+(build-time `` !`cmd` `` inlining) and Position C (scripts-as-tools) remain out of
+scope — see Decision.
 
-This ADR exists to **record the deferral and the design space**, not
-to make a decision. Created during the 2026-05-22 roadmap rebalance
+This ADR was created during the 2026-05-22 roadmap rebalance as a **deliberate
+deferral** that recorded the design space without choosing
 (see [spec §2.6 B-defer](../superpowers/specs/2026-05-22-roadmap-rebalance-design.md)).
+That deferral text is preserved below as history; the finalized decision is in
+**Decision**. The trigger to revisit ("a concrete use case surfaces") was met: the
+complete-skill-support design (ADR-0029/0030/0031/0032/0033) made script-bearing
+skills reachable and runnable, and the `pptx` skill is the concrete consumer.
 
 ## Context
 
@@ -68,13 +75,52 @@ and a sandbox story.
 
 ## Decision
 
-**Defer.** No execution path implemented in v0.1 or v0.2. The format
-is **read-compatible**: SKILL.md files written for Claude Code or
-Codex load successfully into cogito, but their `scripts/` content is
-inert until this ADR is finalized.
+**Adopt Position A: scripts as data, read and run via the existing tools.** A
+skill's `scripts/` files are reached with `read_file` and executed with `bash`;
+the loader does not execute anything. Position B and Position C stay out of scope
+(B unless `` !`cmd` `` becomes a portable agentskills.io standard; C is a Phase-5
+ergonomic upgrade). This is the same model Claude Code and Codex use
+(progressive disclosure + read/run in place), and it required **no Brain change**
+— it composes seams that already exist.
 
-The B-defer position is recorded as a placeholder so the question is
-**explicitly open** rather than silently ignored.
+The pieces that make Position A real (all shipped):
+
+- **Reach** — `read_file`/`list_dir` resolve a bundled file by its absolute
+  skill-root path through the read-only skill-root scope (**ADR-0032**;
+  `ExecCtx.skill_roots`, wired from `SkillProvider::skill_roots()`).
+- **Run** — the `bash` tool (`cogito-jobs::BashTool`) runs commands through the
+  injected `CommandExecutor` (**ADR-0027**); with no explicit `cwd` it runs in the
+  **workspace root** (**ADR-0031 §5** exec-cwd unification), so script output
+  lands in the session workspace, not the bundle.
+- **Locate** — the activated skill's bundle root is surfaced to the model in the
+  `<skill root="...">` header (**ADR-0029**), so SKILL.md's relative `scripts/…`
+  references resolve.
+- **Dependencies** — host runtime/packages are handled by the agent loop
+  (self-heal via `bash`) in Local and by the pre-baked image in SaaS
+  (**ADR-0033**); cogito declares no custom descriptor.
+
+End-to-end coverage: `crates/cogito-jobs/tests/skill_script_e2e.rs` drives a
+Runtime turn that `read_file`s a bundled script then `bash`-runs it, asserting the
+artifact is produced in the workspace. The `pptx` skill is exercised manually in
+`docs/experiments/2026-06-02-skill-support-phase2.md`.
+
+Resolving the original **open design questions**:
+
+1. *Which position?* **A only.** Implicit-invocation-by-script-path (Codex's
+   trick) is **not** implemented — explicit `$Skill` sigil + model-invocation
+   suffice; revisit if a need appears.
+2. *Sandbox boundary?* Local = `DirectExecutor` subprocess via the
+   `CommandExecutor` seam; SaaS = sandbox executor in Phase 3 (ADR-0012). No
+   Sandbox v2 lifecycle needed — the seam was enough.
+3. *Permission model?* The `bash` tool is gated like any tool: the tool-allow set
+   + Hooks (H09) + the `[tools].bash` / `[skills]` config. Global off = do not
+   register `bash` (or disable skills).
+4. *Position C parameter schema?* N/A — C is deferred (Phase 5).
+5. *Output capture?* `bash` returns a structured `{ stdout, stderr, exit_code }`
+   payload; limits/streaming are the executor's concern.
+
+The format remains **read-compatible**: SKILL.md files written for Claude Code or
+Codex load and now also *run* their scripts via Position A.
 
 ## When to revisit
 
@@ -90,7 +136,10 @@ Revisit this ADR when **any one** of the following triggers:
   spec (turning it into a portable standard rather than a Claude-Code
   extension)
 
-## Open design questions (for whichever sprint finalizes this ADR)
+## Open design questions (resolved at finalization — see Decision)
+
+These were the questions left open by the deferral; their answers are recorded in
+**Decision** above. Preserved here for the original framing.
 
 1. Which position(s)? A is cheapest; B is most user-friendly; C is
    most powerful. Combinations are possible (e.g., A + B but not C).
