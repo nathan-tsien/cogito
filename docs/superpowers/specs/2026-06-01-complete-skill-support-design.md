@@ -310,9 +310,17 @@ signed URL).
 
 ## 7. ADR ledger
 
-- ADR-0029 (new, drafted) — bundled-file path exposure. **Phase 0.**
+- ADR-0029 (drafted, implemented) — bundled-file path exposure. **Phase 0.**
 - ADR-0023 (finalize) — adopt Position A baseline. **Phase 1.**
-- New — `Workspace` seam + file-mutation tools. **Phase 1.**
+- ADR-0030 / ADR-0031 (drafted, implemented) — `Workspace` seam +
+  provisioning/scoping + exec-cwd unification; the file-mutation tool set
+  (`read_file` migrated, `write_file`/`list_dir`/`edit`/`grep`/`glob`).
+  **Phase 1.**
+- ADR-0032 (proposed) — skill-bundle reachability via a read-only skill-root
+  scope (`ExecCtx.skill_roots`; `read_file`/`list_dir`/`exists` resolve into
+  registered skill dirs; no Local copy; body injection unchanged; SaaS physical
+  placement deferred to Phase 3). Aligns with how Claude Code / Codex reach
+  bundles in place. **Phase 2.**
 - New — skill runtime/dependency descriptor. **Phase 2.**
 - New — artifact production & delivery (`ArtifactProduced`, blob namespace,
   delivery). **Phase 4** (event可 land earlier).
