@@ -57,31 +57,50 @@ impl BuiltinTool for ReadFile {
                 };
             }
         };
-        let Some(workspace) = ctx.workspace else {
-            return ToolResult::Error {
-                kind: ToolErrorKind::InvocationFailed,
-                message: "read_file: no workspace is configured for this session".into(),
-                retryable: false,
+        // Read-only skill-root scope (ADR-0032): a path resolving within a
+        // registered skill bundle is read in place from the host, bypassing the
+        // workspace. Checked before the workspace branch so the model can read
+        // bundled files by the absolute root from the `<skill root="...">`
+        // header.
+        let mut bytes =
+            if let Some(abs) = crate::skill_scope::resolve_in_roots(&path, &ctx.skill_roots) {
+                match tokio::fs::read(&abs).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return ToolResult::Error {
+                            kind: ToolErrorKind::InvocationFailed,
+                            message: format!("read_file: cannot read {path}: {e}"),
+                            retryable: false,
+                        };
+                    }
+                }
+            } else {
+                let Some(workspace) = ctx.workspace else {
+                    return ToolResult::Error {
+                        kind: ToolErrorKind::InvocationFailed,
+                        message: "read_file: no workspace is configured for this session".into(),
+                        retryable: false,
+                    };
+                };
+                match workspace.read(&path).await {
+                    Ok(b) => b,
+                    // A path that escapes the root is bad input the model can fix.
+                    Err(e @ WorkspaceError::PathEscapesRoot(_)) => {
+                        return ToolResult::Error {
+                            kind: ToolErrorKind::InvalidArgs,
+                            message: format!("read_file: {e}"),
+                            retryable: false,
+                        };
+                    }
+                    Err(e) => {
+                        return ToolResult::Error {
+                            kind: ToolErrorKind::InvocationFailed,
+                            message: format!("read_file: {e}"),
+                            retryable: false,
+                        };
+                    }
+                }
             };
-        };
-        let mut bytes = match workspace.read(&path).await {
-            Ok(b) => b,
-            // A path that escapes the root is bad input the model can fix.
-            Err(e @ WorkspaceError::PathEscapesRoot(_)) => {
-                return ToolResult::Error {
-                    kind: ToolErrorKind::InvalidArgs,
-                    message: format!("read_file: {e}"),
-                    retryable: false,
-                };
-            }
-            Err(e) => {
-                return ToolResult::Error {
-                    kind: ToolErrorKind::InvocationFailed,
-                    message: format!("read_file: {e}"),
-                    retryable: false,
-                };
-            }
-        };
         let truncated = bytes.len() > MAX_BYTES;
         if truncated {
             bytes.truncate(MAX_BYTES);

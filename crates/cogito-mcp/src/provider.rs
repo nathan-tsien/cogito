@@ -138,6 +138,7 @@ mod tests {
             subagent_depth: 0,
             brain_spawner: None,
             workspace: None,
+            skill_roots: std::sync::Arc::from([]),
         };
         let outcome = provider.invoke("mcp__nope__nope", Value::Null, ctx).await;
         let InvokeOutcome::Sync(ToolResult::Error { kind, .. }) = outcome else {

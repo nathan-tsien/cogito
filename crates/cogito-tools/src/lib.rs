@@ -8,6 +8,7 @@
 pub mod builtins;
 pub mod composite;
 pub mod provider;
+pub(crate) mod skill_scope;
 pub mod workspace;
 
 pub use builtins::{Edit, Glob, Grep, ListDir, ReadFile, WebFetch, WebFetchConfig, WriteFile};
