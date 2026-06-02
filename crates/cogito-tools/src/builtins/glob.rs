@@ -1,10 +1,10 @@
-//! `grep` — search files under the injected `ExecCtx.workspace` (ADR-0030 /
-//! ADR-0031) for lines matching a regular expression. The tree is walked via
-//! `Workspace::list` (not the host filesystem, so any backend works), each
-//! file is read via `Workspace::read`, non-UTF-8 files are skipped, and
-//! matches are emitted as `path:line:text`, sorted by path then line. A bad
-//! regex / escaping path is bad input (`InvalidArgs`); the absent-workspace
-//! case surfaces as a structured error.
+//! `glob` — find files under the injected `ExecCtx.workspace` (ADR-0030 /
+//! ADR-0031) whose path matches a shell-style glob pattern. The tree is walked
+//! via `Workspace::list` (not the host filesystem, so any backend works); the
+//! pattern is matched against each file's path relative to the search root
+//! (`path`, default the workspace root), and the full workspace-relative path
+//! is emitted, sorted. A bad pattern / escaping path is bad input
+//! (`InvalidArgs`); the absent-workspace case surfaces as a structured error.
 
 use std::fmt::Write as _;
 
@@ -12,19 +12,19 @@ use async_trait::async_trait;
 use cogito_protocol::ExecCtx;
 use cogito_protocol::tool::{ExecutionClass, ToolDescriptor, ToolErrorKind, ToolResult};
 use cogito_protocol::workspace::WorkspaceError;
-use regex::Regex;
+use globset::GlobBuilder;
 use serde::Deserialize;
 
 use crate::builtins::walk::collect_files;
 use crate::provider::BuiltinTool;
 
-/// Maximum matches returned per call; beyond this a truncation marker is
-/// appended (mirrors `read_file`'s byte cap, keeps model context bounded).
+/// Maximum paths returned per call; beyond this a truncation marker is
+/// appended (mirrors `grep`'s match cap, keeps model context bounded).
 pub const MAX_MATCHES: usize = 1000;
 
-/// Stateless searcher; `Grep::default()` yields the canonical instance.
+/// Stateless matcher; `Glob::default()` yields the canonical instance.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct Grep;
+pub struct Glob;
 
 #[derive(Debug, Deserialize)]
 struct Args {
@@ -34,15 +34,15 @@ struct Args {
 }
 
 #[async_trait]
-impl BuiltinTool for Grep {
+impl BuiltinTool for Glob {
     fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
-            name: "grep".into(),
-            description: "Search the workspace for lines matching a regular expression. Recurses from `path` (relative to the workspace root; empty searches the whole workspace). Returns `path:line:text` per match. Binary (non-UTF-8) files are skipped.".into(),
+            name: "glob".into(),
+            description: "Find files in the workspace whose path matches a shell glob pattern (supports `**`, `*`, `?`, `{a,b}`, `[..]`). The pattern is relative to `path` (relative to the workspace root; empty searches the whole workspace). Returns matching workspace-relative paths, sorted.".into(),
             schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "pattern": { "type": "string", "description": "Regular expression to match against each line." },
+                    "pattern": { "type": "string", "description": "Shell glob, e.g. `**/*.rs`. `*` does not cross `/`; `**` does." },
                     "path": {
                         "type": "string",
                         "description": "Directory to search, relative to the workspace root; empty or omitted searches the whole workspace. Absolute paths and paths escaping the root are rejected."
@@ -62,17 +62,19 @@ impl BuiltinTool for Grep {
             Err(e) => {
                 return ToolResult::Error {
                     kind: ToolErrorKind::InvalidArgs,
-                    message: format!("grep args: {e}"),
+                    message: format!("glob args: {e}"),
                     retryable: false,
                 };
             }
         };
-        let re = match Regex::new(&pattern) {
-            Ok(r) => r,
+        // `literal_separator(true)` makes `*`/`?` stop at `/`; only `**`
+        // crosses directories — standard shell-glob semantics.
+        let matcher = match GlobBuilder::new(&pattern).literal_separator(true).build() {
+            Ok(g) => g.compile_matcher(),
             Err(e) => {
                 return ToolResult::Error {
                     kind: ToolErrorKind::InvalidArgs,
-                    message: format!("grep: invalid regex: {e}"),
+                    message: format!("glob: invalid pattern: {e}"),
                     retryable: false,
                 };
             }
@@ -80,7 +82,7 @@ impl BuiltinTool for Grep {
         let Some(workspace) = ctx.workspace else {
             return ToolResult::Error {
                 kind: ToolErrorKind::InvocationFailed,
-                message: "grep: no workspace is configured for this session".into(),
+                message: "glob: no workspace is configured for this session".into(),
                 retryable: false,
             };
         };
@@ -90,43 +92,40 @@ impl BuiltinTool for Grep {
             Err(e @ WorkspaceError::PathEscapesRoot(_)) => {
                 return ToolResult::Error {
                     kind: ToolErrorKind::InvalidArgs,
-                    message: format!("grep: {e}"),
+                    message: format!("glob: {e}"),
                     retryable: false,
                 };
             }
             Err(e) => {
                 return ToolResult::Error {
                     kind: ToolErrorKind::InvocationFailed,
-                    message: format!("grep: {e}"),
+                    message: format!("glob: {e}"),
                     retryable: false,
                 };
             }
         };
+        // The pattern is matched against each file's path relative to the
+        // search root; the full workspace-relative path is what we emit.
+        let prefix = if path.is_empty() {
+            String::new()
+        } else {
+            format!("{path}/")
+        };
         let mut out: Vec<String> = Vec::new();
         let mut truncated = false;
-        'files: for file in files {
-            // A file that vanished mid-walk or can't be read is skipped, not
-            // fatal — grep is best-effort over the tree it discovered.
-            let Ok(bytes) = workspace.read(&file).await else {
-                continue;
-            };
-            // Binary (non-UTF-8) files are skipped silently.
-            let Ok(content) = String::from_utf8(bytes) else {
-                continue;
-            };
-            for (i, line) in content.lines().enumerate() {
-                if re.is_match(line) {
-                    out.push(format!("{file}:{}:{line}", i + 1));
-                    if out.len() >= MAX_MATCHES {
-                        truncated = true;
-                        break 'files;
-                    }
+        for file in files {
+            let relative = file.strip_prefix(&prefix).unwrap_or(&file);
+            if matcher.is_match(relative) {
+                out.push(file.clone());
+                if out.len() >= MAX_MATCHES {
+                    truncated = true;
+                    break;
                 }
             }
         }
         let mut text = out.join("\n");
         if truncated {
-            let _ = write!(text, "\n[grep truncated at {MAX_MATCHES} matches]");
+            let _ = write!(text, "\n[glob truncated at {MAX_MATCHES} matches]");
         }
         ToolResult::text(text)
     }
