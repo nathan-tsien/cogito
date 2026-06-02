@@ -153,7 +153,7 @@ Hand; new capability is always a `cogito-protocol` trait injected via
 | Writable working tree | **`Workspace` trait** (new) — rooted read/write/list/glob | `LocalWorkspace` (host); `SandboxWorkspace` (SaaS) | — |
 | File-mutation tools | (use `Workspace`) | `write_file`/`edit`/`glob`/`grep`/`list_dir` in cogito-tools | TUI tool pane |
 | Command execution | `CommandExecutor` (exists, ADR-0027) | `DirectExecutor` (host); sandboxed executor (SaaS, ADR-0012) | — |
-| Dependency runtime | **skill metadata `runtime`/`requires`** (new ADR) | local: host-check; SaaS: runtime image | preflight notice |
+| Dependency runtime | **no custom descriptor** (ADR-0033 — Skills standard has none) | local: agent self-heal via `bash`; SaaS: pre-baked runtime image | — |
 | Artifact storage | `StorageSystem` (v0.5 ADR-0009) + **`ArtifactProduced` event** | `storage-local` (v0.5); `storage-s3` (v0.4) | TUI link / signed URL |
 | Per-tenant isolation | `TenantContext` on `ExecCtx` (v0.4 ADR-0014) | sandbox + cred proxy (ADR-0012/0013) | consumer gateway |
 | Per-session skill+workspace+storage | extend `SessionSpec` (ADR-0028) | caller-composed Arcs | server |
@@ -298,7 +298,7 @@ zero Brain delta; nothing here reopens H01–H11.
 |---|---|---|---|
 | 0 | v0.2 Sprint 13 / patch | ADR-0029: `SkillContent.root` + injector header | Script-bearing skills *readable*; `bash`-run locally if host has deps |
 | 1 | v0.2.x → early v0.3 | `Workspace` seam + `write_file`/`edit`/`glob`/`grep`/`list_dir`; migrate `read_file`; finalize ADR-0023 Position A | Skills can author files & run scripts cleanly (Local profile) |
-| 2 | v0.3 | Skill-bundle materialization; git/plugin skills carry scripts (ADR-0022); dependency descriptor ADR (declare + host-check) | Distributed skills with scripts; explicit deps |
+| 2 | v0.2.x → v0.3 | **Shipped as:** skill-bundle *reachability* via a read-only skill-root scope (ADR-0032, replaced "materialization" for Local — no copy); dependency handling decided with no custom descriptor (ADR-0033 — Local agent self-heal, SaaS image pre-bake; replaced the "declare + host-check" descriptor). git/plugin skills carrying scripts (ADR-0022) stays on the plugin track | Script-bearing skills reachable + runnable (Local); deps handled without forking the Skills standard |
 | 3 | v0.4 (SaaS-ready) | Sandbox executor (ADR-0012) + credential isolation (ADR-0013) + TenantContext (ADR-0014) + `SandboxWorkspace` + per-session workspace/storage namespace (extend ADR-0028) + resource budgets | **SaaS profile real**: untrusted skill scripts run isolated per tenant |
 | 4 | v0.5 | `StorageSystem` + `ArtifactProduced` + binary read + `ContentBlock::Image` + multimedia tools | Binary artifacts (pptx/pdf) persisted & delivered; multimodal skill outputs |
 | 5 | v0.6+ | ADR-0023 Position C (scripts-as-tools); skill marketplace; runtime-image management; soak/load hardening | Ergonomic + ecosystem maturity |
@@ -311,7 +311,8 @@ signed URL).
 ## 7. ADR ledger
 
 - ADR-0029 (drafted, implemented) — bundled-file path exposure. **Phase 0.**
-- ADR-0023 (finalize) — adopt Position A baseline. **Phase 1.**
+- ADR-0023 (finalized 2026-06-02) — adopted Position A (scripts-as-data;
+  read via `read_file`/ADR-0032, run via `bash`/ADR-0027/0031 §5). **Phase 1/2.**
 - ADR-0030 / ADR-0031 (drafted, implemented) — `Workspace` seam +
   provisioning/scoping + exec-cwd unification; the file-mutation tool set
   (`read_file` migrated, `write_file`/`list_dir`/`edit`/`grep`/`glob`).
