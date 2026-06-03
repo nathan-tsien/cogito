@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-03
+
+**Integration snapshot for the downstream SaaS consumer (praxis).** A small,
+additive Runtime-surface release that closes the consumer's same-process
+integration gaps. Brain (H01–H11) is unchanged; `cogito-protocol` is unchanged;
+no `ConversationEvent` `SCHEMA_VERSION` bump. All additions are
+backward-compatible at the API level. Stability posture stays 0.x: the public
+surface may still evolve in a later minor — pin a commit/tag for integration.
+
+**Added**
+
+- `Runtime::close_session(id, deadline)` and `Runtime::get_session(id)`
+  (`cogito-core::runtime`): a session can now be re-`Resume`d within the *same*
+  `Runtime`. The `sessions` registry was insert-only, so a crashed/closed
+  session could not be reopened in-process; `close_session` drives shutdown then
+  deregisters, and releases the session's `ConversationStore` resources on actor
+  exit (flush + close). Driven by praxis RR-7 / issue #55. Pure Runtime surface,
+  no protocol change. See ADR-0034.
+- `RuntimeBuilder::metrics(Arc<dyn MetricsRecorder>)`: the `MetricsRecorder`
+  seam is now consumer-injectable (it was hardcoded to `NoOpMetricsRecorder`
+  with no setter, so the trait was unreachable). The default stays
+  `NoOpMetricsRecorder`; `open_inner` clones the runtime's recorder into each
+  session's `SessionState` and hook pipeline. First step of the observability
+  extension point. See ADR-0036.
+
+**Docs / decisions**
+
+- ADR-0034 (Runtime session-registry lifecycle) — Accepted, implemented.
+- ADR-0014 (TenantContext) — Accepted, Route A: tenant identity stays in
+  `SessionMeta`, no `ExecCtx` propagation; consumers bind tenant into
+  per-session providers. No protocol change.
+- ADR-0036 (observability extension point) — setter shipped; OTel adapter crate
+  and metric density deferred / incremental.
+- ADR-0012 / ADR-0013 (sandbox lifecycle / credential isolation → Credential
+  Broker) — drafted, DEFERRED (gated on the consumer's untrusted-code /
+  bash-exposure decision).
+- ADR-0011 (subagent full lifecycle) — v0.3 amendment drafted, deferred (sync
+  `delegate` from v0.2 is sufficient for near-term consumer integration).
+- ADR-0022 (plugin distribution) — draft finalized, pending review.
+
 ## [0.2.0] - 2026-06-02
 
 **v0.2 Extensibility.** Pack domain capabilities into shippable units and
