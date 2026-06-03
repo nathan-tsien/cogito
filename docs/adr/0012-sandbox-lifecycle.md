@@ -2,15 +2,30 @@
 
 ## Status
 
-Proposed (draft, v0.3/v0.4).
+Proposed (draft) — **DEFERRED (2026-06-03), not scheduled.**
 
-Deep production hardening. This ADR is **deferrable** and should not be
-ratified until a consumer actually runs untrusted or tenant-supplied code
-inside a cogito process — see Context. It reserves the lifecycle decisions
-for the eventual non-`Direct` `CommandExecutor` / `Workspace` backends; it
-does **not** authorize building them now. Scope is strictly *lifecycle*
-(provisioning, reuse, teardown, resource budgets). Credential isolation is
-the separate ADR-0013.
+Deep production hardening, deliberately parked. Resolution: the execution
+**seam is already in the right place** (`CommandExecutor` in
+`cogito-protocol::command`; `DirectExecutor` in `cogito-sandbox`, selected by
+the `build_executor(&SandboxConfig)` tagged factory), so a future
+`SandboxedExecutor` slots in as a Hands-layer swap, invisible to the Brain and
+to tools. We do **not** build the real sandbox (namespaces / seccomp / chroot /
+cgroups or a remote executor) now.
+
+**Trigger to build it:** cogito executes code reachable by an untrusted party —
+a multi-tenant shared process running tenant-authored code, or a `bash`/exec
+tool exposed to a model whose input is attacker-influenceable without a human
+gate. Until then, the current posture is honest and documented: default
+builtin tools are file ops confined to the `Workspace` single root
+(ADR-0030/0031), `DirectExecutor` is explicitly "not a security boundary," and
+arbitrary `sh -c` is opt-in (the `cogito-jobs` bash path + bash-running
+skills), which the consumer chooses whether to expose.
+
+**Pending input (sizes this ADR):** does the consumer (praxis) wire bash/exec
+into the model's tool surface, and is the model's input reachable by untrusted
+parties? That single answer sizes both this ADR and ADR-0013. Scope when
+built stays strictly *lifecycle* (provisioning, reuse, teardown, resource
+budgets); credential isolation is the separate ADR-0013.
 
 ## Context
 

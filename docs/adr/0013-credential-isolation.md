@@ -25,9 +25,30 @@ accepted, documented posture (ADR-0027). This ADR specifies *where the
 seam goes* so that the day a consumer (praxis) does run multi-tenant or
 model-authored code, the secrets do not already leak into it.
 
-Relates to ADR-0014 (TenantContext) — the proxy is the natural place to
-key per-tenant credential selection once `TenantContext` flows on
-`ExecCtx`.
+Relates to ADR-0014 (TenantContext): note ADR-0014 was Accepted as **Route A**
+— tenant identity does **not** flow on `ExecCtx`. So per-tenant credential
+selection keys off the tenant the consumer captured into the per-session
+provider it injects (ADR-0028), not off an `ExecCtx.tenant` handle.
+
+**DEFERRED (2026-06-03), not scheduled.** Gated on the same trigger as
+ADR-0012 — cogito executing untrusted / attacker-reachable code (multi-tenant
+tenant code, or `bash`/exec exposed to an attacker-influenceable model). The
+seam location is settled; the broker abstraction and the hardening item below
+are designed when that trigger fires or praxis answers the bash-exposure
+question.
+
+**Near-term hardening item — execution env policy (the cheap part of the
+broker):** today `DirectExecutor` defaults to `inherit_env: true`, so the host
+process environment — model API keys, DB URLs, MCP bearer tokens, cloud creds —
+is visible to every `sh -c` command (model-authored bash, skill scripts). The
+fix is **not** a bool flip to `inherit_env: false`: `env_clear()` also drops
+`PATH` / `HOME` / `LANG` / `TMPDIR` and would break skill scripts and most
+commands. The right shape is an **env policy** on `DirectConfig` /
+`CommandSpec` — a curated allowlist (`PATH`, `HOME`, `LANG`, `TMPDIR`, plus
+consumer-supplied vars) that is **default-deny for everything else (the
+secrets)**, replacing the binary inherit-all / clear-all choice. Small design,
+gated on the same bash-exposure question; specified here so it lands with the
+broker rather than as a rushed default flip.
 
 ## Context
 

@@ -369,8 +369,8 @@ covers both the Subagent full upgrade AND Plugin git distribution.
 > mutation the consumer's gateway cannot reconstruct. Caller-re-supplies
 > (ADR-0028 §5) stays the resume contract. (Draft ADR-0035 withdrawn.)
 
-- [ ] **ADR-0012**: Sandbox lifecycle (lazy provisioning, pets-vs-cattle) _(renumbered from ADR-0010)_
-- [ ] **ADR-0013**: Credential isolation (sandbox proxy pattern) _(renumbered from ADR-0011)_
+- [ ] **ADR-0012**: Sandbox lifecycle — **DEFERRED (2026-06-03), not scheduled.** Execution seam (`CommandExecutor`) already in place; build the real sandbox only when cogito runs untrusted/attacker-reachable code. Gated on praxis answering: does it expose bash/exec to the model, with attacker-reachable input? _(renumbered from ADR-0010)_
+- [ ] **ADR-0013**: Credential isolation → **Credential Broker** seam — **DEFERRED (2026-06-03).** Tool/exec auth (esp. MCP creds) out of core scope; Brain never touches credentials. Includes the execution env-policy hardening (curated allowlist, default-deny secrets) instead of a naive `inherit_env=false` flip. Same trigger as ADR-0012. _(renumbered from ADR-0011)_
 - [x] **ADR-0014**: TenantContext — **Accepted Route A (2026-06-03): no `ExecCtx` propagation, no protocol change.** Tenant identity stays in `SessionMeta` (ADR-0028) for attribution; consumers bind tenant into per-session providers (ADR-0028). _(renumbered from ADR-0012)_
 - [ ] `cogito-store --features postgres`: production multi-replica backend (folded into umbrella `cogito-store` crate per ADR-0024; was originally `cogito-store-postgres`)
 - [ ] `cogito-storage-s3` crate: object storage backend
