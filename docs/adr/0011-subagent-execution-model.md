@@ -276,3 +276,338 @@ Recorded so the v0.2 seams are chosen for additive growth:
 - The JSON Schema artifact (`docs/schemas/conversation-event-v1.json`) is
   regenerated for the new `SessionMeta` fields, and the CI drift gate
   re-pinned.
+
+
+---
+
+## v0.3 amendment: Subagent full
+
+**Status**: Proposed (draft, v0.3); **deferred (2026-06-03)**. The downstream
+consumer (praxis) confirmed the shipped synchronous `delegate(role, input) ->
+output` is sufficient for near-term SaaS integration, so the full four-tool
+async lifecycle is not on the near-term path. This section is kept as a parked
+design draft, not scheduled work. The v0.2 S2 minimal decision above
+is Accepted and shipped (`cogito-core::runtime::subagent::DelegateToolProvider`,
+`cogito-protocol::subagent::BrainSpawner::run_to_completion`, the additive
+`SessionMeta` linkage fields, and the `ExecCtx { brain_spawner, subagent_depth }`
+seams all exist in code). This section is a draft for human ratification; it
+adds the full four-tool lifecycle on top of those seams **additively** and
+must not be read as accepted.
+
+### Why now
+
+The v0.2 §"v0.3 amendment, not built now" list reserved exactly these seams.
+The driver is praxis beginning SaaS integration: a delegating agent that
+**blocks the parent turn for the child's whole duration** (the v0.2 sync
+`delegate`, see Consequences §"Harder / given up") is unworkable when the
+parent itself is a request handler that must stay responsive, fan out several
+children, or let a human cancel a runaway child. v0.3 makes the parent→child
+hop async and cancellable while keeping every v0.2 consumer's `delegate`
+behaviour byte-for-byte unchanged.
+
+### 1. Four tools, one provider
+
+`DelegateToolProvider` grows from one tool to five (the v0.2 `delegate`
+stays, see §6). The four new tools are exposed by the same provider's
+`list()` and routed by name in `invoke()` — no new crate, no Brain change
+(H05 sees four more `ToolDescriptor`s; the layer rule is untouched because
+the provider still reads everything through `ExecCtx`):
+
+- `spawn_agent(role, input) -> { child_session_id, job_id }`
+  (`ExecutionClass::Async`). Resolves `role`, opens the child as an
+  unregistered top-level session exactly as `run_to_completion` does today
+  (steps 1-3 of the v0.2 "Drive-to-completion mechanism"), submits the
+  child-drive future to `JobManager` instead of awaiting it inline, and
+  returns the child session id plus the job id to the model. The parent
+  turn does **not** pause here — `spawn_agent` returns synchronously with
+  identifiers; the turn continues so the model can spawn siblings.
+- `wait_agent(child_session_id) -> output` (`ExecutionClass::Async`). The
+  only blocking tool. It returns `InvokeOutcome::Async(job_id)` for the
+  child's drive job, so H01 records `TurnPaused { job_id }` and the parent
+  turn parks on the existing async-tool pause/resume machinery (H08
+  `on_complete` -> `JobCompletedRecorded` -> `TurnResumed`). On resume the
+  tool replays the child log (the v0.2 last-`AssistantMessageAppended`
+  extraction) and returns the child's final text.
+- `send_input(child_session_id, input) -> ack` (`ExecutionClass::AlwaysSync`).
+  Pushes an additional user turn into a still-live child via the child
+  `SessionHandle::submit_user_text`. Requires the child handle to still be
+  resolvable (see §3 registry note). Returns a structured ack, not the
+  child's output — the model uses `wait_agent` to collect results. If the
+  child has already reached a terminal turn, returns `ToolResult::Error`.
+- `cancel_agent(child_session_id) -> ack` (`ExecutionClass::AlwaysSync`).
+  Cancels the child's drive job (`JobManager::cancel`) and drives
+  `child.shutdown(deadline)`. Idempotent: cancelling an already-finished or
+  already-cancelled child is a success ack, not an error.
+
+All five tools share the depth guard (§5) and the
+`ctx.brain_spawner.is_none()` "not wired" error path that `delegate`
+already implements.
+
+### 2. Trait shape: extend `BrainSpawner` with default methods, not a new trait
+
+**Decision: add the three new lifecycle methods directly to `BrainSpawner`,
+each with a `default` body that returns a `SpawnError::Unsupported`
+variant.** Do **not** introduce a separate `SubagentLifecycle` trait.
+
+Justification, on the two axes the brief names:
+
+- **v0.2 non-breaking.** Adding methods with default bodies to
+  `BrainSpawner` does not break the v0.2 `MockSpawner` / `OkSpawner` test
+  impls in `subagent.rs`, nor any consumer impl: they keep compiling and
+  simply inherit "unsupported" for the new verbs while their
+  `run_to_completion` keeps working. A *new* trait would force the Runtime's
+  `RuntimeSpawner` (`builder.rs`) and every test double to implement two
+  traits, and would force `ExecCtx` to carry a second `Option<Arc<dyn ...>>`
+  — a wider, more error-prone seam for no gain.
+- **Object-safety.** `BrainSpawner` is consumed as `Arc<dyn BrainSpawner>`
+  (in `ExecCtx::brain_spawner` and the `RuntimeSpawner` impl), so every new
+  method must stay object-safe: `async fn` via `#[async_trait]`, no generic
+  type parameters, no `where Self: Sized`, `self: &Self` receivers only,
+  and request/return types that are themselves `Send`. The new signatures
+  obey this:
+
+  ```rust
+  #[async_trait::async_trait]
+  pub trait BrainSpawner: Send + Sync {
+      // v0.2, unchanged.
+      async fn run_to_completion(&self, req: DelegateRequest) -> Result<String, SpawnError>;
+
+      // v0.3, additive. Default bodies keep v0.2 impls compiling.
+      /// Open the child and start driving it on a background job; return the
+      /// child session id and the drive job id. Does not block.
+      async fn spawn(&self, req: DelegateRequest) -> Result<SpawnHandle, SpawnError> {
+          Err(SpawnError::Unsupported { verb: "spawn" })
+      }
+      /// Resolve the drive job for an outstanding child, for the parent turn
+      /// to park on via `InvokeOutcome::Async`.
+      async fn drive_job(&self, child: SessionId) -> Result<JobId, SpawnError> {
+          let _ = child;
+          Err(SpawnError::Unsupported { verb: "wait" })
+      }
+      /// Push an additional user turn into a still-live child.
+      async fn send_input(&self, child: SessionId, input: String) -> Result<(), SpawnError> {
+          let _ = (child, input);
+          Err(SpawnError::Unsupported { verb: "send_input" })
+      }
+      /// Cancel the child's drive job and shut the child actor down.
+      async fn cancel(&self, child: SessionId) -> Result<(), SpawnError> {
+          let _ = child;
+          Err(SpawnError::Unsupported { verb: "cancel" })
+      }
+  }
+  ```
+
+  `SpawnHandle { child_session_id: SessionId, job_id: JobId }` and
+  `SpawnError::Unsupported { verb: &'static str }` are the only new
+  protocol types; both are additive. `SpawnError` is already
+  `#[non_exhaustive]`, so adding `Unsupported` does not break existing
+  `match` arms that have a catch-all (the `delegate` tool's `map_spawn_error`
+  already has a `_ =>` arm).
+
+### 3. JobManager-backed async wait
+
+`spawn`'s background work is the *same* drive loop `run_to_completion`
+runs today (subscribe -> `submit_user_text` -> loop to terminal
+`TurnCompleted`/`TurnFailed` -> `shutdown`), but submitted as a boxed
+future to `JobSubmitter::submit_boxed` (`cogito-protocol::job`) rather than
+awaited inline. The returned `JobId` is the drive job. `wait_agent` then
+reuses the existing async-tool contract verbatim: it returns
+`InvokeOutcome::Async(job_id)`, H08 records `JobSubmitted` is **not** re-run
+(the job already exists) — instead `wait_agent` registers an
+`on_complete` sink on that job id and H01 parks the parent on
+`TurnPaused { job_id }`. The child's terminal `JobOutcome` (success /
+failed / cancelled) drives `JobCompletedRecorded` -> `TurnResumed`, after
+which `wait_agent` reads the child log for the final text. This is why the
+async surface needs **no new turn-driver state**: the subagent wait rides
+the same pause/resume path async tools already use.
+
+Open registry question (see Open questions): `send_input` and `cancel_agent`
+need the child `SessionHandle` to still be live. The child is opened
+*unregistered* in v0.2 (the spawner holds the only handle, inside the drive
+future). For v0.3 the spawner must keep a parent-call-scoped map
+`child_session_id -> SessionHandle` for the lifetime of the drive job so
+`send_input`/`cancel` can reach it. This map is **process-local runtime
+state, not conversation state** (consistent with ADR-0028 §5: a live handle
+is code/IO, not replayable state) — and it is exactly the
+`get_session`/`close_session` registry concern ADR-0034 raises. The
+cleanest landing is to register spawned children in the same `sessions`
+DashMap that ADR-0034 makes reopenable, keyed by `child_session_id`, and
+deregister on drive-job completion.
+
+### 4. Additive event tree in the PARENT log
+
+v0.2 wrote **nothing** to the parent log (linkage was child-side only on
+`SessionMeta`). v0.3 adds three additive `EventPayload` variants written to
+the **parent** session's log, giving the parent a replayable record of its
+outstanding children. These follow the ADR-0007 additive-variant precedent
+used by `JobSubmitted` / `ThinkingBlockRecorded` (ADR-0019) — **no
+`SCHEMA_VERSION` bump** (it stays at 1; `EventPayload` is `#[non_exhaustive]`
+and the variants default-absent on read of older logs):
+
+```rust
+// cogito-protocol::event::EventPayload — three new variants, snake_case tagged.
+SubagentSpawned {
+    call_id: String,          // the spawn_agent tool-call id
+    child_session_id: SessionId,
+    job_id: JobId,            // the child drive job
+    role: String,
+},
+SubagentInputSent {
+    child_session_id: SessionId,
+    // input text is NOT inlined (event log is not a transcript cache,
+    // ADR-0007); it is persisted in the CHILD's own log as its user turn.
+},
+SubagentCompleted {
+    child_session_id: SessionId,
+    outcome: JobOutcome,      // success / failed / cancelled — reuses the job type
+},
+```
+
+`SubagentSpawned` is written when `spawn_agent` returns;
+`SubagentCompleted` when the drive job reaches a terminal outcome (alongside
+the existing `JobCompletedRecorded`). The parent model still never sees the
+child's *intermediate* steps — these are coarse lifecycle markers, not the
+child transcript. The child transcript remains its own `<child_id>.jsonl`
+(v0.2 §7, unchanged). The live observability bridge (`subagent_call_id` on
+`StreamEvent`, v0.2 §8) is unchanged and still broadcast-only.
+
+### 5. Depth-limit enforcement (unchanged mechanism)
+
+`DEFAULT_MAX_SUBAGENT_DEPTH = 3` already exists
+(`subagent.rs`), checked in `DelegateToolProvider::invoke` against
+`ctx.subagent_depth`. All four new tools reuse the identical guard before
+spawning: `spawn_agent` rejects with `ToolResult::Error` when
+`ctx.subagent_depth >= max_depth`; `wait_agent`/`send_input`/`cancel_agent`
+do not deepen the tree and need no guard. The child still opens at
+`parent_depth + 1`, stamped into the child `SessionMeta.subagent_depth`
+(v0.2 §5), so depth survives replay. Per-role `max_subagent_depth` on
+`HarnessStrategy` remains a future upgrade — v0.3 keeps the single
+construction-time default; if praxis needs per-tenant caps we set it via the
+provider built per `SessionSpec` (ADR-0028), not via a new protocol field.
+
+### 6. `delegate` is sugar — zero behaviour change for v0.2 consumers
+
+`run_to_completion` is redefined as `spawn` followed by an immediate inline
+wait on the returned drive job, then the same log-replay extraction. The
+`delegate` tool keeps its v0.2 contract exactly: `ExecutionClass::AlwaysSync`,
+returns the child's final text or a `ToolResult::Error`, blocks the parent
+turn. A consumer that only knows `delegate` sees no difference — same tool
+name, same schema, same blocking semantics, same error mapping. The only
+internal change is that `run_to_completion`'s default impl now layers over
+`spawn` + wait instead of owning the drive loop directly. Because
+`run_to_completion` keeps a concrete body on `RuntimeSpawner`, a spawner
+that does *not* implement the v0.3 verbs (returns `Unsupported`) can still
+keep its own monolithic `run_to_completion` — the sugar is opt-in.
+
+### 7. Parent-resume-with-outstanding-child crash semantics (the load-bearing decision)
+
+This is the first time parent↔child linkage must be **rebuildable from the
+parent log** (Inviolable #3) — v0.2 sidestepped it because sync `delegate`
+had no "outstanding child" state to recover (a crash mid-`delegate` simply
+re-ran `delegate` and spawned a fresh child; the half-written child was an
+accepted orphan, see v0.2 Consequences). With async spawn, a parent can
+crash while one or more children are still running, and resume must not
+hang forever waiting on a job that died with the old process, nor silently
+lose the child.
+
+The recovery contract:
+
+1. **The parent log is the source of truth for "which children exist."**
+   On resume, replaying the parent log yields every `SubagentSpawned` with
+   its `child_session_id` and `job_id`, minus those with a matching
+   `SubagentCompleted`. That difference is the set of *outstanding children*
+   — reconstructed purely from the log, no struct state carried across the
+   crash. This is what makes the v0.3 tree (§4) necessary and not merely
+   decorative: it is the parent-side anchor Inviolable #3 demands.
+
+2. **`JobId` does not survive a process restart.** `JobManager` is
+   in-process (`cogito-jobs`); a fresh Runtime has an empty job registry, so
+   the old `job_id` is dead. Therefore on resume an outstanding child's
+   drive job is treated as **lost, not pending.** The parent does not block
+   on it.
+
+3. **Resolution policy (drafted, see Open questions for the live choice):**
+   for each outstanding child, the resumed parent reads the *child's* log
+   (`store.replay(child_session_id)`):
+   - if the child log shows a terminal turn -> synthesize the missing
+     `SubagentCompleted` from the child's last state and let any parked
+     `wait_agent` resolve from the child log (the child finished even though
+     the parent crashed; its `<child_id>.jsonl` is intact and authoritative);
+   - if the child log shows no terminal turn -> the child died mid-flight
+     with the process. The resumed parent writes
+     `SubagentCompleted { outcome: Cancelled }` and any parked `wait_agent`
+     returns a `ToolResult::Error` ("subagent did not survive parent
+     restart") so the parent model decides whether to re-`spawn_agent`. We do
+     **not** auto-respawn — re-execution policy is the model's, matching the
+     v0.2 "the model decides what to do with the error" principle (§9).
+
+4. **No new store method.** All of the above is the existing single-session
+   `replay` applied to two session ids (parent, then each child). Reading a
+   child's log from the parent's resume path is a cross-session *read*,
+   served by the backend directly (Inviolable #7 / ADR-0007), identical on
+   JSONL and Postgres. The Postgres backend's projection of
+   `parent_session_id` out of seq=0 `SessionMeta` (v0.2 §7) is what lets a
+   SaaS replica answer "find this parent's outstanding children" without
+   scanning — but correctness does not depend on it; the parent log alone
+   suffices.
+
+The net property: a crashed parent with N outstanding children resumes
+deterministically — finished children are reaped from their own logs,
+in-flight children are marked cancelled and surfaced to the model as
+errors — with **no cross-process job handoff** and **no child state stored
+in the parent log beyond the spawn/complete markers**.
+
+### 8. Crate extraction stays DEFERRED
+
+The v0.2 list set the bar at "~1k LoC with low dep overlap" for splitting
+out a `cogito-subagent` crate. The current module is **301 LoC**
+(`cogito-core/src/runtime/subagent.rs`) plus 114 in
+`cogito-protocol/src/subagent.rs`. v0.3's four tools, the
+default-method trait growth, and the resume policy will add perhaps a few
+hundred LoC — still comfortably under the 1k criterion, and still tightly
+coupled to `open_inner` / `sessions` / `JobManager` inside the Runtime.
+**No crate extraction in v0.3.** Re-evaluate only if `handed_tools` and
+per-role gating (still future) push it past the threshold.
+
+### Consequences (delta over v0.2)
+
+**Easier.**
+
+- Parent stays responsive: fan out several children, let a human cancel one,
+  collect results out of order — none of which the v0.2 sync `delegate`
+  allowed. Directly serves a praxis request-handler-as-parent.
+- The parent now has a replayable record of its children
+  (`SubagentSpawned`/`SubagentCompleted`), so crash recovery is
+  deterministic instead of "orphan and re-run."
+- All growth is additive: no `SCHEMA_VERSION` bump, no breaking trait
+  change, v0.2 `delegate` consumers untouched.
+
+**Harder / given up.**
+
+- The spawner must keep a process-local `child_session_id -> SessionHandle`
+  map for `send_input`/`cancel` (depends on the ADR-0034 registry making
+  children resolvable). Lifetime management of that map is new surface.
+- Resume now has a real reconciliation step (§7) — the resume-chaos suite
+  must gain a "parent crashes with an outstanding child" scenario asserting
+  the finished-child-reaped and in-flight-child-cancelled branches.
+- Cross-process job handoff is explicitly **not** attempted: an in-flight
+  child does not survive a parent restart (it is cancelled and surfaced as
+  an error). Durable child execution across replicas is out of scope for
+  v0.3.
+
+### Open questions
+
+- §7.3 resolution policy: confirm "no auto-respawn, surface as error to the
+  model" vs. a strategy-level opt-in to auto-respawn idempotent children.
+  Drafted as no-auto-respawn; needs human ratification.
+- §3 registry: settle whether spawned children register in the ADR-0034
+  `sessions` DashMap (cleanest, couples this ADR's landing to ADR-0034) or
+  the spawner keeps a private per-parent map. Drafted as "register in the
+  shared registry."
+- `send_input` semantics on a child that is *between* turns vs. *mid-turn*:
+  reuse the single-slot mid-pause input discipline (ADR-0028 §3) or reject
+  mid-turn. Drafted as reuse-the-existing-discipline; confirm.
+- Whether `wait_agent` on an already-completed child (the parent crashed,
+  child finished, parent resumed) should return immediately from the child
+  log without re-parking. Drafted as yes (read-through, no pause); confirm
+  it composes with H08's `on_complete` registration.
