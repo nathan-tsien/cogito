@@ -115,29 +115,7 @@ Configuration arrives from multiple sources. Each source produces a
 `RuntimeConfigPartial` (every field is `Option<T>`). A reducer merges
 the partials by precedence:
 
-```text
-                          ┌─────────────────────┐
-                          │   CLI args          │  ◄── highest priority
-                          └──────────┬──────────┘
-                                     │
-                          ┌──────────▼──────────┐
-                          │   ENV variables     │
-                          └──────────┬──────────┘
-                                     │
-                  ┌──────────────────▼──────────────────┐
-                  │   File (cogito.toml + YAML dir)     │
-                  │     OR Database (v0.4+ consumer)    │
-                  └──────────────────┬──────────────────┘
-                                     │
-                          ┌──────────▼──────────┐
-                          │   Defaults          │  ◄── lowest priority
-                          └──────────┬──────────┘
-                                     │
-                                     ▼
-                          ┌─────────────────────┐
-                          │  RuntimeConfig      │  (finalize)
-                          └─────────────────────┘
-```
+<img src="../diagrams/config-sources-composition.svg" alt="Config sources merge by precedence: CLI args override ENV, which override file or database, which override defaults, finalized into RuntimeConfig." width="560">
 
 Later sources override earlier ones field-by-field. Arrays
 (`providers`, future `plugins`, future `subagents`) replace
@@ -405,37 +383,7 @@ adding them later is an additive serde change, not a breaking one.
 
 ## 9. Crate map
 
-```text
-                  ┌──────────────────────┐
-                  │   cogito-protocol    │  HarnessStrategy, traits
-                  └──────────┬───────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-              ▼              ▼              ▼
-       ┌─────────────┐ ┌──────────────┐ ┌──────────────┐
-       │ cogito-     │ │ cogito-model │ │ cogito-tools │
-       │   core      │ │              │ │              │
-       │ (Brain +    │ │ ProviderConfig│ │ ...          │
-       │  Runtime)   │ │ build_gateway│ │              │
-       └─────────────┘ └───────┬──────┘ └──────────────┘
-                               │
-                  ┌────────────▼────────────┐
-                  │   cogito-config (NEW)   │
-                  │   RuntimeConfig,        │
-                  │   ConfigLoader trait,   │
-                  │   FileConfigLoader,     │
-                  │   EnvConfigLoader,      │
-                  │   merge + finalize      │
-                  └────────────┬────────────┘
-                               │
-              ┌────────────────┼────────────────┐
-              ▼                ▼                ▼
-       ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
-       │  cogito-cli  │ │ cogito-tui   │ │ consumer's Server│
-       │  (v0.1)      │ │ (v0.1)       │ │ (v0.4+, external)│
-       └──────────────┘ └──────────────┘ └──────────────────┘
-```
+<img src="../diagrams/config-crate-map.svg" alt="Configuration crate map: cogito-protocol feeds cogito-core, cogito-model and cogito-tools; cogito-model and the new cogito-config crate produce RuntimeConfig consumed by cogito-cli, cogito-tui and the consumer's server." width="740">
 
 Surface consumers of `RuntimeConfig` + `FsStrategyRegistry`:
 
@@ -498,6 +446,10 @@ synthesis.
 
 ## 11. Data flow: from `cogito chat` to a model call
 
+<img src="../diagrams/config-data-flow.svg" alt="Config data flow: cogito chat parses args, loads and merges config into RuntimeConfig, selects a provider, builds a ModelGateway, builds the Runtime, and runs the per-turn agent loop where Brain sees only trait objects." width="680">
+
+<details><summary>Text version</summary>
+
 ```text
                             cogito chat --model X
                                     │
@@ -557,6 +509,8 @@ synthesis.
             │  RuntimeConfig, file paths, ENV vars.  │
             └────────────────────────────────────────┘
 ```
+
+</details>
 
 The vertical line between "build" and "agent loop" is the **layer
 boundary** specified by ADR-0004 and AGENTS.md §6: above the line,
