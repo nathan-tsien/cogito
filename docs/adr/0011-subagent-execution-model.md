@@ -282,7 +282,11 @@ Recorded so the v0.2 seams are chosen for additive growth:
 
 ## v0.3 amendment: Subagent full
 
-**Status**: Proposed (draft, v0.3/v0.4). The v0.2 S2 minimal decision above
+**Status**: Proposed (draft, v0.3); **deferred (2026-06-03)**. The downstream
+consumer (praxis) confirmed the shipped synchronous `delegate(role, input) ->
+output` is sufficient for near-term SaaS integration, so the full four-tool
+async lifecycle is not on the near-term path. This section is kept as a parked
+design draft, not scheduled work. The v0.2 S2 minimal decision above
 is Accepted and shipped (`cogito-core::runtime::subagent::DelegateToolProvider`,
 `cogito-protocol::subagent::BrainSpawner::run_to_completion`, the additive
 `SessionMeta` linkage fields, and the `ExecCtx { brain_spawner, subagent_depth }`

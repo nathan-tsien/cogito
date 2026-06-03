@@ -359,9 +359,15 @@ covers both the Subagent full upgrade AND Plugin git distribution.
 
 > **Pulled forward:** per-session provider injection (`SessionSpec` /
 > `open_session_with`, ADR-0028) landed early in v0.2 Sprint 12. v0.4
-> now covers the remaining multi-replica / TenantContext / store work,
-> including self-describing resume (rebuild a session's provider surface
-> on any replica without the caller re-supplying the spec).
+> now covers the remaining multi-replica / TenantContext / store work.
+>
+> **Cut (2026-06-03):** self-describing resume (rebuild a session's
+> provider surface on any replica without the caller re-supplying the
+> spec) is **dropped**. The consumer (praxis) owns gateway routing and
+> re-supplies the `SessionSpec` on every resume, and disallows
+> cogito-internal-initiated surface changes — so there is no surface
+> mutation the consumer's gateway cannot reconstruct. Caller-re-supplies
+> (ADR-0028 §5) stays the resume contract. (Draft ADR-0035 withdrawn.)
 
 - [ ] **ADR-0012**: Sandbox lifecycle (lazy provisioning, pets-vs-cattle) _(renumbered from ADR-0010)_
 - [ ] **ADR-0013**: Credential isolation (sandbox proxy pattern) _(renumbered from ADR-0011)_
