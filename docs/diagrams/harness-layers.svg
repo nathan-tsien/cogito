@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 720" role="img"
+     aria-label="cogito Harness: Agent Runtime shell drives the Brain, whose eleven components are grouped into Orchestration, Input, Output, Execution and Control responsibility bands.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 16px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .grp { font-size: 12px; font-weight: 700; fill: #5a6b8c; letter-spacing: .02em; }
+    .cname { font-size: 13px; }
+    .cid { font-size: 13px; font-weight: 700; fill: #4c6ef5; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .runtime { fill: #e7ebf0; stroke: #7d8590; }
+    .brain { fill: #eef1fe; stroke: #4c6ef5; }
+    .comp { fill: #ffffff; stroke: #c7d0e0; }
+    .div { stroke: #dde3ea; stroke-width: 1; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="2" y="2" width="776" height="716" rx="12"/>
+  <text class="h1" x="24" y="34">cogito Harness &#8212; components &amp; responsibility scope</text>
+
+  <!-- Runtime shell -->
+  <rect class="runtime" x="200" y="50" width="380" height="58" rx="8"/>
+  <text class="h1" x="390" y="78" text-anchor="middle" font-size="14">Agent Runtime (shell)</text>
+  <text class="sub" x="390" y="97" text-anchor="middle">DI &#183; panic catch &#183; per-session budget</text>
+  <path class="flow" d="M390,108 L390,140" marker-end="url(#arrow)"/>
+
+  <!-- Brain container = scope of the 11 components -->
+  <rect class="brain" x="40" y="142" width="700" height="546" rx="10"/>
+  <text class="h1" x="62" y="172" font-size="14">Harness (Brain)</text>
+  <text class="note" x="718" y="172" text-anchor="end">H01 is the only coordinator &#183; H02&#8211;H10 never call each other</text>
+
+  <!-- Group: Orchestration -->
+  <text class="grp" x="58" y="241">Orchestration</text>
+  <rect class="comp" x="170" y="218" width="175" height="46" rx="6"/>
+  <text x="184" y="246"><tspan class="cid mono">H01</tspan><tspan class="cname"> Turn Driver</tspan></text>
+  <rect class="comp" x="359" y="218" width="175" height="46" rx="6"/>
+  <text x="373" y="246"><tspan class="cid mono">H02</tspan><tspan class="cname"> Step Recorder</tspan></text>
+  <rect class="comp" x="548" y="218" width="175" height="46" rx="6"/>
+  <text x="562" y="246"><tspan class="cid mono">H03</tspan><tspan class="cname"> Resume Coord.</tspan></text>
+
+  <!-- Group: Input -->
+  <line class="div" x1="56" y1="290" x2="724" y2="290"/>
+  <text class="grp" x="58" y="337">Input</text>
+  <rect class="comp" x="170" y="314" width="175" height="46" rx="6"/>
+  <text x="184" y="342"><tspan class="cid mono">H11</tspan><tspan class="cname"> Context Manage</tspan></text>
+  <rect class="comp" x="359" y="314" width="175" height="46" rx="6"/>
+  <text x="373" y="342"><tspan class="cid mono">H04</tspan><tspan class="cname"> Prompt Composer</tspan></text>
+  <rect class="comp" x="548" y="314" width="175" height="46" rx="6"/>
+  <text x="562" y="342"><tspan class="cid mono">H05</tspan><tspan class="cname"> Tool Surface</tspan></text>
+
+  <!-- Group: Output -->
+  <line class="div" x1="56" y1="386" x2="724" y2="386"/>
+  <text class="grp" x="58" y="433">Output</text>
+  <rect class="comp" x="170" y="410" width="270" height="46" rx="6"/>
+  <text x="184" y="438"><tspan class="cid mono">H06</tspan><tspan class="cname"> Stream Demultiplexer</tspan></text>
+  <rect class="comp" x="454" y="410" width="270" height="46" rx="6"/>
+  <text x="468" y="438"><tspan class="cid mono">H07</tspan><tspan class="cname"> Tool Call Resolver</tspan></text>
+
+  <!-- Group: Execution -->
+  <line class="div" x1="56" y1="482" x2="724" y2="482"/>
+  <text class="grp" x="58" y="529">Execution</text>
+  <rect class="comp" x="170" y="506" width="270" height="46" rx="6"/>
+  <text x="184" y="534"><tspan class="cid mono">H08</tspan><tspan class="cname"> Tool Dispatcher</tspan></text>
+  <rect class="comp" x="454" y="506" width="270" height="46" rx="6"/>
+  <text x="468" y="534"><tspan class="cid mono">H09</tspan><tspan class="cname"> Hook Pipeline</tspan></text>
+
+  <!-- Group: Control -->
+  <line class="div" x1="56" y1="578" x2="724" y2="578"/>
+  <text class="grp" x="58" y="625">Control</text>
+  <rect class="comp" x="170" y="602" width="270" height="46" rx="6"/>
+  <text x="184" y="630"><tspan class="cid mono">H10</tspan><tspan class="cname"> Strategy Selector</tspan></text>
+  <text class="note" x="454" y="624">produces HarnessStrategy</text>
+  <text class="note" x="454" y="638">consumed by H11 / H04 / H05 / H09</text>
+</svg>

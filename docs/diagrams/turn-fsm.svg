@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 760" role="img"
+     aria-label="cogito turn state machine: Init to ContextManaged to PromptBuilt to ModelCalling to ModelCompleted to ToolDispatching, which terminates in Completed, Paused, or Failed. An event is written before every transition.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .st { font-size: 13px; font-weight: 600; }
+    .edge { font-size: 11px; fill: #57606a; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .state { fill: #eef1fe; stroke: #4c6ef5; }
+    .ok { fill: #e6f4ea; stroke: #2da44e; }
+    .pause { fill: #fdf3e3; stroke: #d4a72c; }
+    .fail { fill: #fbe9e9; stroke: #cf222e; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="2" y="2" width="576" height="756" rx="12"/>
+  <text class="h1" x="24" y="32">Turn state machine</text>
+  <text class="sub" x="24" y="50">an event is written to the log before every transition (ADR-0003)</text>
+
+  <!-- linear states -->
+  <rect class="state" x="190" y="70"  width="200" height="44" rx="8"/>
+  <text class="st" x="290" y="97" text-anchor="middle">Init</text>
+
+  <rect class="state" x="190" y="166" width="200" height="44" rx="8"/>
+  <text class="st" x="290" y="193" text-anchor="middle">ContextManaged</text>
+
+  <rect class="state" x="190" y="262" width="200" height="44" rx="8"/>
+  <text class="st" x="290" y="289" text-anchor="middle">PromptBuilt</text>
+
+  <rect class="state" x="190" y="358" width="200" height="44" rx="8"/>
+  <text class="st" x="290" y="385" text-anchor="middle">ModelCalling</text>
+
+  <rect class="state" x="190" y="454" width="200" height="44" rx="8"/>
+  <text class="st" x="290" y="481" text-anchor="middle">ModelCompleted</text>
+
+  <rect class="state" x="190" y="550" width="200" height="44" rx="8"/>
+  <text class="st" x="290" y="577" text-anchor="middle">ToolDispatching</text>
+
+  <!-- linear edges -->
+  <path class="flow" d="M290,114 L290,166" marker-end="url(#a)"/>
+  <text class="edge mono" x="300" y="144">H10  strategy lookup</text>
+
+  <path class="flow" d="M290,210 L290,262" marker-end="url(#a)"/>
+  <text class="edge mono" x="300" y="240">H11  context (may do I/O)</text>
+
+  <path class="flow" d="M290,306 L290,358" marker-end="url(#a)"/>
+  <text class="edge mono" x="300" y="330">H04 + H05 + H09 pre_prompt</text>
+  <text class="edge mono" x="300" y="345">ModelGateway streaming</text>
+
+  <path class="flow" d="M290,402 L290,454" marker-end="url(#a)"/>
+  <text class="edge mono" x="300" y="432">H06  stream &#8594; events</text>
+
+  <path class="flow" d="M290,498 L290,550" marker-end="url(#a)"/>
+  <text class="edge mono" x="300" y="528">H07 parse + H08 invoke</text>
+
+  <!-- terminals -->
+  <rect class="fail" x="430" y="550" width="120" height="44" rx="8"/>
+  <text class="st" x="490" y="577" text-anchor="middle">Failed</text>
+  <path class="flow" d="M390,572 L430,572" marker-end="url(#a)"/>
+
+  <rect class="ok" x="120" y="660" width="160" height="44" rx="8"/>
+  <text class="st" x="200" y="687" text-anchor="middle">Completed</text>
+  <path class="flow" d="M270,594 C250,630 220,635 200,660" marker-end="url(#a)"/>
+
+  <rect class="pause" x="320" y="660" width="160" height="44" rx="8"/>
+  <text class="st" x="400" y="687" text-anchor="middle">Paused</text>
+  <path class="flow" d="M310,594 C330,630 380,635 400,660" marker-end="url(#a)"/>
+  <text class="edge" x="400" y="724" text-anchor="middle">async job in flight</text>
+</svg>
