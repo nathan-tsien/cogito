@@ -155,26 +155,7 @@ Never called by H02–H11 directly; H09 is invoked by H01 only.
 
 ### Lifecycle timeline
 
-```
-TurnStarted
-   │
-   ├─ ContextManaged stage (H10 / H11 / H04 / H05) ──┐
-   │                                                  ▼
-   │                                          [pre_prompt]   ← gate (Allow / Reject)
-   │
-   ├─ ModelCalling stage (H06 stream) ────────────────┐
-   │                                                  ▼
-   │                                          [post_model]   ← observation
-   │
-   ├─ ToolDispatching loop (per tool call)
-   │   ├─ H07 ToolResolve
-   │   ├─ [pre_dispatch]                              ← gate (Allow / Reject)
-   │   └─ H08 Dispatch + H02 Record
-   │
-   ├─ Completed terminal       → [post_turn]          ← observation
-   ├─ Paused terminal          → (no post_turn yet — TODO, see Open design questions)
-   └─ Failed terminal (5 sites) → [on_error]          ← observation
-```
+<img src="../diagrams/h09-lifecycle-timeline.svg" alt="Hook lifecycle timeline across one turn: pre_prompt and pre_dispatch are gates (Allow/Reject); post_model, post_turn and on_error are observation points; Paused has no post_turn yet." width="760">
 
 ### Hook point mapping
 
