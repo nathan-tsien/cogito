@@ -2,7 +2,19 @@
 
 ## Status
 
-Proposed (draft, v0.3/v0.4).
+Proposed (draft, v0.3/v0.4) — **needs more design; framed as a Credential
+Broker.**
+
+Direction set 2026-06-03: tool/execution authentication — especially **MCP
+credential handling** — is not owned by cogito core. It is future work under a
+dedicated **Credential Broker** seam: the Brain (the Agent loop) never sees or
+handles credentials; it decides, and the broker (a Hands-layer seam) injects
+auth at egress. cogito core stays a Brain + Hands framework that exposes this
+seam for a SaaS layer to implement, rather than baking credential policy in.
+This draft sketches the proxy mechanism; the broker abstraction (how tools and
+MCP servers acquire scoped, short-lived credentials without the Brain or the
+model ever touching them) needs its own design pass before ratification. See
+ADR-0014 §Decision-4 for the core-responsibility framing.
 
 Depends on ADR-0012 (sandbox lifecycle): this ADR extends the same
 isolating-executor seam ADR-0012 introduces. Like ADR-0012, the whole

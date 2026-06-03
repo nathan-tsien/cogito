@@ -371,10 +371,10 @@ covers both the Subagent full upgrade AND Plugin git distribution.
 
 - [ ] **ADR-0012**: Sandbox lifecycle (lazy provisioning, pets-vs-cattle) _(renumbered from ADR-0010)_
 - [ ] **ADR-0013**: Credential isolation (sandbox proxy pattern) _(renumbered from ADR-0011)_
-- [ ] **ADR-0014**: TenantContext propagation _(renumbered from ADR-0012)_
+- [x] **ADR-0014**: TenantContext — **Accepted Route A (2026-06-03): no `ExecCtx` propagation, no protocol change.** Tenant identity stays in `SessionMeta` (ADR-0028) for attribution; consumers bind tenant into per-session providers (ADR-0028). _(renumbered from ADR-0012)_
 - [ ] `cogito-store --features postgres`: production multi-replica backend (folded into umbrella `cogito-store` crate per ADR-0024; was originally `cogito-store-postgres`)
 - [ ] `cogito-storage-s3` crate: object storage backend
-- [ ] `cogito-protocol`: add `TenantContext` optional field on `ExecCtx`
+- [ ] ~~`cogito-protocol`: add `TenantContext` optional field on `ExecCtx`~~ — **dropped (ADR-0014 Route A)**
 - [ ] `cogito-protocol`: add `MetricsRecorder` trait
 - [ ] `cogito-observability-otel` crate: OpenTelemetry adapter (traces + metrics)
 - [ ] Per-session resource budget enforcement (memory cap, CPU time cap)
