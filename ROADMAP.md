@@ -380,7 +380,7 @@ covers both the Subagent full upgrade AND Plugin git distribution.
 - [ ] `cogito-storage-s3` crate: object storage backend
 - [ ] ~~`cogito-protocol`: add `TenantContext` optional field on `ExecCtx`~~ — **dropped (ADR-0014 Route A)**
 - [x] `cogito-protocol`: `MetricsRecorder` trait (already shipped Sprint 5, no-op default — this line was stale)
-- [ ] **Observability extension point (ADR-0036):** make `MetricsRecorder` injectable (`RuntimeBuilder::metrics()` setter — currently hardcoded no-op) + lock additive-evolution rule. Near-term, small. Metric density added incrementally; traces via consumer-owned `tracing` subscriber.
+- [x] **Observability extension point (ADR-0036):** `RuntimeBuilder::metrics()` setter shipped 2026-06-03 — `MetricsRecorder` is now consumer-injectable (was hardcoded no-op). Additive-evolution rule locked in ADR-0036; metric density added incrementally; traces via consumer-owned `tracing` subscriber.
 - [ ] `cogito-observability-otel` crate: OpenTelemetry adapter — **DEFERRED / optional** (consumer can implement `MetricsRecorder` against its own telemetry once the setter exists)
 - [ ] Per-session resource budget enforcement (memory cap, CPU time cap)
 - [ ] `cogito-sandbox` redesign: lazy provisioning + credential proxy
