@@ -25,6 +25,24 @@ impl Default for SandboxConfig {
     }
 }
 
+/// Environment policy for a child process started by `DirectExecutor`.
+///
+/// This is a programmatic, construction-time concern: it is set in code (the
+/// local/TUI surface sets `Allowlist`), not loaded from `cogito.toml`, so it
+/// is deliberately not part of the serde schema (see `DirectConfig`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum EnvPolicy {
+    /// Child inherits the parent environment per `DirectConfig::inherit_env`
+    /// (the v0.1 default; "not a security boundary"). The default policy, so
+    /// existing behavior is preserved.
+    #[default]
+    InheritAll,
+    /// Child starts from an empty environment and receives ONLY these keys,
+    /// copied from the parent process when present. Everything else (secrets)
+    /// is denied. Used by the local/TUI surface (ADR-0037).
+    Allowlist(Vec<String>),
+}
+
 /// Configuration for `DirectExecutor`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
@@ -33,8 +51,15 @@ pub struct DirectConfig {
     /// this. Defaults to the process current dir (`.`).
     pub root: PathBuf,
     /// Whether the child inherits the parent process environment. Defaults
-    /// to `true` (v0.1 is not a security boundary).
+    /// to `true` (v0.1 is not a security boundary). Only consulted under
+    /// `EnvPolicy::InheritAll`.
     pub inherit_env: bool,
+    /// Environment scrubbing policy. Set programmatically; `#[serde(skip)]`
+    /// keeps the `cogito.toml` schema unchanged, and skipped fields fall back
+    /// to `Default` on deserialize, so existing configs keep working and load
+    /// `EnvPolicy::InheritAll` (exact v0.1 behavior).
+    #[serde(skip)]
+    pub env_policy: EnvPolicy,
 }
 
 impl Default for DirectConfig {
@@ -42,6 +67,7 @@ impl Default for DirectConfig {
         Self {
             root: PathBuf::from("."),
             inherit_env: true,
+            env_policy: EnvPolicy::InheritAll,
         }
     }
 }

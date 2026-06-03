@@ -606,6 +606,7 @@ dependencies = [
  "async-trait",
  "cogito-protocol",
  "serde",
+ "temp-env",
  "thiserror 1.0.69",
  "tokio",
  "tracing",

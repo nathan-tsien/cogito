@@ -3,6 +3,11 @@
 > **Status**: Sprint 5 (2026-05-22): real `HookHandler` trait + 2 example hooks
 > + 5 lifecycle wirings + panic catch + `MetricsRecorder`. `HookDecision::Modify`
 > deferred (see §"Open design questions").
+> 2026-06-03 (ADR-0037): the pipeline is now consumer-injectable via
+> `RuntimeBuilder::hooks(...)` (previously hardcoded to `Vec::new()`), and the
+> first non-example builtin handler shipped — `CommandGuardHook`
+> (`harness::hooks::command_guard`), a `pre_dispatch` denylist accident guard
+> for `bash` (TUI-default; **not a security boundary**).
 
 ## Role in Harness
 

@@ -16,6 +16,7 @@ use cogito_cli::chat::{ChatArgs, ChatMode, ResolveError, resolve_strategy};
 use cogito_cli::chat_config::{
     ChatConfigInputs, build_runtime_config_and_registry, build_skill_provider, patch_base_url,
 };
+use cogito_core::harness::hooks::{CommandGuardHook, HookHandler};
 use cogito_core::runtime::{OpenMode, Runtime, SessionHandle};
 use cogito_jobs::{BashTool, LocalJobManager, RunTestsTool};
 use cogito_protocol::ConversationStore;
@@ -23,6 +24,7 @@ use cogito_protocol::ids::SessionId;
 use cogito_protocol::job::{JobManager, LocalJobSubmitter};
 use cogito_protocol::strategy_registry::StrategyRegistry;
 use cogito_protocol::tool::ToolProvider;
+use cogito_sandbox::{EnvPolicy, SandboxConfig, default_safe_env_allowlist};
 use cogito_store::JsonlStore;
 use cogito_tools::{
     BuiltinToolProvider, CompositeToolProvider, Edit, Glob, Grep, ListDir, NamingPolicy, ReadFile,
@@ -107,7 +109,8 @@ pub async fn build(args: &TuiArgs) -> Result<Built> {
         .model(gateway)
         .tools(tool_provider)
         .strategy(strategy.clone())
-        .job_manager(job_mgr_dyn);
+        .job_manager(job_mgr_dyn)
+        .hooks(local_safety_hooks());
     if let Some(provider) = skills {
         builder = builder.skills(provider);
     }
@@ -180,6 +183,23 @@ pub async fn build(args: &TuiArgs) -> Result<Built> {
         app,
         mcp_banner: mcp_banner_lines,
     })
+}
+
+/// Local/TUI default H09 guard set (ADR-0037): an accident guard against
+/// catastrophic shell commands. Not a security boundary.
+fn local_safety_hooks() -> Vec<Arc<dyn HookHandler>> {
+    vec![Arc::new(CommandGuardHook::new()) as Arc<dyn HookHandler>]
+}
+
+/// TUI default: scrub the child env to a curated allowlist so model-authored
+/// `bash` cannot read host secrets (ADR-0037 / ADR-0013 env-policy).
+fn harden_sandbox_env(sandbox: SandboxConfig) -> SandboxConfig {
+    match sandbox {
+        SandboxConfig::Direct(mut dc) => {
+            dc.env_policy = EnvPolicy::Allowlist(default_safe_env_allowlist());
+            SandboxConfig::Direct(dc)
+        }
+    }
 }
 
 /// Seed empty `ChatModel` + `ToolTreeModel` with (a) the MCP banner
@@ -287,7 +307,10 @@ async fn build_tools_with_banner(
     cfg: &cogito_config::RuntimeConfig,
     job_mgr: Arc<LocalJobManager>,
 ) -> Result<(Arc<dyn ToolProvider>, Vec<String>)> {
-    let executor = cogito_sandbox::build_executor(&cfg.tools.sandbox)
+    // Harden the child env before building the executor: the TUI scrubs
+    // model-authored `bash` down to a curated allowlist (ADR-0037).
+    let hardened_sandbox = harden_sandbox_env(cfg.tools.sandbox.clone());
+    let executor = cogito_sandbox::build_executor(&hardened_sandbox)
         .map_err(|e| anyhow!("build command executor: {e}"))?;
 
     let builtin: Arc<dyn ToolProvider> = Arc::new(
@@ -364,4 +387,35 @@ async fn build_tools_with_banner(
         None => local,
     };
     Ok((tools, banner_lines))
+}
+
+#[cfg(test)]
+mod tests {
+    use cogito_sandbox::{DirectConfig, EnvPolicy, SandboxConfig};
+
+    use super::{harden_sandbox_env, local_safety_hooks};
+
+    #[test]
+    fn local_safety_hooks_contains_command_guard() {
+        let hooks = local_safety_hooks();
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].name(), "command-guard");
+    }
+
+    #[test]
+    fn harden_sandbox_env_sets_allowlist_on_direct() {
+        let original = SandboxConfig::Direct(DirectConfig::default());
+        // Sanity: the starting point is the InheritAll default.
+        let SandboxConfig::Direct(dc) = &original;
+        assert_eq!(dc.env_policy, EnvPolicy::InheritAll);
+
+        let hardened = harden_sandbox_env(original);
+        let SandboxConfig::Direct(dc) = hardened;
+        let EnvPolicy::Allowlist(keys) = dc.env_policy else {
+            unreachable!("harden_sandbox_env must set an Allowlist policy");
+        };
+        assert!(!keys.is_empty());
+        assert!(keys.contains(&"PATH".to_string()));
+        assert!(keys.contains(&"HOME".to_string()));
+    }
 }

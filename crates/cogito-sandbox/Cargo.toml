@@ -18,6 +18,7 @@ serde = { workspace = true, features = ["derive"] }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 cogito-protocol = { workspace = true, features = ["test-support"] }
+temp-env = { workspace = true, features = ["async_closure"] }
 
 [lints]
 workspace = true
