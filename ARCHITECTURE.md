@@ -37,32 +37,7 @@ cogito must be:
 
 ## The 11-component Brain
 
-```
-                  ┌─────────────────────────────┐
-                  │   Agent Runtime (shell)     │
-                  │  DI · panic catch · budget  │
-                  └──────────┬──────────────────┘
-                             │
-                  ┌──────────▼──────────────────┐
-                  │       Harness (Brain)       │
-                  │  ─────────────────────────  │
-   Orchestration: │   H01 Turn Driver           │
-                  │   H02 Step Recorder         │
-                  │   H03 Resume Coordinator    │
-                  │  ─────────────────────────  │
-        Input:    │   H11 Context Manage        │ ← decides what context
-                  │   H04 Prompt Composer       │   the model sees
-                  │   H05 Tool Surface Builder  │
-                  │  ─────────────────────────  │
-       Output:    │   H06 Stream Demultiplexer  │
-                  │   H07 Tool Call Resolver    │
-                  │  ─────────────────────────  │
-     Execution:   │   H08 Tool Dispatcher       │
-                  │   H09 Hook Pipeline         │
-                  │  ─────────────────────────  │
-       Control:   │   H10 Strategy Selector     │
-                  └─────────────────────────────┘
-```
+<img src="./docs/diagrams/harness-layers.svg" alt="Agent Runtime shell drives the Brain; eleven components in five responsibility bands (Orchestration, Input, Output, Execution, Control)" width="780">
 
 Each component has a dedicated design doc in `docs/components/H0X-*.md`.
 
@@ -82,60 +57,13 @@ Each component has a dedicated design doc in `docs/components/H0X-*.md`.
 
 ## Critical dependency constraints
 
-```
-H01 Turn Driver
- ├→ H03 Resume Coordinator  (on entry)
- ├→ H10 Strategy Selector   (on entry; produces value consumed by H11/H04/H05/H09)
- ├→ H11 Context Manage      (Init → ContextManaged)
- ├→ H04 Prompt Composer     (ContextManaged → PromptBuilt)
- ├→ H05 Tool Surface Builder (ContextManaged → PromptBuilt)
- ├→ H06 Stream Demultiplexer (ModelCalling → ModelCompleted)
- ├→ H07 Tool Call Resolver  (ModelCompleted)
- ├→ H08 Tool Dispatcher     (ToolDispatching)
- └→ H09 Hook Pipeline       (lifecycle points)
-
-H02 Step Recorder
- ← called by every component (including H01 on each state transition)
- → depends only on the `ConversationStore` trait
-```
+<img src="./docs/diagrams/harness-deps.svg" alt="H01 Turn Driver calls H03, H10, H11, H04, H05, H06, H07, H08, H09 at defined points; H02 Step Recorder is called by every component." width="820">
 
 **Critical rule**: H01 is the only coordinator. H02–H10 never call each other.
 
 ## Turn state machine
 
-```
-        ┌─────┐
-        │ Init│
-        └──┬──┘
-           │  H10 (strategy lookup)
-   ┌───────▼──────────┐
-   │ ContextManaged   │
-   └───────┬──────────┘
-           │  H11 (context decisions; may do I/O for summarization)
-   ┌───────▼────────┐
-   │  PromptBuilt   │
-   └───────┬────────┘
-           │  H04 + H05 + H09 (pre_prompt)
-           │
-           │  ModelGateway (streaming)
-   ┌───────▼────────┐
-   │  ModelCalling  │
-   └───────┬────────┘
-           │  H06 (stream → events)
-   ┌───────▼────────┐
-   │ ModelCompleted │
-   └───────┬────────┘
-           │  H07 (parse) + H08 (invoke)
-   ┌───────▼────────┐    ┌──────────┐
-   │ToolDispatching ├───▶│  Failed  │
-   └───────┬────────┘    └──────────┘
-           │
-      ┌────┴─────┐
-      │          │
-┌─────▼───┐ ┌────▼─────┐
-│Completed│ │  Paused  │ (async job in flight)
-└─────────┘ └──────────┘
-```
+<img src="./docs/diagrams/turn-fsm.svg" alt="cogito turn state machine: Init to ContextManaged to PromptBuilt to ModelCalling to ModelCompleted to ToolDispatching, which terminates in Completed, Paused, or Failed. An event is written before every transition." width="580">
 
 Each transition writes an event to the event log **before** moving on
 (ADR-0003). H03 reconstructs state by replaying the log.
@@ -229,14 +157,7 @@ this section is a summary.**
 
 ### Import rules
 
-```
-Protocol  ← Brain · Session · Boundary · Hands · Runtime · Surface · Testing
-Brain     ← Runtime
-Session   ← Runtime
-Boundary  ← Runtime
-Hands     ← Runtime
-Runtime   ← Surface
-```
+<img src="./docs/diagrams/crate-import-rules.svg" alt="Import rules: every layer depends on Protocol; Brain, Session, Boundary and Hands are imported by Runtime; Runtime is imported by Surface." width="700">
 
 (Arrows point from imported to importer.) **Brain importing a Hand
 directly is a build error.** When Brain needs a new capability, add a
