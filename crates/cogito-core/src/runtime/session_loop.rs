@@ -272,6 +272,9 @@ pub(super) async fn run_session(
         }
     }
     // Mailbox channel closed without a Shutdown command — treat as Clean.
+    // Release store resources on this exit path too (last handle dropped
+    // without an explicit shutdown).
+    release_store_resources(&state.store, state.session_id).await;
     ShutdownOutcome::Clean {
         in_flight_cancelled: None,
     }
@@ -1033,8 +1036,31 @@ async fn drain_shutdown(
     } else {
         None
     };
+    // Release store resources before returning so the ack the caller awaits
+    // (sent by the `Shutdown` arm after this returns) implies the file handle
+    // is already freed. See `release_store_resources`.
+    release_store_resources(&state.store, state.session_id).await;
     ShutdownOutcome::Clean {
         in_flight_cancelled,
+    }
+}
+
+/// Release per-session backend resources (file handle / connection slot) on
+/// actor exit. ADR-0034 Option A: keeps `Runtime::close_session` (which frees
+/// the in-memory registry slot) coupled with freeing the store's per-session
+/// resources, so an idle-handle eviction actually reclaims the handle rather
+/// than leaking it for the Runtime's lifetime.
+///
+/// Best-effort: the actor is exiting regardless, so a flush/close error is
+/// logged, not propagated. `ConversationStore::close` permits a later `append`
+/// to re-acquire resources, so a subsequent Resume on a fresh actor is
+/// unaffected.
+async fn release_store_resources(store: &Arc<dyn ConversationStore>, session_id: SessionId) {
+    if let Err(e) = store.flush(session_id).await {
+        tracing::warn!(session_id = %session_id, error = %e, "flush on actor exit failed");
+    }
+    if let Err(e) = store.close(session_id).await {
+        tracing::warn!(session_id = %session_id, error = %e, "store close on actor exit failed");
     }
 }
 

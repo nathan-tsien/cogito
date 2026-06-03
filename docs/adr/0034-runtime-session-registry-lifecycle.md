@@ -2,7 +2,11 @@
 
 ## Status
 
-Proposed (v0.4 SaaS-ready theme; not blocking v0.3).
+Accepted and implemented (2026-06-03). A v0.4 SaaS-ready slice pulled
+forward on explicit consumer direction (the same precedent as ADR-0028);
+not blocking v0.3. Shipped as `Runtime::get_session` / `Runtime::close_session`
+plus store-resource release on actor exit (see the resolved open question
+below); tests in `crates/cogito-core/tests/runtime_close_session.rs`.
 
 Driven by a consumer reverse-requirement: praxis RR-7 (recorded in praxis
 `docs/cogito-reverse-requirements.md`), tracked as cogito issue #55. praxis
@@ -200,13 +204,34 @@ What we give up / watch:
   by ADR-0028's premise: the consumer explicitly does not want a `Runtime`
   per tenant.
 
-## Open questions (to settle when scheduled into v0.4)
+## Resolved: store-resource release on actor exit (Option A)
 
-- Should `close_session` also call `ConversationStore::close(id)` to release
-  per-session backend resources (file handle / connection slot), or is that
-  already the actor's responsibility on shutdown? Confirm against the actor's
-  shutdown path before implementing; if the actor does not close the store,
-  `close_session` should, after the actor exits.
+The open question — "should `close_session` call `ConversationStore::close(id)`
+to release per-session backend resources?" — is settled. Verified against the
+code: the actor's `drain_shutdown` (`runtime/session_loop.rs`) cancels the
+in-flight turn and waits, but does **not** `flush`/`close` the store, so the
+JSONL file handle would leak for the `Runtime`'s lifetime — defeating the
+"free memory for idle sessions" goal that motivates `close_session`.
+
+Decision: release in the **actor exit path**, not inside `close_session`. A
+helper `release_store_resources(store, session_id)` runs `flush` then `close`
+(best-effort, errors logged) at both terminal exits of `run_session`:
+
+1. the end of `drain_shutdown` — runs *before* the `Shutdown` arm sends its
+   ack, so by the time `close_session`'s `handle.shutdown(deadline)` resolves,
+   the handle is already freed (deterministic for the caller); and
+2. the mailbox-closed branch — last `SessionHandle` dropped without an
+   explicit shutdown.
+
+This covers every clean exit (so a direct `SessionHandle::shutdown` from a
+CLI/TUI also reclaims the handle), keeps `close_session` a thin
+registry-plus-shutdown wrapper, and respects the abrupt-crash path
+(`run_session` never returns on panic, so no close fires — resources drop with
+the process). `ConversationStore::close` permits a later `append` to
+re-acquire, so a subsequent Resume on a fresh actor is unaffected.
+
+## Open questions (deferred)
+
 - Whether to expose a registry snapshot (`session_ids() -> Vec<SessionId>`)
   for an idle reaper to enumerate candidates. Not requested by RR-7; add only
   if a concrete consumer needs it.

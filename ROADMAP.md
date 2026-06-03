@@ -358,18 +358,22 @@ covers both the Subagent full upgrade AND Plugin git distribution.
 **Goal**: enable multi-replica deployment behind a consumer's gateway.
 
 > **Pulled forward:** per-session provider injection (`SessionSpec` /
-> `open_session_with`, ADR-0028) landed early in v0.2 Sprint 12. v0.4
-> now covers the remaining multi-replica / TenantContext / store work,
+> `open_session_with`, ADR-0028) landed early in v0.2 Sprint 12; the
+> session-registry lifecycle (`get_session` / `close_session` +
+> store-resource release on actor exit, ADR-0034) landed early on
+> 2026-06-03 on consumer direction (praxis RR-7 / issue #55). v0.4 now
+> covers the remaining multi-replica / TenantContext / store work,
 > including self-describing resume (rebuild a session's provider surface
 > on any replica without the caller re-supplying the spec).
 
+- [x] **ADR-0034**: Runtime session-registry lifecycle (`get_session` / `close_session` + store release on actor exit) — pulled forward 2026-06-03 (praxis RR-7 / issue #55), unblocks same-process re-resume / idle reaper
 - [ ] **ADR-0012**: Sandbox lifecycle (lazy provisioning, pets-vs-cattle) _(renumbered from ADR-0010)_
 - [ ] **ADR-0013**: Credential isolation (sandbox proxy pattern) _(renumbered from ADR-0011)_
 - [ ] **ADR-0014**: TenantContext propagation _(renumbered from ADR-0012)_
 - [ ] `cogito-store --features postgres`: production multi-replica backend (folded into umbrella `cogito-store` crate per ADR-0024; was originally `cogito-store-postgres`)
 - [ ] `cogito-storage-s3` crate: object storage backend
 - [ ] `cogito-protocol`: add `TenantContext` optional field on `ExecCtx`
-- [ ] `cogito-protocol`: add `MetricsRecorder` trait
+- [x] `cogito-protocol`: `MetricsRecorder` trait (already shipped in Sprint 5 with a no-op default; v0.4 adds the OTel adapter below, not the trait)
 - [ ] `cogito-observability-otel` crate: OpenTelemetry adapter (traces + metrics)
 - [ ] Per-session resource budget enforcement (memory cap, CPU time cap)
 - [ ] `cogito-sandbox` redesign: lazy provisioning + credential proxy
