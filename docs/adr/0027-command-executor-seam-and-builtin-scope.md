@@ -6,7 +6,9 @@
 **Related**: ADR-0004 (Brain / Hands / Session layering), ADR-0012 / ADR-0013
 (v0.4 sandbox lifecycle + credential isolation — this ADR reserves their
 seam), ADR-0018 (MCP integration), ADR-0023 (bundled script execution),
-Sprint 8 (async Job semantics)
+ADR-0037 (local execution safety — a concrete H09 `CommandGuardHook` at the
+admission seam this ADR reserved, plus the local env-allowlist), Sprint 8
+(async Job semantics)
 
 ## Context
 

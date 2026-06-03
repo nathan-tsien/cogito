@@ -6,9 +6,11 @@
 //!
 //! See `docs/components/H09-hook-pipeline.md`.
 
+pub mod command_guard;
 pub mod composite;
 pub mod examples;
 pub mod panic_catch;
 
 pub use cogito_protocol::hook::{HookDecision, HookHandler, HookLifecyclePoint, HookProvider};
+pub use command_guard::CommandGuardHook;
 pub use composite::CompositeHookPipeline;

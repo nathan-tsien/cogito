@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use cogito_jobs::LocalJobManager;
 use cogito_protocol::gateway::ModelGateway;
+use cogito_protocol::hook::HookHandler;
 use cogito_protocol::job::JobManager;
 use cogito_protocol::metrics::{MetricsRecorder, NoOpMetricsRecorder};
 use cogito_protocol::skill::SkillProvider;
@@ -47,6 +48,11 @@ pub struct Runtime {
     /// via [`RuntimeBuilder::metrics`]; defaults to `NoOpMetricsRecorder`
     /// (ADR-0036). Cloned into each session's `SessionState` and hook pipeline.
     metrics: Arc<dyn MetricsRecorder>,
+    /// H09 hook handlers shared by every session opened on this runtime.
+    /// Injected via [`RuntimeBuilder::hooks`]; defaults to empty. Cloned into
+    /// each session's `CompositeHookPipeline` so a consumer can inject policy
+    /// gates (ADR-0037 local execution safety) without forking the runtime.
+    hook_handlers: Vec<Arc<dyn HookHandler>>,
     /// Optional Skill loader provider. Required only when the strategy
     /// selects `SystemPromptInjectorConfig::Skill`; otherwise `None`.
     skills: Option<Arc<dyn SkillProvider>>,
@@ -292,7 +298,7 @@ impl Runtime {
         let metrics = Arc::clone(&self.metrics);
         let hooks = Arc::new(
             crate::harness::hooks::CompositeHookPipeline::with_handlers_and_metrics(
-                Vec::new(),
+                self.hook_handlers.clone(),
                 Arc::clone(&metrics),
             ),
         );
@@ -428,6 +434,7 @@ pub struct RuntimeBuilder {
     tools: Option<Arc<dyn ToolProvider>>,
     strategy: Option<HarnessStrategy>,
     metrics: Option<Arc<dyn MetricsRecorder>>,
+    hook_handlers: Vec<Arc<dyn HookHandler>>,
     skills: Option<Arc<dyn SkillProvider>>,
     job_mgr: Option<Arc<dyn JobManager>>,
     strategy_registry: Option<Arc<dyn cogito_protocol::strategy_registry::StrategyRegistry>>,
@@ -507,6 +514,19 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Inject H09 hook handlers. Optional — defaults to empty when unset.
+    /// The handlers are shared by every session opened on this runtime
+    /// (cloned into each session's `CompositeHookPipeline`). This is the
+    /// local-execution-safety extension point (ADR-0037): a consumer
+    /// implements `HookHandler` policy gates (e.g. a pre-dispatch guard on
+    /// exec) and injects them here, rather than the pipeline being hardcoded
+    /// empty.
+    #[must_use]
+    pub fn hooks(mut self, handlers: Vec<Arc<dyn HookHandler>>) -> Self {
+        self.hook_handlers = handlers;
+        self
+    }
+
     /// Override the default `LocalJobManager`. Surface code passes the
     /// same `Arc<LocalJobManager>` it threads into `RunTestsTool::new`
     /// (or any other async-tool constructor) so async tool submissions
@@ -572,6 +592,7 @@ impl RuntimeBuilder {
             metrics: self
                 .metrics
                 .unwrap_or_else(|| Arc::new(NoOpMetricsRecorder) as Arc<dyn MetricsRecorder>),
+            hook_handlers: self.hook_handlers,
             skills: self.skills,
             job_mgr,
             strategy_registry: self.strategy_registry,
@@ -858,5 +879,66 @@ mod metrics_setter_tests {
         // harmless no-op (calling it must not panic).
         let rt = min_builder().build().unwrap();
         rt.metrics.record_counter("probe", &[]);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)] // tests
+mod hooks_setter_tests {
+    use std::sync::Arc;
+
+    use cogito_mock_model::MockModelGateway;
+    use cogito_protocol::hook::HookHandler;
+    use cogito_protocol::strategy::HarnessStrategy;
+    use cogito_store::JsonlStore;
+    use cogito_tools::{BuiltinToolProvider, ReadFile};
+
+    use super::{Runtime, RuntimeBuilder};
+
+    /// Minimal `HookHandler` spy: carries only a stable name so a test can
+    /// prove the runtime is holding the injected handlers.
+    struct SpyHook(&'static str);
+    impl HookHandler for SpyHook {
+        fn name(&self) -> &str {
+            self.0
+        }
+    }
+
+    fn min_builder() -> RuntimeBuilder {
+        let dir = tempfile::tempdir().unwrap();
+        Runtime::builder()
+            .store(Arc::new(JsonlStore::new(dir.path().to_path_buf())))
+            .model(Arc::new(MockModelGateway::new()))
+            .tools(Arc::new(
+                BuiltinToolProvider::builder()
+                    .with_tool(Arc::new(ReadFile))
+                    .build(),
+            ))
+            .strategy(HarnessStrategy::default_with_model("mock"))
+    }
+
+    #[tokio::test]
+    async fn hooks_setter_injects_handlers() {
+        let rt = min_builder()
+            .hooks(vec![
+                Arc::new(SpyHook("guard-probe")) as Arc<dyn HookHandler>
+            ])
+            .build()
+            .unwrap();
+
+        // The runtime must hold the injected handlers verbatim.
+        assert_eq!(
+            rt.hook_handlers.len(),
+            1,
+            "Runtime must hold the injected hook handlers"
+        );
+        assert_eq!(rt.hook_handlers[0].name(), "guard-probe");
+    }
+
+    #[tokio::test]
+    async fn hooks_defaults_to_empty_when_unset() {
+        // No `.hooks(..)` call: builds fine and the handler list is empty.
+        let rt = min_builder().build().unwrap();
+        assert!(rt.hook_handlers.is_empty());
     }
 }

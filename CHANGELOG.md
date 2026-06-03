@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Local execution safety for the TUI (ADR-0037).** Three additive parts, no
+  protocol change, no `SCHEMA_VERSION` bump:
+  - `RuntimeBuilder::hooks(Vec<Arc<dyn HookHandler>>)` — the H09 hook pipeline
+    is now consumer-injectable (it was hardcoded to `Vec::new()` with no
+    setter). Runtime-level; cloned into each session's pipeline. Mirrors
+    `RuntimeBuilder::metrics()`.
+  - `CommandGuardHook` (`cogito-core::harness::hooks::command_guard`) — a
+    builtin H09 `pre_dispatch` guard that rejects a curated denylist of
+    catastrophic `bash` commands (recursive-force `rm` on `/` `~` `$HOME` or
+    system dirs, fork bomb, `mkfs`, `dd of=/dev/...`, redirect to a raw block
+    device, `chmod -R` on root). Project-local deletes are allowed. It is a
+    denylist accident guard, **not a security boundary** (trivially bypassable;
+    stops mistakes, not adversaries).
+  - `EnvPolicy::Allowlist` on `cogito-sandbox::DirectConfig` +
+    `default_safe_env_allowlist()` — start a child `sh -c` from an empty
+    environment and copy in only a curated set (`PATH HOME LANG LC_ALL LC_CTYPE
+    TMPDIR USER LOGNAME SHELL TERM PWD`), default-deny secrets. Default stays
+    `InheritAll` (`#[serde(skip)]`, `cogito.toml` schema unchanged).
+  - Wired TUI-only (`cogito-tui` `runtime_build.rs`): the guard is injected and
+    the `Direct` sandbox env is scrubbed by default. CLI chat is unchanged in
+    this cut. Multi-tenant isolation / Credential Broker stay DEFERRED
+    (ADR-0012/0013).
+
 ## [0.2.1] - 2026-06-03
 
 **Integration snapshot for the downstream SaaS consumer (praxis).** A small,

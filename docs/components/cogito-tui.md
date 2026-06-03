@@ -93,6 +93,24 @@ Plan: `docs/superpowers/plans/2026-05-29-cogito-tui-markdown.md`
 - **Three-layer terminal restore**: RAII Drop + panic hook + SIGTERM
   handler. SIGKILL unhandleable.
 
+## Local execution safety (ADR-0037)
+
+`runtime_build.rs` opts the TUI into a local hardening layer by default, since
+`bash` is on by default here and runs through the non-isolating
+`DirectExecutor`:
+
+- `local_safety_hooks()` injects the builtin `CommandGuardHook` via
+  `RuntimeBuilder::hooks(...)` — a `pre_dispatch` denylist that blocks
+  catastrophic shell commands (recursive-force `rm` on root/home/system paths,
+  fork bomb, `mkfs`, `dd of=/dev/...`, block-device redirects, `chmod -R /`).
+  It is an accident guard, **not a security boundary**.
+- `harden_sandbox_env(...)` sets `EnvPolicy::Allowlist(default_safe_env_allowlist())`
+  on the `Direct` sandbox so model-authored `bash` starts from a scrubbed
+  environment (curated allowlist; host secrets default-denied).
+
+Multi-tenant isolation and credential brokering are out of scope here and stay
+deferred (ADR-0012 / ADR-0013).
+
 ## Where things live (other docs)
 
 - Spec (current, v0.2 redesign):

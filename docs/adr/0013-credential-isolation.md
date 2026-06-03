@@ -38,17 +38,20 @@ are designed when that trigger fires or praxis answers the bash-exposure
 question.
 
 **Near-term hardening item — execution env policy (the cheap part of the
-broker):** today `DirectExecutor` defaults to `inherit_env: true`, so the host
-process environment — model API keys, DB URLs, MCP bearer tokens, cloud creds —
-is visible to every `sh -c` command (model-authored bash, skill scripts). The
-fix is **not** a bool flip to `inherit_env: false`: `env_clear()` also drops
-`PATH` / `HOME` / `LANG` / `TMPDIR` and would break skill scripts and most
-commands. The right shape is an **env policy** on `DirectConfig` /
-`CommandSpec` — a curated allowlist (`PATH`, `HOME`, `LANG`, `TMPDIR`, plus
-consumer-supplied vars) that is **default-deny for everything else (the
-secrets)**, replacing the binary inherit-all / clear-all choice. Small design,
-gated on the same bash-exposure question; specified here so it lands with the
-broker rather than as a rushed default flip.
+broker):** **Partially implemented 2026-06-03 for the local/TUI surface via
+ADR-0037** — `EnvPolicy::Allowlist` on `DirectConfig` plus
+`default_safe_env_allowlist()` (default-deny secrets), wired TUI-only. The
+multi-tenant `EnvResolver` / forward-proxy variants in this ADR remain DEFERRED
+with the broker. Background: `DirectExecutor` defaults to `inherit_env: true`,
+so the host process environment — model API keys, DB URLs, MCP bearer tokens,
+cloud creds — is visible to every `sh -c` command (model-authored bash, skill
+scripts). The fix is **not** a bool flip to `inherit_env: false`: `env_clear()`
+also drops `PATH` / `HOME` / `LANG` / `TMPDIR` and would break skill scripts and
+most commands. The right shape is an **env policy** on `DirectConfig` — a
+curated allowlist (`PATH`, `HOME`, `LANG`, `TMPDIR`, plus consumer-supplied
+vars) that is **default-deny for everything else (the secrets)**, replacing the
+binary inherit-all / clear-all choice. ADR-0037 landed exactly this shape for
+the local surface.
 
 ## Context
 
