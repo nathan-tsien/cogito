@@ -293,38 +293,7 @@ caller-agnostic multi-replica resume is a v0.4 concern (ADR-0014).
 
 Hands has **three internal levels**. Only Level 1 is visible to Brain.
 
-```
-                    Brain (Harness)
-                          │
-                          │ uses only the protocol-level traits
-                          ▼
-   ┌────────────────────────────────────────────────────┐
-   │  Level 1 · Brain-facing contracts (in protocol)    │
-   │    · ToolProvider                                   │
-   │    · JobManager                                     │
-   │    · HookHandler                                    │
-   └─────────────────────────┬──────────────────────────┘
-                             │ implemented by
-                             ▼
-   ┌────────────────────────────────────────────────────┐
-   │  Level 2 · Hand crates                             │
-   │    · cogito-tools  → BuiltinToolProvider          │
-   │    · cogito-mcp    → McpToolProvider              │
-   │    · cogito-jobs   → JobManager impls             │
-   │    · cogito-skills → SkillProvider (0.1 Sprint 7) │
-   │    · cogito-plugin → composed providers (0.2)     │
-   │    · cogito-core::runtime::subagent (0.2 minimal) │
-   │      or cogito-subagent crate (0.3 if extracted)  │
-   │    · cogito-tools-multimedia (0.5)                │
-   └─────────────────────────┬──────────────────────────┘
-                             │ internally use
-                             ▼
-   ┌────────────────────────────────────────────────────┐
-   │  Level 3 · Hand-internal primitives (NOT in proto)│
-   │    · Sandbox (cogito-sandbox)                     │
-   │    · HTTP / FS adapters                           │
-   └────────────────────────────────────────────────────┘
-```
+<img src="./docs/diagrams/hands-internal.svg" alt="Hands layer internal structure: Level 1 protocol-facing contracts, Level 2 Hand crates that implement them, Level 3 Hand-internal primitives not visible to Brain." width="780">
 
 Design notes:
 
@@ -560,13 +529,7 @@ needed at v0.3; it can be added later if a workload demands it.
 
 ### Session tree model
 
-```text
-session_root (depth=0)
-  ├── session_a1 (depth=1, parent=root, role=planner)
-  │     └── session_a1a (depth=2, parent=a1, role=worker)
-  ├── session_a2 (depth=1, parent=root, role=coder)
-  └── session_a3 (depth=1, parent=root, role=critic)
-```
+<img src="./docs/diagrams/subagent-session-tree.svg" alt="Subagent session tree: a root session at depth 0 spawns planner, coder and critic children at depth 1; the planner spawns a worker at depth 2." width="780">
 
 Event attribution:
 

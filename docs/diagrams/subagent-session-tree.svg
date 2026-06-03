@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 460" role="img"
+     aria-label="Subagent session tree: a root session at depth 0 spawns planner, coder and critic children at depth 1; the planner spawns a worker at depth 2.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 16px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .brain { fill: #eef1fe; stroke: #4c6ef5; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+    .conn { stroke: #7d8590; stroke-width: 1.5; fill: none; }
+    .box-title { font-size: 13px; font-weight: 700; }
+    .node-id { font-size: 12px; font-weight: 700; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .node-detail { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <!-- Background card -->
+  <rect class="card" x="2" y="2" width="776" height="456" rx="12"/>
+  <text class="h1" x="24" y="34">Subagent session tree</text>
+
+  <!-- Root node: session_root (depth=0), centered -->
+  <!-- x=340, y=60 center, width=200, height=58 -->
+  <rect class="brain" x="290" y="55" width="200" height="58" rx="8"/>
+  <text class="node-id" x="390" y="79" text-anchor="middle">session_root</text>
+  <text class="node-detail" x="390" y="97" text-anchor="middle">depth=0</text>
+
+  <!-- Connector lines from root to depth-1 children -->
+  <!-- Root bottom center = (390, 113) -->
+  <!-- Vertical trunk down to y=145 -->
+  <line class="conn" x1="390" y1="113" x2="390" y2="145"/>
+  <!-- Horizontal bar from x=130 to x=650 at y=145 -->
+  <line class="conn" x1="130" y1="145" x2="650" y2="145"/>
+  <!-- Verticals down to depth-1 nodes -->
+  <!-- session_a1 at x=130 -->
+  <line class="conn" x1="130" y1="145" x2="130" y2="165"/>
+  <!-- session_a2 at x=390 -->
+  <line class="conn" x1="390" y1="145" x2="390" y2="165"/>
+  <!-- session_a3 at x=650 -->
+  <line class="conn" x1="650" y1="145" x2="650" y2="165"/>
+
+  <!-- session_a1 (depth=1, parent=root, role=planner) -->
+  <rect class="brain" x="30" y="165" width="200" height="68" rx="8"/>
+  <text class="node-id" x="130" y="189" text-anchor="middle">session_a1</text>
+  <text class="node-detail" x="130" y="207" text-anchor="middle">depth=1, parent=root</text>
+  <text class="node-detail" x="130" y="221" text-anchor="middle">role=planner</text>
+
+  <!-- session_a2 (depth=1, parent=root, role=coder) -->
+  <rect class="brain" x="290" y="165" width="200" height="68" rx="8"/>
+  <text class="node-id" x="390" y="189" text-anchor="middle">session_a2</text>
+  <text class="node-detail" x="390" y="207" text-anchor="middle">depth=1, parent=root</text>
+  <text class="node-detail" x="390" y="221" text-anchor="middle">role=coder</text>
+
+  <!-- session_a3 (depth=1, parent=root, role=critic) -->
+  <rect class="brain" x="550" y="165" width="200" height="68" rx="8"/>
+  <text class="node-id" x="650" y="189" text-anchor="middle">session_a3</text>
+  <text class="node-detail" x="650" y="207" text-anchor="middle">depth=1, parent=root</text>
+  <text class="node-detail" x="650" y="221" text-anchor="middle">role=critic</text>
+
+  <!-- Connector from session_a1 bottom to session_a1a -->
+  <!-- a1 bottom center = (130, 233) -->
+  <line class="conn" x1="130" y1="233" x2="130" y2="293"/>
+
+  <!-- session_a1a (depth=2, parent=a1, role=worker) -->
+  <rect class="brain" x="30" y="293" width="200" height="68" rx="8"/>
+  <text class="node-id" x="130" y="317" text-anchor="middle">session_a1a</text>
+  <text class="node-detail" x="130" y="335" text-anchor="middle">depth=2, parent=a1</text>
+  <text class="node-detail" x="130" y="349" text-anchor="middle">role=worker</text>
+</svg>

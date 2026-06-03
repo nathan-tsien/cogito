@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 700" role="img"
+     aria-label="Hands layer internal structure: Level 1 protocol-facing contracts, Level 2 Hand crates that implement them, Level 3 Hand-internal primitives not visible to Brain.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 16px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .grp { font-size: 12px; font-weight: 700; fill: #5a6b8c; letter-spacing: .02em; }
+    .cname { font-size: 13px; }
+    .cid { font-size: 13px; font-weight: 700; fill: #4c6ef5; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .runtime { fill: #e7ebf0; stroke: #7d8590; }
+    .brain { fill: #eef1fe; stroke: #4c6ef5; }
+    .session { fill: #e6f4ea; stroke: #2da44e; }
+    .boundary { fill: #f3eefe; stroke: #8250df; }
+    .hands { fill: #fdf3e3; stroke: #d4a72c; }
+    .protocol { fill: #e3f1f1; stroke: #1b9e9e; }
+    .comp { fill: #ffffff; stroke: #c7d0e0; }
+    .div { stroke: #dde3ea; stroke-width: 1; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+    .lbl { font-size: 11px; fill: #57606a; font-style: italic; }
+    .box-title { font-size: 13px; font-weight: 700; }
+    .item { font-size: 12px; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <!-- Background card -->
+  <rect class="card" x="2" y="2" width="776" height="696" rx="12"/>
+  <text class="h1" x="24" y="34">Hands layer internal structure</text>
+
+  <!-- Brain (Harness) box -->
+  <rect class="brain" x="240" y="50" width="300" height="46" rx="8"/>
+  <text class="box-title" x="390" y="78" text-anchor="middle">Brain (Harness)</text>
+
+  <!-- Arrow: Brain → Level 1 -->
+  <path class="flow" d="M390,96 L390,148" marker-end="url(#arrow)"/>
+  <text class="lbl" x="396" y="127">uses only the protocol-level traits</text>
+
+  <!-- Level 1: Brain-facing contracts (protocol) -->
+  <rect class="protocol" x="110" y="150" width="560" height="110" rx="8"/>
+  <text class="box-title" x="390" y="174" text-anchor="middle">Level 1 · Brain-facing contracts (in protocol)</text>
+  <text class="item mono" x="200" y="198">ToolProvider</text>
+  <text class="item mono" x="200" y="218">JobManager</text>
+  <text class="item mono" x="200" y="238">HookHandler</text>
+
+  <!-- Arrow: Level 1 → Level 2 -->
+  <path class="flow" d="M390,260 L390,312" marker-end="url(#arrow)"/>
+  <text class="lbl" x="396" y="291">implemented by</text>
+
+  <!-- Level 2: Hand crates (hands/amber) -->
+  <rect class="hands" x="110" y="314" width="560" height="210" rx="8"/>
+  <text class="box-title" x="390" y="338" text-anchor="middle">Level 2 · Hand crates</text>
+  <text class="item mono" x="200" y="362">cogito-tools</text>
+  <text class="item" x="370" y="362"> → BuiltinToolProvider</text>
+  <text class="item mono" x="200" y="382">cogito-mcp</text>
+  <text class="item" x="370" y="382"> → McpToolProvider</text>
+  <text class="item mono" x="200" y="402">cogito-jobs</text>
+  <text class="item" x="370" y="402"> → JobManager impls</text>
+  <text class="item mono" x="200" y="422">cogito-skills</text>
+  <text class="item" x="370" y="422"> → SkillProvider (0.1 Sprint 7)</text>
+  <text class="item mono" x="200" y="442">cogito-plugin</text>
+  <text class="item" x="370" y="442"> → composed providers (0.2)</text>
+  <text class="item mono" x="200" y="462">cogito-core::runtime::subagent</text>
+  <text class="item" x="200" y="477" font-size="11px" fill="#57606a">  (0.2 minimal) or cogito-subagent crate (0.3 if extracted)</text>
+  <text class="item mono" x="200" y="498">cogito-tools-multimedia</text>
+  <text class="item" x="370" y="498"> (0.5)</text>
+
+  <!-- Arrow: Level 2 → Level 3 -->
+  <path class="flow" d="M390,524 L390,574" marker-end="url(#arrow)"/>
+  <text class="lbl" x="396" y="554">internally use</text>
+
+  <!-- Level 3: Hand-internal primitives (comp/neutral) -->
+  <rect class="comp" x="110" y="576" width="560" height="96" rx="8"/>
+  <text class="box-title" x="390" y="600" text-anchor="middle">Level 3 · Hand-internal primitives (NOT in protocol)</text>
+  <text class="item mono" x="200" y="626">Sandbox (cogito-sandbox)</text>
+  <text class="item mono" x="200" y="648">HTTP / FS adapters</text>
+</svg>
