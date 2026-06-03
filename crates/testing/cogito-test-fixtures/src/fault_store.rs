@@ -27,6 +27,7 @@ use tokio::sync::{Mutex, oneshot};
 pub struct FaultInjectingStore<S> {
     inner: Arc<S>,
     written_count: AtomicU64,
+    close_count: AtomicU64,
     trigger: Mutex<FaultTrigger>,
 }
 
@@ -60,6 +61,7 @@ impl<S> FaultInjectingStore<S> {
         Self {
             inner,
             written_count: AtomicU64::new(0),
+            close_count: AtomicU64::new(0),
             trigger: Mutex::new(FaultTrigger::Disabled),
         }
     }
@@ -74,6 +76,14 @@ impl<S> FaultInjectingStore<S> {
     #[must_use]
     pub fn written_count(&self) -> u64 {
         self.written_count.load(Ordering::SeqCst)
+    }
+
+    /// Inspect how many `close` calls have been made against this store.
+    /// Used by `runtime_close_session` to assert that the actor releases
+    /// per-session store resources on exit (ADR-0034 Option A).
+    #[must_use]
+    pub fn close_count(&self) -> u64 {
+        self.close_count.load(Ordering::SeqCst)
     }
 }
 
@@ -108,6 +118,7 @@ where
     }
 
     async fn close(&self, session_id: SessionId) -> Result<(), StoreError> {
+        self.close_count.fetch_add(1, Ordering::SeqCst);
         self.inner.close(session_id).await
     }
 

@@ -3,6 +3,7 @@
 //! and then open sessions to get back `SessionHandle`s.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use cogito_jobs::LocalJobManager;
 use cogito_protocol::gateway::ModelGateway;
@@ -16,10 +17,10 @@ use tokio::runtime::Handle as TokioHandle;
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use super::handle::{SessionHandle, SessionShared};
+use super::handle::{SessionError, SessionHandle, SessionShared};
 use super::session_loop::{SessionDeps, SessionState, record_session_started_with_meta};
 use super::session_spec::SessionSpec;
-use super::types::{OpenMode, SessionId};
+use super::types::{OpenMode, SessionId, ShutdownOutcome};
 use crate::harness::step_recorder::StepRecorder;
 
 /// The DI container and session registry. One `Runtime` per cogito-using
@@ -109,6 +110,53 @@ impl Runtime {
             .unwrap_or_else(|| self.strategy.clone());
         self.open_inner(id, mode, strategy, spec, None, 0, true)
             .await
+    }
+
+    /// Return the live [`SessionHandle`] for `id` if a session is currently
+    /// registered in this `Runtime`, else `None`. Cheap registry clone; does
+    /// not touch the store and never opens or resumes. Returns `None` for an
+    /// id that was never opened, or one already removed by
+    /// [`Runtime::close_session`]. See ADR-0034.
+    #[must_use]
+    pub fn get_session(&self, id: SessionId) -> Option<SessionHandle> {
+        self.sessions.get(&id).map(|e| e.value().clone())
+    }
+
+    /// Shut the session's actor down (up to `deadline`) and remove it from the
+    /// in-memory registry, so a later `open_session(id, OpenMode::Resume)` for
+    /// the same id succeeds within this same `Runtime`. See ADR-0034.
+    ///
+    /// Idempotent: returns `Ok(None)` if `id` is not registered (never opened,
+    /// or already closed), or if the actor had already exited. `Ok(Some(_))`
+    /// carries the [`ShutdownOutcome`] of the shutdown drive.
+    ///
+    /// Callers that re-resume MUST `await` this before
+    /// `open_session(id, _)`: the await guarantees the old actor has drained
+    /// (no further store appends, store resources released) before the
+    /// resumed actor reads `latest_seq`.
+    ///
+    /// # Errors
+    ///
+    /// Returns no `Err` variant today; the `Result` reserves room for future
+    /// store-level release failures without a signature change.
+    pub async fn close_session(
+        &self,
+        id: SessionId,
+        deadline: Duration,
+    ) -> Result<Option<ShutdownOutcome>, RuntimeError> {
+        // Atomically claim the handle. Concurrent `close_session` callers race
+        // here; exactly one wins the remove and drives shutdown, the rest see
+        // `None`. Removing before awaiting shutdown also means `get_session`
+        // returns `None` for the duration of teardown — consistent.
+        let Some((_, handle)) = self.sessions.remove(&id) else {
+            return Ok(None);
+        };
+        match handle.shutdown(deadline).await {
+            Ok(outcome) => Ok(Some(outcome)),
+            // Actor already gone / shutting down: the slot is already removed,
+            // which is all the caller needs. Absorb, don't surface.
+            Err(SessionError::SessionClosed { .. } | SessionError::ShuttingDown { .. }) => Ok(None),
+        }
     }
 
     /// Internal open path shared by [`Runtime::open_session`] (top-level,
