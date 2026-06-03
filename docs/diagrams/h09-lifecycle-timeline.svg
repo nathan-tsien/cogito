@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 700" role="img"
+     aria-label="Hook lifecycle timeline across one turn: pre_prompt and pre_dispatch are gates (Allow/Reject); post_model, post_turn and on_error are observation points; Paused has no post_turn yet.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .grp { font-size: 11px; font-weight: 700; fill: #5a6b8c; letter-spacing: .02em; }
+    .cname { font-size: 12px; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .label { font-size: 11px; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .runtime { fill: #e7ebf0; stroke: #7d8590; }
+    .brain { fill: #eef1fe; stroke: #4c6ef5; }
+    .session { fill: #e6f4ea; stroke: #2da44e; }
+    .boundary { fill: #f3eefe; stroke: #8250df; }
+    .hands { fill: #fdf3e3; stroke: #d4a72c; }
+    .protocol { fill: #e3f1f1; stroke: #1b9e9e; }
+    .comp { fill: #ffffff; stroke: #c7d0e0; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+    .spine { stroke: #7d8590; stroke-width: 2.5; fill: none; }
+    .gate-label { font-size: 10px; fill: #9a6700; font-weight: 600; }
+    .obs-label { font-size: 10px; fill: #1b9e9e; font-weight: 600; }
+    .todo { font-size: 10px; fill: #6e7781; font-style: italic; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="2" y="2" width="756" height="696" rx="12"/>
+  <text class="h1" x="24" y="34">H09 Hook Pipeline — Lifecycle Timeline</text>
+  <text class="note" x="24" y="52">One agent turn; hook points are either gates (Allow/Reject) or observation points.</text>
+
+  <!-- TurnStarted -->
+  <rect class="brain" x="220" y="68" width="200" height="36" rx="6"/>
+  <text x="320" y="91" text-anchor="middle" font-size="13" font-weight="700">TurnStarted</text>
+
+  <!-- Spine down from TurnStarted -->
+  <line class="spine" x1="320" y1="104" x2="320" y2="640"/>
+
+  <!-- === Stage 1: ContextManaged === -->
+  <!-- branch line right -->
+  <line class="flow" x1="320" y1="140" x2="420" y2="140"/>
+  <!-- stage box -->
+  <rect class="brain" x="420" y="118" width="230" height="44" rx="6"/>
+  <text x="432" y="136" font-size="11" font-weight="600">ContextManaged stage</text>
+  <text class="sub" x="432" y="153">H10 / H11 / H04 / H05</text>
+  <!-- arrow to hook -->
+  <line class="flow" x1="535" y1="162" x2="535" y2="185" marker-end="url(#arrow)"/>
+  <!-- pre_prompt hook pill -->
+  <rect class="hands" x="440" y="185" width="190" height="36" rx="18"/>
+  <text x="535" y="198" text-anchor="middle" font-size="12" font-weight="700" class="mono">[pre_prompt]</text>
+  <text class="gate-label" x="535" y="213" text-anchor="middle">gate: Allow / Reject</text>
+
+  <!-- === Stage 2: ModelCalling === -->
+  <line class="flow" x1="320" y1="260" x2="420" y2="260"/>
+  <rect class="brain" x="420" y="238" width="230" height="44" rx="6"/>
+  <text x="432" y="256" font-size="11" font-weight="600">ModelCalling stage</text>
+  <text class="sub" x="432" y="273">H06 stream</text>
+  <!-- arrow to hook -->
+  <line class="flow" x1="535" y1="282" x2="535" y2="305" marker-end="url(#arrow)"/>
+  <!-- post_model hook pill -->
+  <rect class="protocol" x="440" y="305" width="190" height="36" rx="18"/>
+  <text x="535" y="318" text-anchor="middle" font-size="12" font-weight="700" class="mono">[post_model]</text>
+  <text class="obs-label" x="535" y="333" text-anchor="middle">observation</text>
+
+  <!-- === Stage 3: ToolDispatching loop === -->
+  <line class="flow" x1="320" y1="380" x2="420" y2="380"/>
+  <rect class="brain" x="420" y="358" width="230" height="44" rx="6"/>
+  <text x="432" y="376" font-size="11" font-weight="600">ToolDispatching loop</text>
+  <text class="sub" x="432" y="393">(per tool call)</text>
+  <!-- H07 inside loop -->
+  <rect class="comp" x="440" y="410" width="190" height="26" rx="4"/>
+  <text x="535" y="428" text-anchor="middle" font-size="11">H07 ToolResolve</text>
+  <!-- arrow to pre_dispatch -->
+  <line class="flow" x1="535" y1="436" x2="535" y2="455" marker-end="url(#arrow)"/>
+  <!-- pre_dispatch hook pill -->
+  <rect class="hands" x="440" y="455" width="190" height="36" rx="18"/>
+  <text x="535" y="468" text-anchor="middle" font-size="12" font-weight="700" class="mono">[pre_dispatch]</text>
+  <text class="gate-label" x="535" y="483" text-anchor="middle">gate: Allow / Reject</text>
+  <!-- H08 + H02 after gate -->
+  <line class="flow" x1="535" y1="491" x2="535" y2="508" marker-end="url(#arrow)"/>
+  <rect class="comp" x="440" y="508" width="190" height="26" rx="4"/>
+  <text x="535" y="526" text-anchor="middle" font-size="11">H08 Dispatch + H02 Record</text>
+
+  <!-- === Terminals === -->
+  <!-- Completed terminal -->
+  <line class="flow" x1="320" y1="560" x2="80" y2="560"/>
+  <rect class="session" x="14" y="540" width="115" height="36" rx="6"/>
+  <text x="71" y="558" text-anchor="middle" font-size="11" font-weight="600">Completed</text>
+  <text class="sub" x="71" y="571" text-anchor="middle">terminal</text>
+  <!-- post_turn -->
+  <line class="flow" x1="80" y1="576" x2="80" y2="595" marker-end="url(#arrow)"/>
+  <rect class="protocol" x="14" y="595" width="132" height="34" rx="17"/>
+  <text x="80" y="607" text-anchor="middle" font-size="11" font-weight="700" class="mono">[post_turn]</text>
+  <text class="obs-label" x="80" y="620" text-anchor="middle">observation</text>
+
+  <!-- Paused terminal -->
+  <line class="flow" x1="320" y1="590" x2="240" y2="590"/>
+  <rect class="comp" x="175" y="570" width="115" height="36" rx="6"/>
+  <text x="232" y="588" text-anchor="middle" font-size="11" font-weight="600">Paused</text>
+  <text class="sub" x="232" y="601" text-anchor="middle">terminal</text>
+  <text class="todo" x="232" y="625" text-anchor="middle">(no post_turn yet</text>
+  <text class="todo" x="232" y="638" text-anchor="middle">— TODO)</text>
+
+  <!-- Failed terminal -->
+  <line class="flow" x1="320" y1="620" x2="420" y2="620"/>
+  <rect class="runtime" x="420" y="600" width="155" height="36" rx="6"/>
+  <text x="497" y="618" text-anchor="middle" font-size="11" font-weight="600">Failed terminal</text>
+  <text class="sub" x="497" y="631" text-anchor="middle">(5 sites)</text>
+  <!-- on_error -->
+  <line class="flow" x1="590" y1="618" x2="612" y2="618" marker-end="url(#arrow)"/>
+  <rect class="protocol" x="612" y="600" width="130" height="36" rx="18"/>
+  <text x="677" y="613" text-anchor="middle" font-size="11" font-weight="700" class="mono">[on_error]</text>
+  <text class="obs-label" x="677" y="628" text-anchor="middle">observation</text>
+
+  <!-- Legend -->
+  <rect class="hands" x="24" y="650" width="120" height="22" rx="11"/>
+  <text x="84" y="665" text-anchor="middle" font-size="10" font-weight="700">gate (Allow/Reject)</text>
+  <rect class="protocol" x="158" y="650" width="100" height="22" rx="11"/>
+  <text x="208" y="665" text-anchor="middle" font-size="10" font-weight="700">observation</text>
+</svg>

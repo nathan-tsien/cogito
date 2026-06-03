@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 680" role="img"
+     aria-label="Resume sequence: caller opens a session in Resume mode; Runtime pulls all events then spawns the session actor, which replays the log and applies the resume point.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .lane-title { font-size: 13px; font-weight: 700; fill: #1f2328; }
+    .step-id { font-size: 12px; font-weight: 700; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; fill: #4c6ef5; }
+    .step { font-size: 11.5px; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .runtime { fill: #e7ebf0; stroke: #7d8590; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <!-- card background -->
+  <rect class="card" x="2" y="2" width="816" height="676" rx="12"/>
+  <text class="h1" x="24" y="32">Resume entry path</text>
+  <text class="sub" x="24" y="50">End-to-end recovery sequence for a single session after process restart</text>
+
+  <!-- Swimlane 1: Caller -->
+  <rect class="runtime" x="24" y="64" width="772" height="72" rx="8"/>
+  <text class="lane-title" x="40" y="86">Caller (CLI / consumer)</text>
+  <text class="step" x="40" y="110">runtime.open_session(id, SessionMode::Resume).await</text>
+
+  <!-- arrow 1 -->
+  <path class="flow" d="M410,136 L410,162" marker-end="url(#arrow)"/>
+
+  <!-- Swimlane 2: Runtime::open_session -->
+  <rect class="runtime" x="24" y="162" width="772" height="118" rx="8"/>
+  <text class="lane-title" x="40" y="183">Runtime::open_session</text>
+  <text x="40" y="204"><tspan class="step-id">R1 </tspan><tspan class="step">check in-memory registry (prevent concurrent open of same session)</tspan></text>
+  <text x="40" y="221"><tspan class="step-id">R2 </tspan><tspan class="step">store.range(session_id, ..).await   &#8592; pull all events</tspan></text>
+  <text x="40" y="238"><tspan class="step-id">R3 </tspan><tspan class="step">events.is_empty()? &#8594; Err(ResumeFailed: no such session)</tspan></text>
+  <text x="40" y="255"><tspan class="step-id">R4 </tspan><tspan class="step">tokio::spawn(session_loop::run_session(state, ..., initial_events))</tspan></text>
+
+  <!-- arrow 2 -->
+  <path class="flow" d="M410,280 L410,306" marker-end="url(#arrow)"/>
+
+  <!-- Swimlane 3: session_loop::run_session -->
+  <rect class="runtime" x="24" y="306" width="772" height="352" rx="8"/>
+  <text class="lane-title" x="40" y="328">runtime::session_loop::run_session (the &#8220;session actor&#8221; task body)</text>
+  <text x="40" y="352"><tspan class="step-id">A1 </tspan><tspan class="step">schema check (fail-fast)</tspan></text>
+  <text x="40" y="371"><tspan class="step-id">A2 </tspan><tspan class="step">let decision = harness::resume::replay(&amp;initial_events)?</tspan></text>
+  <text x="40" y="390"><tspan class="step-id">A3 </tspan><tspan class="step">state.event_seq.store(decision.last_event_seq + 1)</tspan></text>
+  <text x="40" y="409"><tspan class="step-id">A4 </tspan><tspan class="step">if New session: write SessionStarted</tspan></text>
+  <text x="40" y="428"><tspan class="step-id">A5 </tspan><tspan class="step">apply_resume_point(decision.point):</tspan></text>
+  <!-- A5 branches, indented -->
+  <text x="68" y="447"><tspan class="step">- FreshTurn                &#8594; in_flight=Idle</tspan></text>
+  <text x="68" y="464"><tspan class="step">- RestartCurrentTurn       &#8594; spawn TurnDriver (Init-like)</tspan></text>
+  <text x="68" y="481"><tspan class="step">- ResumeFromModelCompleted &#8594; spawn TurnDriver (ModelCompleted)</tspan></text>
+  <text x="68" y="498"><tspan class="step">- ResumeFromToolDispatching&#8594; spawn TurnDriver (ToolDispatching)</tspan></text>
+  <text x="68" y="515"><tspan class="step">- ResumePausedJob          &#8594; in_flight=PausedOnJob;</tspan></text>
+  <text x="100" y="532"><tspan class="step">job_manager.on_complete(sink)</tspan></text>
+  <text x="68" y="549"><tspan class="step">- ResumeAfterJobCompletion &#8594; inject result &#8594; spawn TurnDriver</tspan></text>
+  <text x="100" y="566"><tspan class="step">(ToolDispatching)</tspan></text>
+  <text x="40" y="588"><tspan class="step-id">A6 </tspan><tspan class="step">enter mailbox main loop</tspan></text>
+</svg>

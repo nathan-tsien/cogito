@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 520" role="img"
+     aria-label="Import rules: every layer depends on Protocol; Brain, Session, Boundary and Hands are imported by Runtime; Runtime is imported by Surface.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .edge { font-size: 11px; fill: #57606a; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+    .runtime  { fill: #e7ebf0; stroke: #7d8590; }
+    .brain    { fill: #eef1fe; stroke: #4c6ef5; }
+    .session  { fill: #e6f4ea; stroke: #2da44e; }
+    .boundary { fill: #f3eefe; stroke: #8250df; }
+    .hands    { fill: #fdf3e3; stroke: #d4a72c; }
+    .protocol { fill: #e3f1f1; stroke: #1b9e9e; }
+    .testing  { fill: #f6f8fa; stroke: #7d8590; }
+    .surface  { fill: #e7ebf0; stroke: #7d8590; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="2" y="2" width="696" height="516" rx="12"/>
+  <text class="h1" x="24" y="32">Crate import rules</text>
+  <text class="sub" x="24" y="50">Arrows point from imported to importer. Brain importing a Hand directly is a build error.</text>
+
+  <!-- Protocol (base) -->
+  <rect class="protocol" x="250" y="420" width="200" height="48" rx="8"/>
+  <text x="266" y="449" font-size="13" font-weight="700" fill="#1b9e9e">Protocol</text>
+  <text class="note" x="350" y="463" text-anchor="middle">cogito-protocol</text>
+
+  <!-- Brain, Session, Boundary, Hands (middle row) -->
+  <rect class="brain" x="30" y="290" width="140" height="48" rx="8"/>
+  <text x="46" y="319" font-size="13" font-weight="700" fill="#4c6ef5">Brain</text>
+  <text class="note" x="100" y="333" text-anchor="middle">cogito-core/harness</text>
+
+  <rect class="session" x="195" y="290" width="140" height="48" rx="8"/>
+  <text x="211" y="319" font-size="13" font-weight="700" fill="#2da44e">Session</text>
+  <text class="note" x="265" y="333" text-anchor="middle">cogito-store</text>
+
+  <rect class="boundary" x="360" y="290" width="140" height="48" rx="8"/>
+  <text x="376" y="319" font-size="13" font-weight="700" fill="#8250df">Boundary</text>
+  <text class="note" x="430" y="333" text-anchor="middle">cogito-model</text>
+
+  <rect class="hands" x="525" y="290" width="140" height="48" rx="8"/>
+  <text x="541" y="319" font-size="13" font-weight="700" fill="#d4a72c">Hands</text>
+  <text class="note" x="595" y="333" text-anchor="middle">cogito-tools etc.</text>
+
+  <!-- Arrows Protocol -> Brain, Session, Boundary, Hands -->
+  <path class="flow" d="M320,420 L100,338" marker-end="url(#arrow)"/>
+  <path class="flow" d="M330,420 L265,338" marker-end="url(#arrow)"/>
+  <path class="flow" d="M370,420 L430,338" marker-end="url(#arrow)"/>
+  <path class="flow" d="M380,420 L595,338" marker-end="url(#arrow)"/>
+
+  <!-- Runtime (middle) -->
+  <rect class="runtime" x="250" y="180" width="200" height="48" rx="8"/>
+  <text x="266" y="209" font-size="13" font-weight="700" fill="#57606a">Runtime</text>
+  <text class="note" x="350" y="223" text-anchor="middle">cogito-core/runtime</text>
+
+  <!-- Arrows Brain/Session/Boundary/Hands -> Runtime -->
+  <path class="flow" d="M100,290 C100,250 300,240 300,228" marker-end="url(#arrow)"/>
+  <path class="flow" d="M265,290 L310,228" marker-end="url(#arrow)"/>
+  <path class="flow" d="M430,290 L390,228" marker-end="url(#arrow)"/>
+  <path class="flow" d="M595,290 C595,250 400,240 400,228" marker-end="url(#arrow)"/>
+
+  <!-- Protocol -> Runtime arrow -->
+  <path class="flow" d="M350,420 C180,380 210,260 290,228" marker-end="url(#arrow)"/>
+
+  <!-- Surface -->
+  <rect class="surface" x="250" y="80" width="200" height="48" rx="8"/>
+  <text x="266" y="109" font-size="13" font-weight="700" fill="#57606a">Surface</text>
+  <text class="note" x="350" y="123" text-anchor="middle">cogito-cli / cogito-tui</text>
+
+  <!-- Arrow Runtime -> Surface -->
+  <path class="flow" d="M350,180 L350,128" marker-end="url(#arrow)"/>
+
+  <!-- Testing -->
+  <rect class="testing" x="530" y="180" width="140" height="48" rx="8"/>
+  <text x="546" y="209" font-size="13" font-weight="700" fill="#57606a">Testing</text>
+  <text class="note" x="600" y="223" text-anchor="middle">cogito-test-fixtures</text>
+
+  <!-- Arrow Protocol -> Testing -->
+  <path class="flow" d="M420,430 C560,400 590,260 590,228" marker-end="url(#arrow)"/>
+
+  <!-- Legend -->
+  <text class="note" x="24" y="480">Arrow direction: imported &#8594; importer</text>
+  <text class="note" x="24" y="496">Brain importing Hands directly is a build error&#8212;add a trait to Protocol instead.</text>
+</svg>

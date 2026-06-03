@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 740 520" role="img"
+     aria-label="Configuration crate map: cogito-protocol feeds cogito-core, cogito-model and cogito-tools; cogito-model and the new cogito-config crate produce RuntimeConfig consumed by cogito-cli, cogito-tui and the consumer's server.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .label { font-size: 13px; font-weight: 700; }
+    .sublabel { font-size: 11px; fill: #57606a; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+    .runtime  { fill: #e7ebf0; stroke: #7d8590; }
+    .brain    { fill: #eef1fe; stroke: #4c6ef5; }
+    .session  { fill: #e6f4ea; stroke: #2da44e; }
+    .boundary { fill: #f3eefe; stroke: #8250df; }
+    .hands    { fill: #fdf3e3; stroke: #d4a72c; }
+    .protocol { fill: #e3f1f1; stroke: #1b9e9e; }
+    .comp     { fill: #ffffff; stroke: #c7d0e0; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="2" y="2" width="736" height="516" rx="12"/>
+  <text class="h1" x="24" y="34">Configuration crate map</text>
+  <text class="sub" x="24" y="52">Arrows point in import direction (from dependency to dependent).</text>
+
+  <!-- cogito-protocol (top center) -->
+  <rect class="protocol" x="265" y="68" width="210" height="60" rx="8"/>
+  <text class="label" x="370" y="92" text-anchor="middle" fill="#1b9e9e">cogito-protocol</text>
+  <text class="sublabel" x="370" y="112" text-anchor="middle">HarnessStrategy, traits</text>
+
+  <!-- arrows from protocol to the three second-row crates -->
+  <path class="flow" d="M310,128 L195,188" marker-end="url(#arrow)"/>
+  <path class="flow" d="M370,128 L370,188" marker-end="url(#arrow)"/>
+  <path class="flow" d="M430,128 L545,188" marker-end="url(#arrow)"/>
+
+  <!-- cogito-core (Brain + Runtime) -->
+  <rect class="brain" x="75" y="190" width="160" height="72" rx="8"/>
+  <text class="label" x="155" y="214" text-anchor="middle" fill="#4c6ef5">cogito-core</text>
+  <text class="sublabel" x="155" y="232" text-anchor="middle">(Brain + Runtime)</text>
+
+  <!-- cogito-model -->
+  <rect class="boundary" x="285" y="190" width="170" height="72" rx="8"/>
+  <text class="label" x="370" y="214" text-anchor="middle" fill="#8250df">cogito-model</text>
+  <text class="sublabel" x="370" y="232" text-anchor="middle">ProviderConfig,</text>
+  <text class="sublabel" x="370" y="248" text-anchor="middle">build_gateway</text>
+
+  <!-- cogito-tools -->
+  <rect class="hands" x="475" y="190" width="160" height="72" rx="8"/>
+  <text class="label" x="555" y="214" text-anchor="middle" fill="#d4a72c">cogito-tools</text>
+  <text class="sublabel" x="555" y="232" text-anchor="middle">...</text>
+
+  <!-- arrow from cogito-model down to cogito-config -->
+  <path class="flow" d="M370,262 L370,318" marker-end="url(#arrow)"/>
+
+  <!-- cogito-config (NEW) -->
+  <rect class="comp" x="245" y="320" width="250" height="100" rx="8"/>
+  <text class="label" x="370" y="344" text-anchor="middle">cogito-config (NEW)</text>
+  <text class="sublabel" x="370" y="362" text-anchor="middle">RuntimeConfig,</text>
+  <text class="sublabel" x="370" y="378" text-anchor="middle">ConfigLoader trait, FileConfigLoader,</text>
+  <text class="sublabel" x="370" y="394" text-anchor="middle">EnvConfigLoader, merge + finalize</text>
+
+  <!-- arrows from cogito-config down to three surface crates -->
+  <path class="flow" d="M310,420 L195,462" marker-end="url(#arrow)"/>
+  <path class="flow" d="M370,420 L370,462" marker-end="url(#arrow)"/>
+  <path class="flow" d="M430,420 L545,462" marker-end="url(#arrow)"/>
+
+  <!-- cogito-cli -->
+  <rect class="runtime" x="95" y="464" width="200" height="38" rx="8"/>
+  <text class="label" x="195" y="484" text-anchor="middle">cogito-cli (v0.1)</text>
+
+  <!-- cogito-tui -->
+  <rect class="runtime" x="270" y="464" width="200" height="38" rx="8"/>
+  <text class="label" x="370" y="484" text-anchor="middle">cogito-tui (v0.1)</text>
+
+  <!-- consumer's Server -->
+  <rect class="runtime" x="445" y="464" width="240" height="38" rx="8"/>
+  <text class="label" x="565" y="478" text-anchor="middle">consumer&#39;s Server</text>
+  <text class="sublabel" x="565" y="494" text-anchor="middle">(v0.4+, external)</text>
+</svg>

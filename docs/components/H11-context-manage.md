@@ -86,25 +86,7 @@ A trait failure degrades: the error is captured in `ContextDecisionRecorded.erro
 
 ## State machine placement
 
-```
-Init
-  │  H10 strategy (pure)
-  │  H03 resume decision (pure)
-  ▼
-ContextManaged
-  │  H11 manage(context)
-  │     ├─ Compactor (may call ModelGateway for summarization)
-  │     ├─ SystemPromptInjector
-  │     ├─ ToolFilterOverrider
-  │     └─ writes ContextDecisionRecorded + ContextManageCompleted via H02
-  ▼
-PromptBuilt
-  │  H04 compose (pure; reads history including H11's just-written events)
-  │  H05 surface (pure; respects H11's tool override if any)
-  │  H09 pre_prompt hook (pure; may Allow / Modify / Reject)
-  ▼
-ModelCalling → ModelCompleted → ToolDispatching → {Completed | Paused | Failed}
-```
+<img src="../diagrams/h11-state-placement.svg" alt="H11 Context Manage runs at the ContextManaged state between Init and PromptBuilt, running the compactor, system-prompt injector and tool-filter overrider and writing its decision events via H02." width="620">
 
 `ContextManaged` is a real FSM state (not an inline call) because:
 

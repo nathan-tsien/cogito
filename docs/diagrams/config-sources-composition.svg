@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 460" role="img"
+     aria-label="Config sources merge by precedence: CLI args override ENV, which override file or database, which override defaults, finalized into RuntimeConfig.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .label { font-size: 13px; font-weight: 600; }
+    .annot { font-size: 11px; fill: #57606a; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+    .runtime  { fill: #e7ebf0; stroke: #7d8590; }
+    .brain    { fill: #eef1fe; stroke: #4c6ef5; }
+    .session  { fill: #e6f4ea; stroke: #2da44e; }
+    .boundary { fill: #f3eefe; stroke: #8250df; }
+    .hands    { fill: #fdf3e3; stroke: #d4a72c; }
+    .protocol { fill: #e3f1f1; stroke: #1b9e9e; }
+    .comp     { fill: #ffffff; stroke: #c7d0e0; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="2" y="2" width="556" height="456" rx="12"/>
+  <text class="h1" x="24" y="34">Config sources and composition</text>
+  <text class="sub" x="24" y="52">Each source produces a RuntimeConfigPartial; a reducer merges by precedence.</text>
+
+  <!-- CLI args (highest priority) -->
+  <rect class="runtime" x="155" y="72" width="200" height="48" rx="8"/>
+  <text class="label" x="255" y="98" text-anchor="middle">CLI args</text>
+  <text class="annot" x="370" y="102">&#9668;&#8212; highest priority</text>
+
+  <!-- arrow 1 -->
+  <path class="flow" d="M255,120 L255,148" marker-end="url(#arrow)"/>
+
+  <!-- ENV variables -->
+  <rect class="runtime" x="155" y="150" width="200" height="48" rx="8"/>
+  <text class="label" x="255" y="176" text-anchor="middle">ENV variables</text>
+
+  <!-- arrow 2 -->
+  <path class="flow" d="M255,198 L255,226" marker-end="url(#arrow)"/>
+
+  <!-- File / Database -->
+  <rect class="session" x="105" y="228" width="300" height="58" rx="8"/>
+  <text class="label" x="255" y="252" text-anchor="middle">File (cogito.toml + YAML dir)</text>
+  <text class="sub" x="255" y="272" text-anchor="middle">OR Database (v0.4+ consumer)</text>
+
+  <!-- arrow 3 -->
+  <path class="flow" d="M255,286 L255,314" marker-end="url(#arrow)"/>
+
+  <!-- Defaults (lowest priority) -->
+  <rect class="runtime" x="155" y="316" width="200" height="48" rx="8"/>
+  <text class="label" x="255" y="342" text-anchor="middle">Defaults</text>
+  <text class="annot" x="370" y="346">&#9668;&#8212; lowest priority</text>
+
+  <!-- arrow 4 -->
+  <path class="flow" d="M255,364 L255,392" marker-end="url(#arrow)"/>
+
+  <!-- RuntimeConfig (finalize) -->
+  <rect class="brain" x="145" y="394" width="220" height="48" rx="8"/>
+  <text class="label" x="255" y="420" text-anchor="middle" fill="#4c6ef5">RuntimeConfig</text>
+  <text class="note" x="255" y="436" text-anchor="middle">(finalize)</text>
+</svg>

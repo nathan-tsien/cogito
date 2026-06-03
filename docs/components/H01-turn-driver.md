@@ -49,15 +49,7 @@ the Rust realization.
 
 ## State machine
 
-```
-Init → ContextManaged → PromptBuilt → ModelCalling → ModelCompleted
-                                                       │
-                                                       ▼
-                               ┌─── ToolDispatching ───┤
-                               │                       │
-                               ▼                       ▼
-                         {Completed | Paused}        Failed
-```
+<img src="../diagrams/turn-fsm.svg" alt="Turn state machine: Init, ContextManaged, PromptBuilt, ModelCalling, ModelCompleted, ToolDispatching, terminating in Completed, Paused or Failed" width="560">
 
 | State | Entered when | H01 calls |
 |---|---|---|
@@ -114,7 +106,11 @@ pub(crate) enum TurnEntry {
 
 This is the **five-component collaboration** that produces a ready-to-stream `ModelInput`. Reviewers and implementers MUST consult this when touching H04, H05, H09, H10, or H11.
 
-```
+<img src="../diagrams/h01-init-sequence.svg" alt="Canonical Init to ContextManaged to PromptBuilt sequence: H10 and H03 on entry, then H11 context management, then H04, H05 and H09 pre_prompt build the ModelInput before streaming." width="820">
+
+<details><summary>Text version</summary>
+
+```text
 H01 in state = Init
   │
   │  step 1 ──► H10 Strategy Selector::select(model_id, task, registry)
@@ -179,6 +175,7 @@ H01 transitions: ContextManaged → PromptBuilt   (H02 records the transition)
   │
 H01 transitions: PromptBuilt → ModelCalling   (H02 records; ModelGateway::stream begins)
 ```
+</details>
 
 **Responsibility matrix**:
 

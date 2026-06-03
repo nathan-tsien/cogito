@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 820" role="img"
+     aria-label="Config data flow: cogito chat parses args, loads and merges config into RuntimeConfig, selects a provider, builds a ModelGateway, builds the Runtime, and runs the per-turn agent loop where Brain sees only trait objects.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .label { font-size: 13px; font-weight: 600; }
+    .sublabel { font-size: 11px; fill: #57606a; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+    .runtime  { fill: #e7ebf0; stroke: #7d8590; }
+    .brain    { fill: #eef1fe; stroke: #4c6ef5; }
+    .session  { fill: #e6f4ea; stroke: #2da44e; }
+    .boundary { fill: #f3eefe; stroke: #8250df; }
+    .hands    { fill: #fdf3e3; stroke: #d4a72c; }
+    .protocol { fill: #e3f1f1; stroke: #1b9e9e; }
+    .comp     { fill: #ffffff; stroke: #c7d0e0; }
+    .entry    { fill: #f0fdf4; stroke: #2da44e; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="2" y="2" width="676" height="816" rx="12"/>
+  <text class="h1" x="24" y="34">Config data flow: from cogito chat to a model call</text>
+  <text class="sub" x="24" y="52">Vertical pipeline; inner loaders produce Partials merged into RuntimeConfig.</text>
+
+  <!-- Step 0: cogito chat -model X -->
+  <text class="label mono" x="340" y="86" text-anchor="middle">cogito chat --model X</text>
+  <path class="flow" d="M340,92 L340,114" marker-end="url(#arrow)"/>
+
+  <!-- Step 1: cogito-cli parses args -->
+  <rect class="runtime" x="120" y="116" width="440" height="44" rx="8"/>
+  <text class="label" x="340" y="138" text-anchor="middle">cogito-cli parses args (clap)</text>
+
+  <path class="flow" d="M340,160 L340,184" marker-end="url(#arrow)"/>
+
+  <!-- Step 2: load_runtime_config outer box -->
+  <rect class="comp" x="80" y="186" width="520" height="240" rx="8"/>
+  <text class="label mono" x="340" y="210" text-anchor="middle">cogito-config::load_runtime_config()</text>
+
+  <!-- Inner loader: FileConfigLoader -->
+  <rect class="session" x="140" y="222" width="210" height="36" rx="6"/>
+  <text class="sublabel" x="245" y="242" text-anchor="middle" font-weight="600">FileConfigLoader</text>
+  <path class="flow" d="M350,240 L414,240" marker-end="url(#arrow)"/>
+  <text class="sublabel" x="430" y="244">Partial</text>
+
+  <!-- Inner loader: EnvConfigLoader -->
+  <rect class="session" x="140" y="268" width="210" height="36" rx="6"/>
+  <text class="sublabel" x="245" y="288" text-anchor="middle" font-weight="600">EnvConfigLoader</text>
+  <path class="flow" d="M350,286 L414,286" marker-end="url(#arrow)"/>
+  <text class="sublabel" x="430" y="290">Partial</text>
+
+  <!-- Inner loader: CLI args patch -->
+  <rect class="session" x="140" y="314" width="210" height="36" rx="6"/>
+  <text class="sublabel" x="245" y="334" text-anchor="middle" font-weight="600">CLI args patch</text>
+  <path class="flow" d="M350,332 L414,332" marker-end="url(#arrow)"/>
+  <text class="sublabel" x="430" y="336">Partial</text>
+
+  <!-- merge + finalize -->
+  <path class="flow" d="M340,350 L340,368" marker-end="url(#arrow)"/>
+  <text class="sublabel" x="340" y="382" text-anchor="middle" font-weight="600">merge_layers + finalize</text>
+  <path class="flow" d="M340,386 L340,404" marker-end="url(#arrow)"/>
+  <text class="label" x="340" y="416" text-anchor="middle">RuntimeConfig</text>
+
+  <!-- outer box ends at y=426 -->
+
+  <path class="flow" d="M340,426 L340,450" marker-end="url(#arrow)"/>
+
+  <!-- Step 3: select_provider -->
+  <rect class="boundary" x="120" y="452" width="440" height="52" rx="8"/>
+  <text class="label" x="340" y="474" text-anchor="middle">select_provider(&amp;cfg, &amp;args)</text>
+  <text class="sublabel" x="340" y="492" text-anchor="middle">&#9658; ProviderConfig (one variant)</text>
+
+  <path class="flow" d="M340,504 L340,528" marker-end="url(#arrow)"/>
+
+  <!-- Step 4: build_gateway -->
+  <rect class="boundary" x="120" y="530" width="440" height="52" rx="8"/>
+  <text class="label mono" x="340" y="552" text-anchor="middle">cogito_model::build_gateway(cfg)</text>
+  <text class="sublabel" x="340" y="570" text-anchor="middle">&#9658; Arc&lt;dyn ModelGateway&gt;</text>
+
+  <path class="flow" d="M340,582 L340,606" marker-end="url(#arrow)"/>
+
+  <!-- Step 5: Runtime::builder() -->
+  <rect class="runtime" x="120" y="608" width="440" height="96" rx="8"/>
+  <text class="label mono" x="340" y="630" text-anchor="middle">Runtime::builder()</text>
+  <text class="sublabel mono" x="340" y="650" text-anchor="middle">.model(gateway)</text>
+  <text class="sublabel mono" x="340" y="666" text-anchor="middle">.store(jsonl_store)</text>
+  <text class="sublabel mono" x="340" y="682" text-anchor="middle">.tools(...).strategy(...).build()</text>
+
+  <path class="flow" d="M340,704 L340,728" marker-end="url(#arrow)"/>
+
+  <!-- Step 6: Per-turn agent loop (Brain) -->
+  <rect class="brain" x="80" y="730" width="520" height="70" rx="8"/>
+  <text class="label" x="340" y="754" text-anchor="middle" fill="#4c6ef5">Per-turn agent loop (H01&#8211;H11)</text>
+  <text class="sublabel" x="340" y="772" text-anchor="middle">Brain sees: trait objects only.</text>
+  <text class="sublabel" x="340" y="788" text-anchor="middle">Brain does NOT see: ProviderConfig, RuntimeConfig, file paths, ENV vars.</text>
+</svg>

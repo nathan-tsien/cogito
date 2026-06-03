@@ -20,21 +20,7 @@ Spec: [docs/superpowers/specs/2026-05-30-sprint-11-subagent-minimal-design.md](.
 
 ## Position
 
-```
-Parent Brain (cogito-core::harness)   sees ToolProvider + BrainSpawner only
-  │  H08 dispatch
-  ▼
-DelegateToolProvider (Hands)          AlwaysSync; reads ExecCtx, guards depth
-  │  reads ctx.brain_spawner
-  ▼
-BrainSpawner (cogito-protocol)        ◄── the protocol seam (ADR-0004)
-  │  run_to_completion(DelegateRequest)
-  ▼
-RuntimeSpawner(Arc<Runtime>)          Runtime: opens + drives the child
-  │  open_inner(register = false)
-  ▼
-Child top-level session               own actor, broadcast, JSONL log
-```
+<img src="../diagrams/subagent-position.svg" alt="Subagent position: the parent Brain sees only ToolProvider and BrainSpawner; H08 dispatches DelegateToolProvider, which reads the BrainSpawner protocol seam; RuntimeSpawner opens and drives a child top-level session." width="680">
 
 The Brain sees only two things from `cogito-protocol`: the `ToolProvider`
 trait (which H08 dispatches) and the `BrainSpawner` protocol type (which the

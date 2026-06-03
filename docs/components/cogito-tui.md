@@ -7,15 +7,7 @@ Harness component (no H-number).
 
 ## Position
 
-```
-Brain (cogito-core::harness)
-  ↑
-Runtime (cogito-core::runtime)
-  ↑
-+-------------+-------------+
-| cogito-cli  | cogito-tui  |   <- Surface layer
-+-------------+-------------+
-```
+<img src="../diagrams/tui-position.svg" alt="cogito-tui position: cogito-cli and cogito-tui are sibling Surface crates that both consume the same Runtime, which drives the Brain; adding cogito-tui required no protocol or Brain change." width="540">
 
 Both Surfaces consume the same Runtime via the same builder pattern
 and the same `FsStrategyRegistry`. No protocol or Brain change was

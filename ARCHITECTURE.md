@@ -37,32 +37,7 @@ cogito must be:
 
 ## The 11-component Brain
 
-```
-                  ┌─────────────────────────────┐
-                  │   Agent Runtime (shell)     │
-                  │  DI · panic catch · budget  │
-                  └──────────┬──────────────────┘
-                             │
-                  ┌──────────▼──────────────────┐
-                  │       Harness (Brain)       │
-                  │  ─────────────────────────  │
-   Orchestration: │   H01 Turn Driver           │
-                  │   H02 Step Recorder         │
-                  │   H03 Resume Coordinator    │
-                  │  ─────────────────────────  │
-        Input:    │   H11 Context Manage        │ ← decides what context
-                  │   H04 Prompt Composer       │   the model sees
-                  │   H05 Tool Surface Builder  │
-                  │  ─────────────────────────  │
-       Output:    │   H06 Stream Demultiplexer  │
-                  │   H07 Tool Call Resolver    │
-                  │  ─────────────────────────  │
-     Execution:   │   H08 Tool Dispatcher       │
-                  │   H09 Hook Pipeline         │
-                  │  ─────────────────────────  │
-       Control:   │   H10 Strategy Selector     │
-                  └─────────────────────────────┘
-```
+<img src="./docs/diagrams/harness-layers.svg" alt="Agent Runtime shell drives the Brain; eleven components in five responsibility bands (Orchestration, Input, Output, Execution, Control)" width="780">
 
 Each component has a dedicated design doc in `docs/components/H0X-*.md`.
 
@@ -82,60 +57,13 @@ Each component has a dedicated design doc in `docs/components/H0X-*.md`.
 
 ## Critical dependency constraints
 
-```
-H01 Turn Driver
- ├→ H03 Resume Coordinator  (on entry)
- ├→ H10 Strategy Selector   (on entry; produces value consumed by H11/H04/H05/H09)
- ├→ H11 Context Manage      (Init → ContextManaged)
- ├→ H04 Prompt Composer     (ContextManaged → PromptBuilt)
- ├→ H05 Tool Surface Builder (ContextManaged → PromptBuilt)
- ├→ H06 Stream Demultiplexer (ModelCalling → ModelCompleted)
- ├→ H07 Tool Call Resolver  (ModelCompleted)
- ├→ H08 Tool Dispatcher     (ToolDispatching)
- └→ H09 Hook Pipeline       (lifecycle points)
-
-H02 Step Recorder
- ← called by every component (including H01 on each state transition)
- → depends only on the `ConversationStore` trait
-```
+<img src="./docs/diagrams/harness-deps.svg" alt="H01 Turn Driver calls H03, H10, H11, H04, H05, H06, H07, H08, H09 at defined points; H02 Step Recorder is called by every component." width="820">
 
 **Critical rule**: H01 is the only coordinator. H02–H10 never call each other.
 
 ## Turn state machine
 
-```
-        ┌─────┐
-        │ Init│
-        └──┬──┘
-           │  H10 (strategy lookup)
-   ┌───────▼──────────┐
-   │ ContextManaged   │
-   └───────┬──────────┘
-           │  H11 (context decisions; may do I/O for summarization)
-   ┌───────▼────────┐
-   │  PromptBuilt   │
-   └───────┬────────┘
-           │  H04 + H05 + H09 (pre_prompt)
-           │
-           │  ModelGateway (streaming)
-   ┌───────▼────────┐
-   │  ModelCalling  │
-   └───────┬────────┘
-           │  H06 (stream → events)
-   ┌───────▼────────┐
-   │ ModelCompleted │
-   └───────┬────────┘
-           │  H07 (parse) + H08 (invoke)
-   ┌───────▼────────┐    ┌──────────┐
-   │ToolDispatching ├───▶│  Failed  │
-   └───────┬────────┘    └──────────┘
-           │
-      ┌────┴─────┐
-      │          │
-┌─────▼───┐ ┌────▼─────┐
-│Completed│ │  Paused  │ (async job in flight)
-└─────────┘ └──────────┘
-```
+<img src="./docs/diagrams/turn-fsm.svg" alt="cogito turn state machine: Init to ContextManaged to PromptBuilt to ModelCalling to ModelCompleted to ToolDispatching, which terminates in Completed, Paused, or Failed. An event is written before every transition." width="580">
 
 Each transition writes an event to the event log **before** moving on
 (ADR-0003). H03 reconstructs state by replaying the log.
@@ -161,7 +89,11 @@ pending). See `docs/components/H01-turn-driver.md` §"Init → ContextManaged
 
 End-to-end recovery sequence for a single session after process restart:
 
-```
+<img src="./docs/diagrams/resume-entry-path.svg" alt="Resume sequence: caller opens a session in Resume mode; Runtime pulls all events then spawns the session actor, which replays the log and applies the resume point." width="820">
+
+<details><summary>Text version</summary>
+
+```text
 ┌─ Caller (CLI / consumer) ──────────────────────────────────────────────┐
 │   runtime.open_session(id, SessionMode::Resume).await                  │
 └──────────────────┬─────────────────────────────────────────────────────┘
@@ -192,6 +124,7 @@ End-to-end recovery sequence for a single session after process restart:
 │  A6 enter mailbox main loop                                            │
 └────────────────────────────────────────────────────────────────────────┘
 ```
+</details>
 
 **Key invariants** (correctness requirements, not preferences):
 
@@ -229,14 +162,7 @@ this section is a summary.**
 
 ### Import rules
 
-```
-Protocol  ← Brain · Session · Boundary · Hands · Runtime · Surface · Testing
-Brain     ← Runtime
-Session   ← Runtime
-Boundary  ← Runtime
-Hands     ← Runtime
-Runtime   ← Surface
-```
+<img src="./docs/diagrams/crate-import-rules.svg" alt="Import rules: every layer depends on Protocol; Brain, Session, Boundary and Hands are imported by Runtime; Runtime is imported by Surface." width="700">
 
 (Arrows point from imported to importer.) **Brain importing a Hand
 directly is a build error.** When Brain needs a new capability, add a
@@ -275,7 +201,11 @@ requirements, not engineering preferences:
 
 ### Topology
 
-```
+<img src="./docs/diagrams/actor-topology.svg" alt="Per-session actor topology: one actor task owns private state and communicates only through mailbox, broadcast, persist and job-sink channels." width="880">
+
+<details><summary>Text version</summary>
+
+```text
                   Caller (CLI / consumer service)
                                 │
                                 ▼  Arc<Runtime>
@@ -312,6 +242,7 @@ requirements, not engineering preferences:
  │       ◄── JobManager.on_complete(job_id, sink) callbacks            │
  └─────────────────────────────────────────────────────────────────────┘
 ```
+</details>
 
 ### Advantages in cogito's context
 
@@ -362,38 +293,7 @@ caller-agnostic multi-replica resume is a v0.4 concern (ADR-0014).
 
 Hands has **three internal levels**. Only Level 1 is visible to Brain.
 
-```
-                    Brain (Harness)
-                          │
-                          │ uses only the protocol-level traits
-                          ▼
-   ┌────────────────────────────────────────────────────┐
-   │  Level 1 · Brain-facing contracts (in protocol)    │
-   │    · ToolProvider                                   │
-   │    · JobManager                                     │
-   │    · HookHandler                                    │
-   └─────────────────────────┬──────────────────────────┘
-                             │ implemented by
-                             ▼
-   ┌────────────────────────────────────────────────────┐
-   │  Level 2 · Hand crates                             │
-   │    · cogito-tools  → BuiltinToolProvider          │
-   │    · cogito-mcp    → McpToolProvider              │
-   │    · cogito-jobs   → JobManager impls             │
-   │    · cogito-skills → SkillProvider (0.1 Sprint 7) │
-   │    · cogito-plugin → composed providers (0.2)     │
-   │    · cogito-core::runtime::subagent (0.2 minimal) │
-   │      or cogito-subagent crate (0.3 if extracted)  │
-   │    · cogito-tools-multimedia (0.5)                │
-   └─────────────────────────┬──────────────────────────┘
-                             │ internally use
-                             ▼
-   ┌────────────────────────────────────────────────────┐
-   │  Level 3 · Hand-internal primitives (NOT in proto)│
-   │    · Sandbox (cogito-sandbox)                     │
-   │    · HTTP / FS adapters                           │
-   └────────────────────────────────────────────────────┘
-```
+<img src="./docs/diagrams/hands-internal.svg" alt="Hands layer internal structure: Level 1 protocol-facing contracts, Level 2 Hand crates that implement them, Level 3 Hand-internal primitives not visible to Brain." width="780">
 
 Design notes:
 
@@ -629,13 +529,7 @@ needed at v0.3; it can be added later if a workload demands it.
 
 ### Session tree model
 
-```text
-session_root (depth=0)
-  ├── session_a1 (depth=1, parent=root, role=planner)
-  │     └── session_a1a (depth=2, parent=a1, role=worker)
-  ├── session_a2 (depth=1, parent=root, role=coder)
-  └── session_a3 (depth=1, parent=root, role=critic)
-```
+<img src="./docs/diagrams/subagent-session-tree.svg" alt="Subagent session tree: a root session at depth 0 spawns planner, coder and critic children at depth 1; the planner spawns a worker at depth 2." width="780">
 
 Event attribution:
 

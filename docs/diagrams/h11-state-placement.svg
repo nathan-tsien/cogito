@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 680" role="img"
+     aria-label="H11 Context Manage runs at the ContextManaged state between Init and PromptBuilt, running the compactor, system-prompt injector and tool-filter overrider and writing its decision events via H02.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .label { font-size: 11px; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .runtime { fill: #e7ebf0; stroke: #7d8590; }
+    .brain { fill: #eef1fe; stroke: #4c6ef5; }
+    .session { fill: #e6f4ea; stroke: #2da44e; }
+    .boundary { fill: #f3eefe; stroke: #8250df; }
+    .hands { fill: #fdf3e3; stroke: #d4a72c; }
+    .protocol { fill: #e3f1f1; stroke: #1b9e9e; }
+    .comp { fill: #ffffff; stroke: #c7d0e0; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+    .brain-em { fill: #d8defd; stroke: #4c6ef5; stroke-width: 2; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="2" y="2" width="616" height="676" rx="12"/>
+  <text class="h1" x="24" y="34">H11 Context Manage — State Machine Placement</text>
+  <text class="note" x="24" y="52">H11 runs at the ContextManaged FSM state; ContextManaged is real (not inline) because it does I/O.</text>
+
+  <!-- Init state -->
+  <rect class="comp" x="180" y="68" width="200" height="36" rx="6"/>
+  <text x="280" y="91" text-anchor="middle" font-size="13" font-weight="700">Init</text>
+  <!-- annotations for Init -->
+  <text x="24" y="90" font-size="11" fill="#5a6b8c">H10 strategy (pure)</text>
+  <text x="24" y="104" font-size="11" fill="#5a6b8c">H03 resume decision (pure)</text>
+
+  <!-- Arrow Init -> ContextManaged -->
+  <line class="flow" x1="280" y1="104" x2="280" y2="140" marker-end="url(#arrow)"/>
+
+  <!-- ContextManaged state — highlighted (this is the H11 focus) -->
+  <rect class="brain-em" x="100" y="140" width="360" height="220" rx="10"/>
+  <text x="280" y="165" text-anchor="middle" font-size="13" font-weight="700">ContextManaged</text>
+  <text x="280" y="182" text-anchor="middle" font-size="11" fill="#4c6ef5" font-weight="600">H11 manage(context)</text>
+  <!-- sub-items inside ContextManaged -->
+  <rect class="comp" x="120" y="192" width="300" height="110" rx="6"/>
+  <text x="140" y="212" font-size="11" font-weight="600">Sub-components:</text>
+  <text x="152" y="231" font-size="11">- Compactor</text>
+  <text x="164" y="247" font-size="10.5" fill="#6e7781" font-style="italic">(may call ModelGateway for summarization)</text>
+  <text x="152" y="264" font-size="11">- SystemPromptInjector</text>
+  <text x="152" y="281" font-size="11">- ToolFilterOverrider</text>
+  <text x="140" y="301" font-size="10.5" fill="#6e7781" font-style="italic">writes ContextDecisionRecorded + ContextManageCompleted via H02</text>
+
+  <!-- Arrow ContextManaged -> PromptBuilt -->
+  <line class="flow" x1="280" y1="360" x2="280" y2="396" marker-end="url(#arrow)"/>
+
+  <!-- PromptBuilt state -->
+  <rect class="comp" x="130" y="396" width="300" height="82" rx="6"/>
+  <text x="280" y="420" text-anchor="middle" font-size="13" font-weight="700">PromptBuilt</text>
+  <text x="148" y="440" font-size="11">H04 compose (pure; reads history incl. H11 events)</text>
+  <text x="148" y="456" font-size="11">H05 surface (pure; respects H11 tool override)</text>
+  <text x="148" y="472" font-size="11" fill="#d4a72c" font-weight="600">H09 pre_prompt hook (Allow / Modify / Reject)</text>
+
+  <!-- Arrow PromptBuilt -> ModelCalling -->
+  <line class="flow" x1="280" y1="478" x2="280" y2="512" marker-end="url(#arrow)"/>
+
+  <!-- Tail: ModelCalling -> ... -> terminals (compact) -->
+  <rect class="comp" x="130" y="512" width="300" height="36" rx="6"/>
+  <text x="280" y="535" text-anchor="middle" font-size="12">ModelCalling</text>
+
+  <line class="flow" x1="280" y1="548" x2="280" y2="574" marker-end="url(#arrow)"/>
+
+  <rect class="comp" x="130" y="574" width="300" height="36" rx="6"/>
+  <text x="280" y="597" text-anchor="middle" font-size="12">ModelCompleted</text>
+
+  <line class="flow" x1="280" y1="610" x2="280" y2="634" marker-end="url(#arrow)"/>
+
+  <rect class="comp" x="130" y="634" width="300" height="28" rx="6"/>
+  <text x="280" y="653" text-anchor="middle" font-size="11">ToolDispatching → {Completed | Paused | Failed}</text>
+</svg>

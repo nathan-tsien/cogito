@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 560" role="img"
+     aria-label="Subagent position: the parent Brain sees only ToolProvider and BrainSpawner; H08 dispatches DelegateToolProvider, which reads the BrainSpawner protocol seam; RuntimeSpawner opens and drives a child top-level session.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .seam { font-size: 10.5px; fill: #1b9e9e; font-weight: 700; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .runtime { fill: #e7ebf0; stroke: #7d8590; }
+    .brain { fill: #eef1fe; stroke: #4c6ef5; }
+    .session { fill: #e6f4ea; stroke: #2da44e; }
+    .boundary { fill: #f3eefe; stroke: #8250df; }
+    .hands { fill: #fdf3e3; stroke: #d4a72c; }
+    .protocol { fill: #e3f1f1; stroke: #1b9e9e; }
+    .comp { fill: #ffffff; stroke: #c7d0e0; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+    .layer-tag { font-size: 10px; fill: #6e7781; font-style: italic; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="2" y="2" width="676" height="556" rx="12"/>
+  <text class="h1" x="24" y="34">cogito-subagent — Position in the Layer Stack</text>
+  <text class="note" x="24" y="52">Brain never names Runtime or concrete session types; all wired via protocol traits (ADR-0004).</text>
+
+  <!-- Parent Brain -->
+  <rect class="brain" x="140" y="68" width="300" height="60" rx="8"/>
+  <text x="290" y="93" text-anchor="middle" font-size="13" font-weight="700">Parent Brain</text>
+  <text class="sub" x="290" y="111" text-anchor="middle">cogito-core::harness</text>
+  <text class="layer-tag" x="460" y="93">sees ToolProvider + BrainSpawner only</text>
+
+  <!-- H08 dispatch label + arrow -->
+  <text x="310" y="145" font-size="11" fill="#5a6b8c" font-weight="600">H08 dispatch</text>
+  <line class="flow" x1="290" y1="128" x2="290" y2="168" marker-end="url(#arrow)"/>
+
+  <!-- DelegateToolProvider -->
+  <rect class="hands" x="140" y="168" width="300" height="60" rx="8"/>
+  <text x="290" y="193" text-anchor="middle" font-size="13" font-weight="700">DelegateToolProvider</text>
+  <text class="sub" x="290" y="211" text-anchor="middle">Hands — AlwaysSync; reads ExecCtx, guards depth</text>
+
+  <!-- reads ctx.brain_spawner label + arrow -->
+  <text x="310" y="246" font-size="11" fill="#5a6b8c" font-weight="600">reads ctx.brain_spawner</text>
+  <line class="flow" x1="290" y1="228" x2="290" y2="268" marker-end="url(#arrow)"/>
+
+  <!-- BrainSpawner (protocol seam) -->
+  <rect class="protocol" x="100" y="268" width="380" height="60" rx="8"/>
+  <text x="290" y="293" text-anchor="middle" font-size="13" font-weight="700">BrainSpawner</text>
+  <text class="sub" x="290" y="311" text-anchor="middle">cogito-protocol — the protocol seam (ADR-0004)</text>
+  <text class="seam" x="490" y="300" text-anchor="start">&#9668;&#9668; protocol seam</text>
+
+  <!-- run_to_completion label + arrow -->
+  <text x="310" y="347" font-size="11" fill="#5a6b8c" font-weight="600">run_to_completion(DelegateRequest)</text>
+  <line class="flow" x1="290" y1="328" x2="290" y2="368" marker-end="url(#arrow)"/>
+
+  <!-- RuntimeSpawner -->
+  <rect class="runtime" x="140" y="368" width="300" height="60" rx="8"/>
+  <text x="290" y="393" text-anchor="middle" font-size="13" font-weight="700">RuntimeSpawner(Arc&lt;Runtime&gt;)</text>
+  <text class="sub" x="290" y="411" text-anchor="middle">Runtime: opens + drives the child</text>
+
+  <!-- open_inner label + arrow -->
+  <text x="310" y="447" font-size="11" fill="#5a6b8c" font-weight="600">open_inner(register = false)</text>
+  <line class="flow" x1="290" y1="428" x2="290" y2="468" marker-end="url(#arrow)"/>
+
+  <!-- Child top-level session -->
+  <rect class="session" x="140" y="468" width="300" height="60" rx="8"/>
+  <text x="290" y="493" text-anchor="middle" font-size="13" font-weight="700">Child top-level session</text>
+  <text class="sub" x="290" y="511" text-anchor="middle">own actor, broadcast, JSONL log</text>
+</svg>
