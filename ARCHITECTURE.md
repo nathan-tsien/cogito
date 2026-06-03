@@ -89,7 +89,11 @@ pending). See `docs/components/H01-turn-driver.md` §"Init → ContextManaged
 
 End-to-end recovery sequence for a single session after process restart:
 
-```
+<img src="./docs/diagrams/resume-entry-path.svg" alt="Resume sequence: caller opens a session in Resume mode; Runtime pulls all events then spawns the session actor, which replays the log and applies the resume point." width="820">
+
+<details><summary>Text version</summary>
+
+```text
 ┌─ Caller (CLI / consumer) ──────────────────────────────────────────────┐
 │   runtime.open_session(id, SessionMode::Resume).await                  │
 └──────────────────┬─────────────────────────────────────────────────────┘
@@ -120,6 +124,7 @@ End-to-end recovery sequence for a single session after process restart:
 │  A6 enter mailbox main loop                                            │
 └────────────────────────────────────────────────────────────────────────┘
 ```
+</details>
 
 **Key invariants** (correctness requirements, not preferences):
 
@@ -196,7 +201,11 @@ requirements, not engineering preferences:
 
 ### Topology
 
-```
+<img src="./docs/diagrams/actor-topology.svg" alt="Per-session actor topology: one actor task owns private state and communicates only through mailbox, broadcast, persist and job-sink channels." width="880">
+
+<details><summary>Text version</summary>
+
+```text
                   Caller (CLI / consumer service)
                                 │
                                 ▼  Arc<Runtime>
@@ -233,6 +242,7 @@ requirements, not engineering preferences:
  │       ◄── JobManager.on_complete(job_id, sink) callbacks            │
  └─────────────────────────────────────────────────────────────────────┘
 ```
+</details>
 
 ### Advantages in cogito's context
 

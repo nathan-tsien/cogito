@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 680" role="img"
+     aria-label="Per-session actor topology: one actor task owns private state and communicates only through mailbox, broadcast, persist and job-sink channels.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .box-title { font-size: 12px; font-weight: 700; }
+    .lbl { font-size: 11px; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; fill: #57606a; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .runtime { fill: #e7ebf0; stroke: #7d8590; }
+    .brain { fill: #eef1fe; stroke: #4c6ef5; }
+    .session { fill: #e6f4ea; stroke: #2da44e; }
+    .comp { fill: #ffffff; stroke: #c7d0e0; }
+    .chan { fill: #fdf6e3; stroke: #d4a72c; }
+    .flow { stroke: #7d8590; stroke-width: 1.8; fill: none; }
+    .flow-r { stroke: #2da44e; stroke-width: 1.5; fill: none; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+    <marker id="arrow-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2da44e"/>
+    </marker>
+  </defs>
+
+  <!-- card background -->
+  <rect class="card" x="2" y="2" width="876" height="676" rx="12"/>
+  <text class="h1" x="24" y="32">Per-session actor topology</text>
+  <text class="sub" x="24" y="50">One actor task per session; all interaction through channels</text>
+
+  <!-- Caller box -->
+  <rect class="runtime" x="330" y="66" width="220" height="46" rx="8"/>
+  <text class="box-title" x="440" y="87" text-anchor="middle">Caller (CLI / consumer service)</text>
+  <text class="lbl" x="440" y="103" text-anchor="middle">Arc&lt;Runtime&gt;</text>
+
+  <!-- arrow: Caller -> Runtime -->
+  <path class="flow" d="M440,112 L440,140" marker-end="url(#arrow)"/>
+
+  <!-- Runtime box -->
+  <rect class="runtime" x="270" y="140" width="340" height="72" rx="8"/>
+  <text class="box-title" x="440" y="162" text-anchor="middle">Runtime</text>
+  <text class="lbl" x="440" y="179" text-anchor="middle">&#183; session_registry</text>
+  <text class="lbl" x="440" y="195" text-anchor="middle">&#183; DI: store / model / ...   &#183; panic catch boundary</text>
+
+  <!-- arrow: Runtime -> session loop -->
+  <path class="flow" d="M440,212 L440,244" marker-end="url(#arrow)"/>
+  <text class="lbl" x="450" y="232">open_session</text>
+
+  <!-- Outer session-loop container -->
+  <rect class="brain" x="28" y="244" width="824" height="408" rx="10"/>
+  <text class="box-title" x="44" y="268">runtime::session_loop::run_session (one task per session)</text>
+
+  <!-- mailbox channel label (top) -->
+  <text class="lbl" x="44" y="300">mailbox (mpsc&lt;SessionCommand&gt;, cap 64)</text>
+  <text class="lbl" x="44" y="315">Input / Shutdown / Cancel / JobCompleted</text>
+
+  <!-- Mailbox arrow down into actor_loop -->
+  <path class="flow" d="M200,318 L200,358" marker-end="url(#arrow)"/>
+  <text class="lbl" x="208" y="342">FIFO drain</text>
+
+  <!-- actor_loop box -->
+  <rect class="comp" x="130" y="358" width="195" height="54" rx="6"/>
+  <text class="box-title" x="228" y="380" text-anchor="middle">actor_loop</text>
+  <text class="lbl" x="228" y="397" text-anchor="middle">private state (in_flight, seq, ...)</text>
+
+  <!-- broadcast channel: actor_loop -> right -->
+  <path class="flow" d="M325,385 L490,385" marker-end="url(#arrow)"/>
+  <text class="lbl" x="330" y="368">events_out (broadcast&lt;StreamEvent&gt;, cap 256)</text>
+  <rect class="chan" x="490" y="368" width="240" height="38" rx="5"/>
+  <text class="lbl" x="610" y="387" text-anchor="middle">0..N live subscribers (lossy)</text>
+
+  <!-- persist_tx channel: actor_loop -> store_writer -->
+  <!-- vertical arrow from actor_loop bottom to store_writer -->
+  <path class="flow" d="M280,412 L360,450" marker-end="url(#arrow)"/>
+  <text class="lbl" x="290" y="428">persist_tx</text>
+  <text class="lbl" x="290" y="441">(mpsc&lt;PersistCommand&gt;, cap 256)</text>
+
+  <!-- TurnDriver: spawned per-turn -->
+  <rect class="brain" x="42" y="438" width="148" height="48" rx="6"/>
+  <text class="box-title" x="116" y="458" text-anchor="middle">TurnDriver task</text>
+  <text class="lbl" x="116" y="473" text-anchor="middle">(FSM run loop)</text>
+
+  <!-- arrow: actor_loop -> TurnDriver (spawn per-turn) -->
+  <path class="flow" d="M130,390 L116,438" marker-end="url(#arrow)"/>
+  <text class="lbl" x="44" y="420" font-style="italic">spawn per-turn</text>
+
+  <!-- store_writer box -->
+  <rect class="session" x="300" y="450" width="210" height="54" rx="6"/>
+  <text class="box-title" x="405" y="472" text-anchor="middle">store_writer subtask</text>
+  <text class="lbl" x="405" y="488" text-anchor="middle">(serial fsync)</text>
+
+  <!-- arrow store_writer -> ConversationStore -->
+  <path class="flow" d="M405,504 L405,534" marker-end="url(#arrow)"/>
+
+  <!-- ConversationStore -->
+  <rect class="session" x="270" y="534" width="270" height="46" rx="6"/>
+  <text class="box-title" x="405" y="556" text-anchor="middle">ConversationStore</text>
+  <text class="lbl" x="405" y="572" text-anchor="middle">JSONL / Postgres / ...</text>
+
+  <!-- job_completion_rx channel label -->
+  <text class="lbl" x="44" y="610">job_completion_rx (mpsc&lt;JobCompletionEvent&gt;, cap 32)</text>
+  <text class="lbl" x="44" y="626">&#8592;&#8212; JobManager.on_complete(job_id, sink) callbacks</text>
+
+</svg>
