@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-03
+
 ### Added
 
 - **Local execution safety for the TUI (ADR-0037).** Three additive parts, no
@@ -34,9 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.1] - 2026-06-03
 
-**Integration snapshot for the downstream SaaS consumer (praxis).** A small,
-additive Runtime-surface release that closes the consumer's same-process
-integration gaps. Brain (H01–H11) is unchanged; `cogito-protocol` is unchanged;
+**Downstream integration snapshot.** A small, additive Runtime-surface release
+that closes a same-process integration gap for embedding consumers. Brain
+(H01–H11) is unchanged; `cogito-protocol` is unchanged;
 no `ConversationEvent` `SCHEMA_VERSION` bump. All additions are
 backward-compatible at the API level. Stability posture stays 0.x: the public
 surface may still evolve in a later minor — pin a commit/tag for integration.
@@ -48,8 +50,9 @@ surface may still evolve in a later minor — pin a commit/tag for integration.
   `Runtime`. The `sessions` registry was insert-only, so a crashed/closed
   session could not be reopened in-process; `close_session` drives shutdown then
   deregisters, and releases the session's `ConversationStore` resources on actor
-  exit (flush + close). Driven by praxis RR-7 / issue #55. Pure Runtime surface,
-  no protocol change. See ADR-0034.
+  exit (flush + close). Driven by issue #55 (a same-process resume requirement
+  from a downstream integration). Pure Runtime surface, no protocol change. See
+  ADR-0034.
 - `RuntimeBuilder::metrics(Arc<dyn MetricsRecorder>)`: the `MetricsRecorder`
   seam is now consumer-injectable (it was hardcoded to `NoOpMetricsRecorder`
   with no setter, so the trait was unreachable). The default stays

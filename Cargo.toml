@@ -49,7 +49,7 @@ cogito-store = { path = "crates/cogito-store" }
 cogito-model = { path = "crates/cogito-model" }
 cogito-tools = { path = "crates/cogito-tools" }
 cogito-sandbox = { path = "crates/cogito-sandbox" }
-cogito-skills = { path = "crates/cogito-skills", version = "0.2.1" }
+cogito-skills = { path = "crates/cogito-skills", version = "0.2.2" }
 cogito-strategy = { path = "crates/cogito-strategy" }
 cogito-jobs = { path = "crates/cogito-jobs" }
 cogito-mcp = { path = "crates/cogito-mcp" }
