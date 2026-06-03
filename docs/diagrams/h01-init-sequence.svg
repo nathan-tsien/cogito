@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 1060" role="img"
+     aria-label="Canonical Init to ContextManaged to PromptBuilt sequence: H10 and H03 on entry, then H11 context management, then H04, H05 and H09 pre_prompt build the ModelInput before streaming.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .grp { font-size: 12px; font-weight: 700; fill: #5a6b8c; letter-spacing: .02em; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .runtime { fill: #e7ebf0; stroke: #7d8590; }
+    .brain { fill: #eef1fe; stroke: #4c6ef5; }
+    .comp { fill: #ffffff; stroke: #c7d0e0; }
+    .div { stroke: #dde3ea; stroke-width: 1; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+    .step-label { font-size: 11px; font-weight: 600; fill: #4c6ef5; }
+    .comp-title { font-size: 13px; font-weight: 700; }
+    .comp-body { font-size: 11px; fill: #444d56; }
+    .trans-band { fill: #e7ebf0; stroke: #7d8590; }
+    .trans-text { font-size: 12px; font-weight: 700; fill: #3a4a5c; }
+    .trans-sub { font-size: 11px; fill: #57606a; }
+    .state-header { fill: #eef1fe; stroke: #4c6ef5; }
+    .state-text { font-size: 13px; font-weight: 700; fill: #2b3de0; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <!-- Card background -->
+  <rect class="card" x="2" y="2" width="816" height="1056" rx="12"/>
+
+  <!-- Title -->
+  <text class="h1" x="24" y="36">H01 Turn Driver — Init → ContextManaged → PromptBuilt (canonical sequence)</text>
+  <text class="sub" x="24" y="54">Six steps + three state transitions that produce a ready-to-stream ModelInput</text>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- State header: Init -->
+  <!-- ─────────────────────────────────────────────────── -->
+  <rect class="state-header" x="280" y="72" width="260" height="38" rx="8"/>
+  <text class="state-text" x="410" y="96" text-anchor="middle">H01 state = Init</text>
+
+  <!-- Arrow down to step 1 -->
+  <path class="flow" d="M410,110 L410,134" marker-end="url(#arrow)"/>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- Step 1 — H10 Strategy Selector -->
+  <!-- ─────────────────────────────────────────────────── -->
+  <rect class="brain" x="40" y="134" width="740" height="100" rx="8"/>
+  <text class="step-label" x="60" y="158">step 1</text>
+  <text class="comp-title mono" x="120" y="158">H10 Strategy Selector</text>
+  <text class="comp-body" x="60" y="178">Pure value lookup, no I/O; returns <tspan class="mono">HarnessStrategy</tspan> (cached for the entire turn)</text>
+  <text class="comp-body" x="60" y="196">Strategy carries: system_prompt, allowed_tools, tool_order, length_budget, model_params, hooks, ...</text>
+  <text class="comp-body" x="60" y="214">H02 records: <tspan class="mono">TurnStarted { strategy_id, ... }</tspan></text>
+
+  <!-- Arrow down to step 2 -->
+  <path class="flow" d="M410,234 L410,258" marker-end="url(#arrow)"/>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- Step 2 — H03 Resume Coordinator -->
+  <!-- ─────────────────────────────────────────────────── -->
+  <rect class="comp" x="40" y="258" width="740" height="82" rx="8"/>
+  <text class="step-label" x="60" y="282">step 2</text>
+  <text class="comp-title mono" x="120" y="282">H03 Resume Coordinator</text>
+  <text class="note" x="520" y="282">(only if resuming)</text>
+  <text class="comp-body" x="60" y="302">Decides starting state for this turn; may say "skip to ToolDispatching with prior tool call"</text>
+  <text class="comp-body" x="60" y="320">Non-fresh turns: translates <tspan class="mono">ResumePoint</tspan> → <tspan class="mono">TurnEntry</tspan> (internal FSM entry variant)</text>
+
+  <!-- Arrow down to transition bar 1 -->
+  <path class="flow" d="M410,340 L410,360" marker-end="url(#arrow)"/>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- Transition bar 1: Init → ContextManaged -->
+  <!-- ─────────────────────────────────────────────────── -->
+  <rect class="trans-band" x="40" y="360" width="740" height="44" rx="6"/>
+  <text class="trans-text" x="410" y="383" text-anchor="middle">Init  →  ContextManaged</text>
+  <text class="trans-sub" x="410" y="397" text-anchor="middle">H02 records the transition before H01 proceeds</text>
+
+  <!-- Arrow down to step 3 -->
+  <path class="flow" d="M410,404 L410,428" marker-end="url(#arrow)"/>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- Step 3 — H11 Context Manage -->
+  <!-- ─────────────────────────────────────────────────── -->
+  <rect class="brain" x="40" y="428" width="740" height="136" rx="8"/>
+  <text class="step-label" x="60" y="452">step 3</text>
+  <text class="comp-title mono" x="120" y="452">H11 Context Manage</text>
+  <text class="comp-body" x="60" y="472">ALLOWED to do I/O: may call ModelGateway for summarization</text>
+  <text class="comp-body" x="60" y="490">May write multiple events via H02:</text>
+  <text class="comp-body" x="80" y="508">- <tspan class="mono">ContextCompacted</tspan> (when compaction occurs)</text>
+  <text class="comp-body" x="80" y="524">- <tspan class="mono">ContextDecisionRecorded</tspan> (always), <tspan class="mono">SystemPromptInjected</tspan>, <tspan class="mono">ToolFilterOverridden</tspan></text>
+  <text class="comp-body" x="60" y="542">Returns <tspan class="mono">ContextDecision { compaction_replacements, system_prompt_suffix, tool_filter_override }</tspan></text>
+
+  <!-- Arrow down to transition bar 2 -->
+  <path class="flow" d="M410,564 L410,584" marker-end="url(#arrow)"/>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- Transition bar 2: ContextManaged → PromptBuilt -->
+  <!-- ─────────────────────────────────────────────────── -->
+  <rect class="trans-band" x="40" y="584" width="740" height="44" rx="6"/>
+  <text class="trans-text" x="410" y="607" text-anchor="middle">ContextManaged  →  PromptBuilt</text>
+  <text class="trans-sub" x="410" y="621" text-anchor="middle">H02 records the transition before H01 proceeds</text>
+
+  <!-- Arrow down to step 4 -->
+  <path class="flow" d="M410,628 L410,652" marker-end="url(#arrow)"/>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- Step 4 — H04 Prompt Composer -->
+  <!-- ─────────────────────────────────────────────────── -->
+  <rect class="comp" x="40" y="652" width="740" height="100" rx="8"/>
+  <text class="step-label" x="60" y="676">step 4</text>
+  <text class="comp-title mono" x="120" y="676">H04 Prompt Composer</text>
+  <text class="note" x="600" y="676">PURE — no I/O</text>
+  <text class="comp-body" x="60" y="696">Deterministic; history projection: walk events in seq order; when <tspan class="mono">ContextCompacted</tspan> seen,</text>
+  <text class="comp-body" x="60" y="712">skip its <tspan class="mono">replaced_seq_range</tspan> and emit its replacement instead</text>
+  <text class="comp-body" x="60" y="730">System = <tspan class="mono">strategy.system_prompt</tspan> + any <tspan class="mono">SystemPromptInjected</tspan> from this turn's H11 events</text>
+  <text class="comp-body" x="60" y="748">Returns <tspan class="mono">ModelInput { system, messages, tools, params }</tspan></text>
+
+  <!-- Arrow down to step 5 -->
+  <path class="flow" d="M410,752 L410,776" marker-end="url(#arrow)"/>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- Step 5 — H05 Tool Surface Builder -->
+  <!-- ─────────────────────────────────────────────────── -->
+  <rect class="comp" x="40" y="776" width="740" height="100" rx="8"/>
+  <text class="step-label" x="60" y="800">step 5</text>
+  <text class="comp-title mono" x="120" y="800">H05 Tool Surface Builder</text>
+  <text class="note" x="600" y="800">PURE — no I/O</text>
+  <text class="comp-body" x="60" y="820">Filters <tspan class="mono">provider.list()</tspan> by <tspan class="mono">strategy.allowed_tools</tspan></text>
+  <text class="comp-body" x="60" y="838">If H11 wrote <tspan class="mono">ToolFilterOverridden</tspan> this turn, intersects strategy filter with the override</text>
+  <text class="comp-body" x="60" y="856">(override only narrows; H05 never expands beyond strategy)</text>
+  <text class="comp-body" x="60" y="874">Returns <tspan class="mono">Vec&lt;ToolDescriptor&gt;</tspan> sorted by <tspan class="mono">strategy.tool_order</tspan>; plugged into <tspan class="mono">ModelInput.tools</tspan></text>
+
+  <!-- Arrow down to step 6 -->
+  <path class="flow" d="M410,876 L410,900" marker-end="url(#arrow)"/>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- Step 6 — H09 Hook Pipeline pre_prompt -->
+  <!-- ─────────────────────────────────────────────────── -->
+  <rect class="comp" x="40" y="900" width="740" height="100" rx="8"/>
+  <text class="step-label" x="60" y="924">step 6</text>
+  <text class="comp-title mono" x="120" y="924">H09 Hook Pipeline  pre_prompt</text>
+  <text class="note" x="600" y="924">PURE — no I/O</text>
+  <text class="comp-body" x="60" y="944">Each hook returns <tspan class="mono">Allow</tspan> / <tspan class="mono">Modify(new_input)</tspan> / <tspan class="mono">Reject(reason)</tspan></text>
+  <text class="comp-body" x="60" y="962">Modify chains: the next hook sees the modified input</text>
+  <text class="comp-body" x="60" y="980">Reject: H01 transitions to Failed with <tspan class="mono">HookRejected</tspan> reason</text>
+  <text class="comp-body" x="60" y="998">H02 records: <tspan class="mono">HookFired { name, decision }</tspan> for each hook</text>
+
+  <!-- Arrow down to transition bar 3 -->
+  <path class="flow" d="M410,1000 L410,1014" marker-end="url(#arrow)"/>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- Transition bar 3: PromptBuilt → ModelCalling -->
+  <!-- ─────────────────────────────────────────────────── -->
+  <rect class="trans-band" x="40" y="1014" width="740" height="36" rx="6"/>
+  <text class="trans-text" x="410" y="1033" text-anchor="middle">PromptBuilt  →  ModelCalling</text>
+  <text class="trans-sub" x="410" y="1047" text-anchor="middle">H02 records; ModelGateway::stream begins</text>
+</svg>
