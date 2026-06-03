@@ -12,6 +12,8 @@ product. cogito decides; it does not deploy, serve traffic, authenticate
 users, or render UI — those are the consumer's responsibility (or a
 future SaaS layer wrapping cogito).
 
+<img src="./docs/diagrams/system-overview.svg" alt="cogito layers: a Surface drives the Runtime, which injects Session, Boundary and Hands into the Brain through Protocol traits; the Brain is an 11-component FSM Harness" width="860">
+
 ## What's inside
 
 - **Brain** — 11-component Harness (`H01` Turn Driver … `H11` Context

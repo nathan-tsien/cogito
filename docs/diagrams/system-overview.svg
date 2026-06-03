@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 560" role="img"
+     aria-label="cogito layers: a Surface drives the Runtime, which injects Session, Boundary and Hands into the Brain through Protocol traits; the Brain is an 11-component FSM Harness.">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .h1 { font-size: 16px; font-weight: 700; }
+    .lname { font-size: 14px; font-weight: 700; }
+    .sub { font-size: 11px; fill: #57606a; }
+    .note { font-size: 10.5px; fill: #6e7781; font-style: italic; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .flow { stroke: #7d8590; stroke-width: 2; fill: none; }
+    .runtime  { fill: #e7ebf0; stroke: #7d8590; }
+    .brain    { fill: #eef1fe; stroke: #4c6ef5; }
+    .session  { fill: #e6f4ea; stroke: #2da44e; }
+    .boundary { fill: #f3eefe; stroke: #8250df; }
+    .hands    { fill: #fdf3e3; stroke: #d4a72c; }
+    .protocol { fill: #e3f1f1; stroke: #1b9e9e; }
+    .surface  { fill: #e7ebf0; stroke: #7d8590; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7d8590"/>
+    </marker>
+  </defs>
+
+  <!-- Card background -->
+  <rect class="card" x="2" y="2" width="856" height="556" rx="12"/>
+  <text class="h1" x="24" y="34">cogito &#8212; system overview</text>
+
+  <!-- Surface (top, full width) -->
+  <rect class="surface" x="80" y="52" width="700" height="60" rx="8"/>
+  <text class="lname" x="430" y="77" text-anchor="middle" fill="#57606a">Surface</text>
+  <text class="sub" x="430" y="97" text-anchor="middle">cogito-cli / cogito-tui / consumer service</text>
+
+  <!-- Arrow Surface -> Runtime -->
+  <path class="flow" d="M430,112 L430,142" marker-end="url(#arrow)"/>
+
+  <!-- Runtime -->
+  <rect class="runtime" x="200" y="144" width="460" height="60" rx="8"/>
+  <text class="lname" x="430" y="169" text-anchor="middle" fill="#57606a">Runtime</text>
+  <text class="sub" x="430" y="189" text-anchor="middle">DI &#183; panic isolation &#183; per-session actor &#183; open_session &#8594; SessionHandle</text>
+
+  <!-- Arrow Runtime -> Brain -->
+  <path class="flow" d="M430,204 L430,232" marker-end="url(#arrow)"/>
+
+  <!-- Brain (large center box) -->
+  <rect class="brain" x="200" y="234" width="460" height="84" rx="8"/>
+  <text class="lname" x="430" y="260" text-anchor="middle" fill="#4c6ef5">Brain</text>
+  <text class="sub" x="430" y="278" text-anchor="middle">11-component Harness (H01 Turn Driver &#8230; H11 Context Manage)</text>
+  <text class="sub" x="430" y="296" text-anchor="middle">explicit FSM &#183; the only coordinator &#183; depends only on Protocol</text>
+  <text class="note" x="430" y="312" text-anchor="middle">injected dependencies arrive as trait objects (ADR-0004)</text>
+
+  <!-- Protocol band (spans the injection row) -->
+  <rect class="protocol" x="200" y="346" width="460" height="32" rx="6"/>
+  <text x="430" y="366" text-anchor="middle" font-size="11" font-weight="700" fill="#1b9e9e">Protocol traits &#8212; the only interface Brain calls across (cogito-protocol)</text>
+
+  <!-- Arrows: Brain down to Protocol band -->
+  <path class="flow" d="M430,318 L430,346" marker-end="url(#arrow)"/>
+
+  <!-- Session, Boundary, Hands boxes (bottom row) -->
+  <rect class="session" x="30" y="410" width="230" height="100" rx="8"/>
+  <text x="145" y="436" text-anchor="middle" font-size="13" font-weight="700" fill="#2da44e">Session</text>
+  <text class="sub" x="145" y="454" text-anchor="middle">event-sourced ConversationStore</text>
+  <text class="sub" x="145" y="470" text-anchor="middle">JSONL backend</text>
+  <text class="sub" x="145" y="486" text-anchor="middle">resume from log</text>
+
+  <rect class="boundary" x="315" y="410" width="230" height="100" rx="8"/>
+  <text x="430" y="436" text-anchor="middle" font-size="13" font-weight="700" fill="#8250df">Boundary</text>
+  <text class="sub" x="430" y="454" text-anchor="middle">ModelGateway</text>
+  <text class="sub" x="430" y="470" text-anchor="middle">Anthropic Messages</text>
+  <text class="sub" x="430" y="486" text-anchor="middle">OpenAI-compat (vLLM / SGLang)</text>
+
+  <rect class="hands" x="600" y="410" width="230" height="100" rx="8"/>
+  <text x="715" y="436" text-anchor="middle" font-size="13" font-weight="700" fill="#d4a72c">Hands</text>
+  <text class="sub" x="715" y="454" text-anchor="middle">ToolProvider / JobManager</text>
+  <text class="sub" x="715" y="470" text-anchor="middle">HookHandler / StorageSystem</text>
+  <text class="sub" x="715" y="486" text-anchor="middle">builtin + MCP + plugin + subagent</text>
+
+  <!-- Arrows: Protocol band -> Session, Boundary, Hands -->
+  <path class="flow" d="M295,378 C200,378 200,392 145,410" marker-end="url(#arrow)"/>
+  <path class="flow" d="M430,378 L430,410" marker-end="url(#arrow)"/>
+  <path class="flow" d="M565,378 C660,378 660,392 715,410" marker-end="url(#arrow)"/>
+
+  <!-- inject-up arrows: Session/Boundary/Hands -> Runtime (via Runtime arrows on sides) -->
+  <!-- Left injection label -->
+  <text class="note" x="430" y="540" text-anchor="middle">Session, Boundary and Hands are injected into Brain by Runtime via Protocol trait objects</text>
+</svg>
