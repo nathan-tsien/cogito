@@ -8,6 +8,7 @@ use std::time::Duration;
 use cogito_jobs::LocalJobManager;
 use cogito_protocol::gateway::ModelGateway;
 use cogito_protocol::job::JobManager;
+use cogito_protocol::metrics::{MetricsRecorder, NoOpMetricsRecorder};
 use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::store::ConversationStore;
 use cogito_protocol::strategy::HarnessStrategy;
@@ -42,6 +43,10 @@ pub struct Runtime {
     tools: Arc<dyn ToolProvider>,
     /// Default strategy applied to every new session.
     strategy: HarnessStrategy,
+    /// Metrics sink shared by every session opened on this runtime. Injected
+    /// via [`RuntimeBuilder::metrics`]; defaults to `NoOpMetricsRecorder`
+    /// (ADR-0036). Cloned into each session's `SessionState` and hook pipeline.
+    metrics: Arc<dyn MetricsRecorder>,
     /// Optional Skill loader provider. Required only when the strategy
     /// selects `SystemPromptInjectorConfig::Skill`; otherwise `None`.
     skills: Option<Arc<dyn SkillProvider>>,
@@ -278,12 +283,13 @@ impl Runtime {
             record_session_started_with_meta(&recorder, id, meta).await;
         }
 
-        // Build metrics first so the hook pipeline shares the same Arc rather
-        // than embedding its own private NoOpMetricsRecorder. Sprint 6 (Context
-        // C2) needs to record context-decision metrics directly via
-        // TurnDeps.metrics, not via hooks — so keep both fields in sync here.
-        let metrics: Arc<dyn cogito_protocol::MetricsRecorder> =
-            Arc::new(cogito_protocol::NoOpMetricsRecorder);
+        // Clone the runtime's injected metrics recorder so the hook pipeline
+        // shares the same Arc rather than embedding its own private no-op.
+        // Sprint 6 (Context C2) needs to record context-decision metrics
+        // directly via TurnDeps.metrics, not via hooks — so keep both fields
+        // in sync here. The recorder is configured once via
+        // RuntimeBuilder::metrics (ADR-0036), defaulting to NoOpMetricsRecorder.
+        let metrics = Arc::clone(&self.metrics);
         let hooks = Arc::new(
             crate::harness::hooks::CompositeHookPipeline::with_handlers_and_metrics(
                 Vec::new(),
@@ -421,6 +427,7 @@ pub struct RuntimeBuilder {
     model: Option<Arc<dyn ModelGateway>>,
     tools: Option<Arc<dyn ToolProvider>>,
     strategy: Option<HarnessStrategy>,
+    metrics: Option<Arc<dyn MetricsRecorder>>,
     skills: Option<Arc<dyn SkillProvider>>,
     job_mgr: Option<Arc<dyn JobManager>>,
     strategy_registry: Option<Arc<dyn cogito_protocol::strategy_registry::StrategyRegistry>>,
@@ -488,6 +495,18 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Inject a [`MetricsRecorder`]. Optional — defaults to
+    /// `NoOpMetricsRecorder` when unset. The recorder is shared by every
+    /// session opened on this runtime (its `SessionState` and hook pipeline).
+    /// This is the observability extension point (ADR-0036): a consumer
+    /// implements `MetricsRecorder` against its own telemetry and injects it
+    /// here; the metric vocabulary then grows additively over time.
+    #[must_use]
+    pub fn metrics(mut self, metrics: Arc<dyn MetricsRecorder>) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
     /// Override the default `LocalJobManager`. Surface code passes the
     /// same `Arc<LocalJobManager>` it threads into `RunTestsTool::new`
     /// (or any other async-tool constructor) so async tool submissions
@@ -550,6 +569,9 @@ impl RuntimeBuilder {
             model,
             tools,
             strategy,
+            metrics: self
+                .metrics
+                .unwrap_or_else(|| Arc::new(NoOpMetricsRecorder) as Arc<dyn MetricsRecorder>),
             skills: self.skills,
             job_mgr,
             strategy_registry: self.strategy_registry,
@@ -768,5 +790,73 @@ fn tag_subagent(
             subagent_call_id: Some(call_id.to_string()),
         },
         other => other,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)] // tests
+mod metrics_setter_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+
+    use cogito_mock_model::MockModelGateway;
+    use cogito_protocol::HookLifecyclePoint;
+    use cogito_protocol::metrics::MetricsRecorder;
+    use cogito_protocol::strategy::HarnessStrategy;
+    use cogito_store::JsonlStore;
+    use cogito_tools::{BuiltinToolProvider, ReadFile};
+
+    use super::{Runtime, RuntimeBuilder};
+
+    /// Counts `record_counter` calls so a test can prove the runtime is using
+    /// the injected recorder rather than the hardcoded no-op.
+    #[derive(Default)]
+    struct SpyMetrics {
+        counters: AtomicU64,
+    }
+    impl MetricsRecorder for SpyMetrics {
+        fn record_hook_invocation(&self, _: HookLifecyclePoint, _: &str, _: Duration, _: bool) {}
+        fn record_counter(&self, _: &str, _: &[(&str, &str)]) {
+            self.counters.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn min_builder() -> RuntimeBuilder {
+        let dir = tempfile::tempdir().unwrap();
+        Runtime::builder()
+            .store(Arc::new(JsonlStore::new(dir.path().to_path_buf())))
+            .model(Arc::new(MockModelGateway::new()))
+            .tools(Arc::new(
+                BuiltinToolProvider::builder()
+                    .with_tool(Arc::new(ReadFile))
+                    .build(),
+            ))
+            .strategy(HarnessStrategy::default_with_model("mock"))
+    }
+
+    #[tokio::test]
+    async fn metrics_setter_injects_recorder() {
+        let spy = Arc::new(SpyMetrics::default());
+        let rt = min_builder()
+            .metrics(spy.clone() as Arc<dyn MetricsRecorder>)
+            .build()
+            .unwrap();
+
+        // The runtime must hold and use the injected recorder, not the no-op.
+        rt.metrics.record_counter("probe", &[]);
+        assert_eq!(
+            spy.counters.load(Ordering::SeqCst),
+            1,
+            "Runtime must hold the injected MetricsRecorder"
+        );
+    }
+
+    #[tokio::test]
+    async fn metrics_defaults_to_noop_when_unset() {
+        // No `.metrics(..)` call: builds fine and the default recorder is a
+        // harmless no-op (calling it must not panic).
+        let rt = min_builder().build().unwrap();
+        rt.metrics.record_counter("probe", &[]);
     }
 }

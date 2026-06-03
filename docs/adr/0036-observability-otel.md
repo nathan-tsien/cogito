@@ -6,6 +6,12 @@ Proposed (draft, 2026-06-03). Reframed from "build an OpenTelemetry adapter
 crate" to "lock the observability **extension point**; let adapters and metric
 density grow incrementally."
 
+Decision item 1 (the injectable `RuntimeBuilder::metrics()` setter) is
+**implemented (2026-06-03)** — `MetricsRecorder` is now consumer-injectable;
+default stays `NoOpMetricsRecorder`. The remaining items (additive-evolution
+discipline, incremental metric density, the optional OTel adapter crate) stay
+as drafted below.
+
 Consumer-directed path: cogito core exposes the observability seam and stays
 open; the concrete OTel adapter and the metric taxonomy are layered on / added
 during development, not built up front. This is the same core-responsibility
@@ -39,10 +45,12 @@ are a subscriber concern the consumer owns.
 
 Lock the extension point; defer the adapter.
 
-1. **Make `MetricsRecorder` injectable (the missing entry point).** Add a
-   public `RuntimeBuilder::metrics(Arc<dyn MetricsRecorder>)` setter; the
-   default stays `NoOpMetricsRecorder`. This is the small, near-term piece —
-   without it the trait is dead. Mirrors the existing builder setters.
+1. **Make `MetricsRecorder` injectable (the missing entry point).** DONE
+   (2026-06-03): `RuntimeBuilder::metrics(Arc<dyn MetricsRecorder>)` setter
+   added; the default stays `NoOpMetricsRecorder`; `open_inner` clones the
+   runtime's recorder into each session's `SessionState` and hook pipeline
+   instead of the previously hardcoded no-op. Mirrors the existing builder
+   setters. Without it the trait was dead.
 
 2. **`MetricsRecorder` evolves additively — forever.** Every new method ships
    a default (no-op) body, so adding instrumentation never breaks a consumer's
