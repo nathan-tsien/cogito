@@ -375,8 +375,9 @@ covers both the Subagent full upgrade AND Plugin git distribution.
 - [ ] `cogito-store --features postgres`: production multi-replica backend (folded into umbrella `cogito-store` crate per ADR-0024; was originally `cogito-store-postgres`)
 - [ ] `cogito-storage-s3` crate: object storage backend
 - [ ] ~~`cogito-protocol`: add `TenantContext` optional field on `ExecCtx`~~ — **dropped (ADR-0014 Route A)**
-- [ ] `cogito-protocol`: add `MetricsRecorder` trait
-- [ ] `cogito-observability-otel` crate: OpenTelemetry adapter (traces + metrics)
+- [x] `cogito-protocol`: `MetricsRecorder` trait (already shipped Sprint 5, no-op default — this line was stale)
+- [ ] **Observability extension point (ADR-0036):** make `MetricsRecorder` injectable (`RuntimeBuilder::metrics()` setter — currently hardcoded no-op) + lock additive-evolution rule. Near-term, small. Metric density added incrementally; traces via consumer-owned `tracing` subscriber.
+- [ ] `cogito-observability-otel` crate: OpenTelemetry adapter — **DEFERRED / optional** (consumer can implement `MetricsRecorder` against its own telemetry once the setter exists)
 - [ ] Per-session resource budget enforcement (memory cap, CPU time cap)
 - [ ] `cogito-sandbox` redesign: lazy provisioning + credential proxy
 - [ ] Tag `v0.4.0`

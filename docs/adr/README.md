@@ -38,7 +38,7 @@ recording an architectural decision and its context.
 - [0031](./0031-workspace-provisioning-and-scoping.md) — Workspace provisioning + scoping (per-session ephemeral workspace, Local root = project cwd, exec-cwd unification) — **Accepted 2026-06-01 (skill-support Phase 1)**
 - [0032](./0032-skill-bundle-reachability.md) — Skill-bundle reachability via a read-only skill-root scope (`ExecCtx.skill_roots`; `read_file`/`list_dir` resolve into registered skill dirs; no Local copy; SaaS placement deferred to Phase 3) — **Accepted, implemented (skill-support Phase 2)**
 - [0033](./0033-skill-dependency-descriptor.md) — Skill runtime dependencies: **no custom descriptor** (Agent Skills standard defines no `runtime`/`requires` — only free-text `compatibility`); Local = agent self-heal via `bash` (ADR-0023 Position A); SaaS = pre-baked runtime image + optional activation fast-fail; safe controlled auto-install deferred to Phase 3 (sandbox); no code change in v0.2 — **Proposed (skill-support Phase 2)**
-- [0036](./0036-observability-otel.md) — OpenTelemetry adapter (`cogito-observability-otel`: composable tracing Layer + `MetricsRecorder` impl; consumer owns the global subscriber; `MetricsRecorder` trait already shipped in Sprint 5) — **Proposed (draft 2026-06-03, pending review; v0.4)**
+- [0036](./0036-observability-otel.md) — Observability extension point: make `MetricsRecorder` injectable (`RuntimeBuilder::metrics()` setter — currently hardcoded no-op) + lock additive-evolution rule; metric density grows incrementally; traces via consumer-owned `tracing` subscriber; OTel adapter crate DEFERRED/optional — **Proposed (draft 2026-06-03; near-term piece = the setter)**
 
 ## Template
 
