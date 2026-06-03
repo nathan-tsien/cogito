@@ -361,19 +361,19 @@ covers both the Subagent full upgrade AND Plugin git distribution.
 > `open_session_with`, ADR-0028) landed early in v0.2 Sprint 12; the
 > session-registry lifecycle (`get_session` / `close_session` +
 > store-resource release on actor exit, ADR-0034) landed early on
-> 2026-06-03 on consumer direction (praxis RR-7 / issue #55). v0.4 now
+> 2026-06-03 on downstream-integration direction (issue #55). v0.4 now
 > covers the remaining multi-replica / TenantContext / store work.
 >
 > **Cut (2026-06-03):** self-describing resume (rebuild a session's
 > provider surface on any replica without the caller re-supplying the
-> spec) is **dropped**. The consumer (praxis) owns gateway routing and
+> spec) is **dropped**. The consumer owns gateway routing and
 > re-supplies the `SessionSpec` on every resume, and disallows
 > cogito-internal-initiated surface changes — so there is no surface
 > mutation the consumer's gateway cannot reconstruct. Caller-re-supplies
 > (ADR-0028 §5) stays the resume contract. (Draft ADR-0035 withdrawn.)
 
-- [x] **ADR-0034**: Runtime session-registry lifecycle (`get_session` / `close_session` + store release on actor exit) — pulled forward 2026-06-03 (praxis RR-7 / issue #55), unblocks same-process re-resume / idle reaper
-- [ ] **ADR-0012**: Sandbox lifecycle — **DEFERRED (2026-06-03), not scheduled.** Execution seam (`CommandExecutor`) already in place; build the real sandbox only when cogito runs untrusted/attacker-reachable code. Gated on praxis answering: does it expose bash/exec to the model, with attacker-reachable input? _(renumbered from ADR-0010)_
+- [x] **ADR-0034**: Runtime session-registry lifecycle (`get_session` / `close_session` + store release on actor exit) — pulled forward 2026-06-03 (issue #55), unblocks same-process re-resume / idle reaper
+- [ ] **ADR-0012**: Sandbox lifecycle — **DEFERRED (2026-06-03), not scheduled.** Execution seam (`CommandExecutor`) already in place; build the real sandbox only when cogito runs untrusted/attacker-reachable code. Gated on the consumer answering: does it expose bash/exec to the model, with attacker-reachable input? _(renumbered from ADR-0010)_
 - [ ] **ADR-0013**: Credential isolation → **Credential Broker** seam — **DEFERRED (2026-06-03).** Tool/exec auth (esp. MCP creds) out of core scope; Brain never touches credentials. Includes the execution env-policy hardening (curated allowlist, default-deny secrets) instead of a naive `inherit_env=false` flip. Same trigger as ADR-0012. _(renumbered from ADR-0011)_
 - [x] **ADR-0014**: TenantContext — **Accepted Route A (2026-06-03): no `ExecCtx` propagation, no protocol change.** Tenant identity stays in `SessionMeta` (ADR-0028) for attribution; consumers bind tenant into per-session providers (ADR-0028). _(renumbered from ADR-0012)_
 - [ ] `cogito-store --features postgres`: production multi-replica backend (folded into umbrella `cogito-store` crate per ADR-0024; was originally `cogito-store-postgres`)
