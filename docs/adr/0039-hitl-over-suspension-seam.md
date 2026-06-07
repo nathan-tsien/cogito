@@ -2,10 +2,13 @@
 
 ## Status
 
-Proposed (2026-06-07) — design + boundary decision. The only proposed core
-change is one additive, observation-only `JobStatus` variant (Decision 5);
-everything else is documentation of a pattern that already works on existing
-mechanisms. No HITL feature is added to core.
+Accepted (2026-06-07) — the one proposed core change, the additive
+observation-only `JobStatus::AwaitingInput` variant (Decision 5), is
+implemented; everything else is documentation of a pattern that already works
+on existing mechanisms. No HITL feature is added to core. The bundled
+`LocalJobManager` stays CLI-grade and deliberately never reports
+`AwaitingInput` (it cannot distinguish a human wait from compute); reporting it
+is opt-in for a HITL-capable `JobManager` per Decision 5.
 
 Related: ADR-0003 (FSM `Paused` state), ADR-0006 (Runtime resume-on-job-
 completion), ADR-0025 (Hands sub-layer; `JobManager` / `LocalJobSubmitter`

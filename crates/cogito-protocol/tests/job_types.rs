@@ -16,6 +16,7 @@ fn job_status_serde_covers_all_variants() -> serde_json::Result<()> {
     for status in [
         JobStatus::Pending,
         JobStatus::Running,
+        JobStatus::AwaitingInput,
         JobStatus::Completed,
         JobStatus::Failed,
         JobStatus::Cancelled,
@@ -24,6 +25,18 @@ fn job_status_serde_covers_all_variants() -> serde_json::Result<()> {
         let back: JobStatus = serde_json::from_str(&json)?;
         assert_eq!(status, back);
     }
+    Ok(())
+}
+
+#[test]
+fn job_status_awaiting_input_wire_name() -> serde_json::Result<()> {
+    // ADR-0039 Decision 5: observation-only state a HITL-capable JobManager
+    // MAY report for a job parked on a human. The wire name must be the
+    // snake_case rendering so dashboards/operators read a stable token.
+    let json = serde_json::to_string(&JobStatus::AwaitingInput)?;
+    assert_eq!(json, "\"awaiting_input\"");
+    let back: JobStatus = serde_json::from_str(&json)?;
+    assert_eq!(JobStatus::AwaitingInput, back);
     Ok(())
 }
 
