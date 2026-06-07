@@ -1,7 +1,7 @@
 [package]
 name = "cogito-config"
 description = "Configuration loading for the cogito Agent Runtime: value types, ConfigLoader trait, ENV / file source loaders, layered partial merge."
-version = "0.2.2"
+version = "0.2.3"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

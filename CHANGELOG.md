@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-07
+
+**Harness loop control.** Two additive changes that give the harness an honest
+stop condition and an observability affordance for human-in-the-loop. No
+protocol change beyond two additive, `#[non_exhaustive]` enum variants; no
+`SCHEMA_VERSION` bump.
+
+### Added
+
+- **Agent-loop iteration budget (ADR-0038).** `HarnessStrategy::max_turns`
+  (default 16) was declared but never enforced; the H01 inner loop could run
+  unbounded. It is now enforced by replay-derived model-call count
+  (`TurnCtx::model_calls`, re-seeded from the event log on every resume path so
+  the budget survives a crash mid-turn). On hit, the turn stops with the new
+  `TurnFailureReason::MaxTurnsExceeded { turns }` (additive variant). On-hit is
+  a **fail** — an honest primitive; continue/summarize/raise-the-budget are
+  consumer policy layered on the failure, not core behavior. Orthogonal to
+  `MAX_CONSECUTIVE_TOOL_ERRORS` and `TurnTimedOut`. Covered by fresh-turn,
+  async-pause/resume, and crash-resume tests.
+- **`JobStatus::AwaitingInput` (ADR-0039).** A single observation-only
+  `JobStatus` variant, reported solely by `JobManager::status()` — never on the
+  turn FSM or the resume path, so it is off the safety-critical resume
+  coordinator (no `TurnPaused` payload change, no resume-coordinator change). A
+  HITL-capable `JobManager` MAY report it for a job parked on a human (an
+  ask-user question or an approval decision) so operators and dashboards can
+  distinguish "waiting on a person" from compute `Running`. Optional for
+  implementations; the bundled `LocalJobManager` stays CLI-grade and never
+  reports it.
+
+### Docs / decisions
+
+- **ADR-0038** (agent-loop iteration budget) — Accepted, implemented.
+- **ADR-0039** (human-in-the-loop is a consumer flow over the suspension seam)
+  — Accepted. Records the boundary: cogito owns the controllable-harness
+  mechanism, not the HITL flow or its policy. Ask-user (`message_ask_user`) and
+  tool-approval gates both reduce to the existing `InvokeOutcome::Async` →
+  `Paused`/`TurnPaused` → resume-on-`JobCompletion` seam ("humans-as-jobs"); no
+  HITL tool/UI/policy is added to core. Specifies the durable-`JobManager`
+  contract a multi-replica consumer must satisfy so a turn parked on a human
+  survives a process restart (the bundled `LocalJobManager` is in-process and
+  will strand a parked turn across restart — documented, not fixed here).
+
 ## [0.2.2] - 2026-06-03
 
 ### Added
