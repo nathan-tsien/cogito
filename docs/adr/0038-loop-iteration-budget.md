@@ -130,6 +130,41 @@ What we give up / accept:
   tests (`make chaos`): a turn paused/resumed mid-loop must resume with the same
   count.
 
+## Prior art — on-hit behavior across agent frameworks
+
+The choice of "fail on hit" (Decision 3) was checked against how other agent
+frameworks handle cap exhaustion. The behaviors cluster into four buckets:
+
+| Framework | Cap / default | On hit |
+|---|---|---|
+| OpenAI Agents SDK | `max_turns`, 10 | **Hard raise** `MaxTurnsExceeded` (opt-in `error_handlers` can synthesize) |
+| Claude Agent SDK | `max_turns`, None (unlimited) | **Error sentinel** `ResultMessage{subtype="error_max_turns"}`, no result; resume with higher limit |
+| Pydantic AI | `request_limit`, 50 | **Hard raise** `UsageLimitExceeded` |
+| LangChain `AgentExecutor` | `max_iterations`, 15 | `"force"` (default) → **sentinel string**; `"generate"` → **synthesize** one final answer |
+| smolagents | `max_steps`, 20 | **Synthesize** final answer from memory (no raise) |
+| Hermes | `agent.max_turns`, ~90 | **Degrade**: one tool-stripped summary call; proposed bounded auto-continue (off by default) |
+| OpenAI Codex CLI | — (no cap) | No iteration cap at all |
+| AutoGPT | `continuous_limit`, ∞ | Silent stop; default non-continuous mode prompts the user per cycle |
+
+Buckets: **(A) hard fail / sentinel** — OpenAI Agents SDK, Pydantic AI, Claude
+SDK, LangChain-`force`; **(B) synthesize a final answer** — smolagents,
+LangChain-`generate`, Hermes, OpenAI's opt-in handler; **(C) auto-continue** —
+nobody does this by default (only Hermes' off-by-default proposal); **(D) ask
+the user to continue** — only AutoGPT's non-continuous mode.
+
+ADR-0038 sits in bucket (A), matching the two production-grade SDKs most aligned
+with cogito's posture: the variant name `MaxTurnsExceeded` is identical to the
+OpenAI Agents SDK exception, and "resume the session with a higher budget" (our
+Decision 3 consumer recipe) is exactly the Claude Agent SDK's recommended
+continuation. Bucket (B) is the main softer alternative and is reachable by the
+consumer (tool-stripped summary turn) without being core policy. The default of
+`16` sits inside the common band (10 / 15 / 20 / ~90 / unlimited).
+
+(Sourced survey on file; see PR discussion. OpenAI Agents SDK `run.py` /
+`run_config.py`; Claude Agent SDK agent-loop docs + `types.py`; Pydantic AI
+`usage.py`; LangChain `AgentExecutor`; smolagents `agents.py`; Hermes
+agent-loop docs.)
+
 ## Alternatives considered
 
 - **Rely only on the wall-clock `TurnTimedOut`.** Rejected: time is not
