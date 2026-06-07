@@ -11,8 +11,7 @@
 > live-server MCP happy-path integration test (see the Sprint 4 closure
 > note); it was a v0.2 candidate but no in-process MCP test-server fixture
 > materialized, so it is now carried forward to v0.3.
-> **v0.2 · Extensibility — Sprints 11–12 shipped; Skill-support /
-> Workspace workstream shipped; Sprint 13 in progress.** Sprint 11
+> **v0.2 · Extensibility — shipped; tagged `v0.2.0` (2026-06-02).** Sprint 11
 > (Subagent S2 minimal); Sprint 12 (per-session provider injection —
 > ADR-0028 — and the local-path plugin loader for Skills + MCP —
 > ADR-0021). An unplanned but coherent **Complete Skill Support +
@@ -21,7 +20,14 @@
 > the Workspace seam (ADR-0030/0031), the builtin file/search tool catalog
 > (`write_file` / `list_dir` / `edit` / `grep` / `glob`), and skill-bundle
 > reachability + dependency descriptor (ADR-0029/0032/0033, ADR-0023
-> finalized). Now: Sprint 13 (v0.2 硬化 + tag `v0.2.0`).
+> finalized). Sprint 13 (v0.2 硬化 + tag `v0.2.0`) closed the version.
+> **Post-v0.2.0 hardening — additive patch snapshots `v0.2.1`/`v0.2.2`/`v0.2.3`.**
+> Interstitial Runtime/harness-surface releases between v0.2 and v0.3, each
+> additive with no `SCHEMA_VERSION` bump: `v0.2.1` (session-registry lifecycle
+> ADR-0034 + injectable `MetricsRecorder` ADR-0036), `v0.2.2` (local execution
+> safety ADR-0037), `v0.2.3` (harness loop control — iteration budget ADR-0038 +
+> HITL-over-suspension-seam ADR-0039). See the "Post-v0.2.0 hardening" subsection
+> below. Next theme: v0.3 (Distributed Collaboration).
 
 ## Version plan
 
@@ -326,8 +332,8 @@ fragment the picture over time — durable docs must carry the decision).
 - [x] Cross-scope same-name collision test (Repo-skill vs Plugin-namespaced skill): plugin skills are namespaced `<plugin_id>:<name>` (ADR-0021 §3), so a repo `review` and plugin `acme:review` coexist rather than collide — pinned by `repo_and_plugin_same_name_coexist_via_namespace` in `cogito-skills/tests/discovery.rs`. Same-scope duplicates resolve by precedence, non-fatal (`cogito-plugin` PR #52; `duplicate_name_in_same_dir_resolves_by_precedence_not_fatal`)
 - [x] `plugin.id` format validation (`[a-z0-9-]+`, ADR-0021 §1) enforced in the manifest parser — closes the Sprint 12 deferred follow-up (`PluginError::InvalidId`)
 - [x] Resume-chaos: new scenario `plugin_skill_then_tool` — crash injection while a plugin-loaded skill is mid-activation; all 4 oracles pass at both boundaries
-- [ ] CHANGELOG.md v0.2 entry
-- [ ] Tag `v0.2.0`
+- [x] CHANGELOG.md v0.2 entry
+- [x] Tag `v0.2.0`
 
 **Sprint 13 carry-forward to v0.3:** the Sprint 4 MCP happy-path
 integration test (live streamable-HTTP MCP server with bearer auth,
@@ -335,6 +341,37 @@ asserting `tools/list` + `tools/call` end-to-end through `cogito chat`)
 remains deferred — it needs an in-process MCP test-server fixture that
 does not yet exist. Resilience invariants are already covered
 (`crates/cogito-mcp/tests/integration.rs`).
+
+#### Post-v0.2.0 hardening (additive patch snapshots, not new sprints)
+
+Interstitial releases landed between v0.2 and the start of v0.3 — each a
+small, additive Runtime/harness-surface change with no `ConversationEvent`
+`SCHEMA_VERSION` bump, recorded here so the durable doc carries the picture
+(specs fragment over time). Stability posture stays 0.x.
+
+- **`v0.2.1` (2026-06-03):** `Runtime::get_session` / `close_session` +
+  store-resource release on actor exit (same-process re-resume; ADR-0034,
+  issue #55); `RuntimeBuilder::metrics()` makes `MetricsRecorder`
+  consumer-injectable (ADR-0036). No protocol change.
+- **`v0.2.2` (2026-06-03):** local execution safety (ADR-0037) —
+  `RuntimeBuilder::hooks()` (H09 injectable), `CommandGuardHook` (bash accident
+  guard, **not** a security boundary), `EnvPolicy::Allowlist` on `DirectConfig`.
+- **`v0.2.3` (2026-06-07):** harness loop control.
+  - [x] **ADR-0038** (agent-loop iteration budget) — enforce the
+    already-declared-but-dead `HarnessStrategy::max_turns` (default 16) via
+    replay-derived model-call count (`TurnCtx::model_calls`, re-seeded from the
+    event log on every resume path); on-hit fails the turn with the additive
+    `TurnFailureReason::MaxTurnsExceeded { turns }`. Continue/summarize are
+    consumer policy layered on the failure. Implemented PR #66; crash-resume
+    seeding guard PR #66 follow-up.
+  - [x] **ADR-0039** (HITL is a consumer flow over the suspension seam) — records
+    the boundary (core owns the controllable-harness mechanism, not the HITL
+    flow/policy); ask-user and tool-approval gates both reduce to the existing
+    `InvokeOutcome::Async` → `Paused`/`TurnPaused` → resume-on-`JobCompletion`
+    seam ("humans-as-jobs"). Sole core change: the additive, observation-only
+    `JobStatus::AwaitingInput` (reported only by `JobManager::status()`, off the
+    resume path). Specifies the durable-`JobManager` contract a multi-replica
+    consumer must satisfy. Implemented PR #67.
 
 ### v0.3 · Distributed Collaboration
 
