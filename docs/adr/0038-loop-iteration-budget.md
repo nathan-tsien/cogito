@@ -2,8 +2,10 @@
 
 ## Status
 
-Proposed (2026-06-07) — design only; implementation is a follow-up (no code
-landed with this ADR).
+Accepted (2026-06-07) — implemented in PR #66. `TurnFailureReason::MaxTurnsExceeded { turns }`
+lands additively, the H01 inner loop is bounded by replay-derived model-call count
+(`TurnCtx::model_calls`, seeded from the event log on every resume path), and on-hit
+fails the turn. Covered by fresh-turn, async-pause/resume, and crash-resume tests.
 
 Related: ADR-0003 (Turn Driver as explicit state machine; H01 owns loop
 termination), ADR-0006 (Runtime + H01 execution model), ADR-0026 (strategy

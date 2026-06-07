@@ -51,6 +51,18 @@ pub enum JobStatus {
     Pending,
     /// A worker is actively executing the job.
     Running,
+    /// Parked pending an external party's input (ADR-0039 Decision 5).
+    ///
+    /// Observation-only: reported solely by [`JobManager::status`], never on
+    /// the turn FSM or the resume path, so it is purely additive and off the
+    /// safety-critical resume coordinator. A HITL-capable `JobManager` MAY
+    /// report this for a job parked on a human (a `message_ask_user` question
+    /// or an approval decision) so operators and `SaaS` dashboards can answer
+    /// "which sessions are waiting on a person" without overloading `Running`.
+    /// Optional for implementations: a manager that cannot distinguish a human
+    /// wait from compute may keep reporting `Running`, and Brain treats this
+    /// like any other non-terminal status. Not a terminal state.
+    AwaitingInput,
     /// Reached a terminal successful state.
     Completed,
     /// Reached a terminal error state.
