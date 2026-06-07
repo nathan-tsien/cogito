@@ -317,6 +317,12 @@ async fn apply_resume_point(
         ResumePoint::FreshTurn => Ok(()),
 
         ResumePoint::RestartCurrentTurn { turn_id } => {
+            // TODO(ADR-0038): when this is wired to actually re-spawn the turn,
+            // seed `model_calls` carefully. The interrupted call's
+            // `ModelCallStarted` is already in the log, so
+            // `count_model_calls_in_events` counts it; re-issuing that same call
+            // increments again in `prompt_built` → an off-by-one over-count.
+            // Seed from the log MINUS the restarted (uncompleted) call.
             // TODO(post-Sprint-3): recover user_input from initial_events
             // (EventPayload::TurnStarted { user_input } at the latest
             // TurnStarted boundary) and call

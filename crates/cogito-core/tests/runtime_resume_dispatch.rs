@@ -28,10 +28,13 @@ use cogito_protocol::ids::{EventId, SessionId, TurnId};
 use cogito_protocol::store::ConversationStore as _;
 use cogito_protocol::strategy::HarnessStrategy;
 use cogito_protocol::stream::StreamEvent;
+use cogito_protocol::tool::ToolResult;
+use cogito_protocol::turn::TurnFailureReason;
 use cogito_protocol::{ConversationEvent, EventPayload, SCHEMA_VERSION, SessionMeta};
 use cogito_store::JsonlStore;
 use cogito_test_fixtures::canonical_sample_session;
 use cogito_tools::{BuiltinToolProvider, ReadFile};
+use futures::StreamExt as _;
 
 /// Hand-build a `ConversationEvent` with the given seq + payload.
 fn evt(
@@ -177,6 +180,178 @@ async fn resume_from_model_completed_fast_paths_to_turn_completed()
     assert!(
         matches!(out, ShutdownOutcome::Clean { .. }),
         "expected Clean shutdown, got: {out:?}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn resume_seeds_iteration_budget_from_log_and_fails_immediately()
+-> Result<(), Box<dyn std::error::Error>> {
+    // ADR-0038: the iteration budget must be re-derived from the event log on
+    // *crash* resume (fresh runtime), not just live async resume. Pre-populate
+    // a turn that already made two model calls (two `ModelCallStarted`) with a
+    // still-pending tool call, so H03 yields `ResumeFromToolDispatching`. With
+    // `max_turns = 2`, the resumed turn must dispatch the pending tool, loop
+    // back to `Init`, and fail with `MaxTurnsExceeded { turns: 2 }` WITHOUT a
+    // third model call. If the count were reset to 0 on resume, the turn would
+    // instead make a third model call and fail with `ModelGatewayFailed` (the
+    // mock has no scripts), so the persisted reason distinguishes the two.
+    let tmp = tempfile::tempdir()?;
+    let store = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+
+    let session_id = SessionId::new();
+    let turn_id = TurnId::new();
+
+    let tool_use = |seq: u64, call_id: &str, path: &str| {
+        evt(
+            session_id,
+            seq,
+            Some(turn_id),
+            EventPayload::ToolUseRecorded {
+                call_id: call_id.into(),
+                tool_name: "read_file".into(),
+                args: serde_json::json!({ "path": path }),
+            },
+        )
+    };
+    let model_started = |seq: u64| {
+        evt(
+            session_id,
+            seq,
+            Some(turn_id),
+            EventPayload::ModelCallStarted {
+                model: "mock".into(),
+            },
+        )
+    };
+    let model_completed = |seq: u64| {
+        evt(
+            session_id,
+            seq,
+            Some(turn_id),
+            EventPayload::ModelCallCompleted {
+                stop_reason: StopReason::ToolUse,
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
+            },
+        )
+    };
+
+    let pre_events = vec![
+        evt(
+            session_id,
+            0,
+            None,
+            EventPayload::SessionStarted {
+                meta: SessionMeta {
+                    cogito_version: "0.1.0".into(),
+                    strategy: Some("default".into()),
+                    model: Some("mock".into()),
+                    ..Default::default()
+                },
+            },
+        ),
+        evt(
+            session_id,
+            1,
+            Some(turn_id),
+            EventPayload::TurnStarted {
+                user_input: vec![cogito_protocol::ContentBlock::Text { text: "hi".into() }],
+                activate_skills: vec![],
+            },
+        ),
+        // Round 1: model call → tool use → completed → tool result.
+        model_started(2),
+        tool_use(3, "c1", "/a"),
+        model_completed(4),
+        evt(
+            session_id,
+            5,
+            Some(turn_id),
+            EventPayload::ToolResultRecorded {
+                call_id: "c1".into(),
+                result: ToolResult::text("ok"),
+            },
+        ),
+        // Round 2: model call → tool use → completed, but NO tool result, so
+        // `c2` is still pending → ResumeFromToolDispatching.
+        model_started(6),
+        tool_use(7, "c2", "/b"),
+        model_completed(8),
+    ];
+    for e in &pre_events {
+        store.append(e).await?;
+    }
+
+    // No scripts: a third model call (the broken-seeding path) would error.
+    let mock = Arc::new(MockModelGateway::new());
+
+    let tools = Arc::new(
+        BuiltinToolProvider::builder()
+            .with_tool(Arc::new(ReadFile))
+            .build(),
+    );
+
+    let mut strategy = HarnessStrategy::default_with_model("mock");
+    strategy.max_turns = 2;
+
+    let runtime = Runtime::builder()
+        .store(Arc::clone(&store) as Arc<dyn cogito_protocol::store::ConversationStore>)
+        .model(Arc::clone(&mock) as Arc<dyn cogito_protocol::gateway::ModelGateway>)
+        .tools(tools)
+        .strategy(strategy)
+        .build()?;
+
+    let handle = runtime.open_session(session_id, OpenMode::Resume).await?;
+    let mut events_rx = handle.subscribe();
+
+    let got_failed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match events_rx.recv().await {
+                Ok(StreamEvent::TurnFailed { .. }) => return true,
+                // A completion or a closed channel both mean "no budget failure".
+                Ok(StreamEvent::TurnCompleted { .. }) | Err(_) => return false,
+                Ok(_) => {}
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+    assert!(got_failed, "expected TurnFailed (budget hit) within 5s");
+
+    // No model call should have been attempted: the budget trips before
+    // `PromptBuilt`. (The mock starts with 0 scripts; a third call would error.)
+    assert_eq!(
+        mock.remaining(),
+        0,
+        "budget must trip before any further model call"
+    );
+
+    handle.shutdown(Duration::from_secs(5)).await?;
+
+    // Drained log carries the precise structured reason.
+    let log: Vec<ConversationEvent> = {
+        let mut s = store.replay(session_id, 0);
+        let mut out = Vec::new();
+        while let Some(evt) = s.next().await {
+            out.push(evt?);
+        }
+        out
+    };
+    let reason = log
+        .iter()
+        .find_map(|e| match &e.payload {
+            EventPayload::TurnFailed { reason } => Some(reason.clone()),
+            _ => None,
+        })
+        .expect("TurnFailed missing from persisted log");
+    assert_eq!(
+        reason,
+        TurnFailureReason::MaxTurnsExceeded { turns: 2 },
+        "crash-resume must re-derive the model-call count (2) from the log; got {reason:?}"
     );
 
     Ok(())
