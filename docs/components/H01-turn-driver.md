@@ -61,7 +61,28 @@ the Rust realization.
 | `ToolDispatching` | One or more tool calls present | H08 (invoke), H09 (`pre_dispatch`) |
 | `Completed` | Model returned `end_turn` without tools | H09 (`post_turn`) |
 | `Paused` | A tool returned `InvokeOutcome::Async(JobId)` | H09 (`post_turn`); turn re-entered when job finishes |
-| `Failed` | Unrecoverable error or hook `Reject` | H09 (`on_error`) |
+| `Failed` | Unrecoverable error, hook `Reject`, or iteration budget exhausted | H09 (`on_error`) |
+
+### Loop termination — stop conditions
+
+The inner loop (`Init → … → ToolDispatching → Init`) terminates on exactly one of:
+
+- **`Completed`** — the model returned `end_turn` with zero `tool_use` blocks.
+- **`Paused`** — a tool returned `InvokeOutcome::Async(JobId)`; resumes on `JobCompleted`.
+- **`Failed`** — a runtime fault (store / gateway / panic / `tokio` timeout →
+  `TurnTimedOut`), a hook `Reject` (`HookRejected`), the consecutive-tool-error
+  guard (`MAX_CONSECUTIVE_TOOL_ERRORS = 4`, an unproductive all-error loop), or
+  the **iteration budget** (ADR-0038).
+
+The iteration budget bounds a *productive but non-terminating* loop. `Init`
+checks `ctx.model_calls >= strategy.max_turns` (default 16) before starting
+another round and, if reached, records `TurnFailed { MaxTurnsExceeded { turns } }`
+and stops instead of issuing the next model call. The count is the number of
+model calls (`ModelCallStarted` events) made this turn — incremented in
+`PromptBuilt` and **re-derived from the event log on resume** (seeded into
+`TurnCtx.model_calls` at `TurnDriver` spawn) so the budget holds across
+pause/resume. On-hit policy is a hard fail by design: continue / summarize are
+consumer policy layered on the failure, not baked into the core (ADR-0038 §3).
 
 > **`ContextManaged` was added 2026-05-19 by PR #6** as an ADR-0006 amendment.
 > Rationale and the full H10/H11/H04/H05/H09 collaboration walkthrough are

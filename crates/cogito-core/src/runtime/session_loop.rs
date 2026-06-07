@@ -24,6 +24,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures::StreamExt as _;
+
 use cogito_protocol::ExecCtx;
 use cogito_protocol::MetricsRecorder;
 use cogito_protocol::content::ContentBlock;
@@ -315,6 +317,12 @@ async fn apply_resume_point(
         ResumePoint::FreshTurn => Ok(()),
 
         ResumePoint::RestartCurrentTurn { turn_id } => {
+            // TODO(ADR-0038): when this is wired to actually re-spawn the turn,
+            // seed `model_calls` carefully. The interrupted call's
+            // `ModelCallStarted` is already in the log, so
+            // `count_model_calls_in_events` counts it; re-issuing that same call
+            // increments again in `prompt_built` → an off-by-one over-count.
+            // Seed from the log MINUS the restarted (uncompleted) call.
             // TODO(post-Sprint-3): recover user_input from initial_events
             // (EventPayload::TurnStarted { user_input } at the latest
             // TurnStarted boundary) and call
@@ -340,6 +348,7 @@ async fn apply_resume_point(
                 TurnEntry::FromModelCompleted {
                     output: rebuilt_output,
                 },
+                count_model_calls_in_events(initial_events, turn_id),
                 deps,
             );
             Ok(())
@@ -354,6 +363,7 @@ async fn apply_resume_point(
                 state,
                 turn_id,
                 TurnEntry::FromToolDispatching { pending, completed },
+                count_model_calls_in_events(initial_events, turn_id),
                 deps,
             );
             Ok(())
@@ -450,6 +460,7 @@ async fn apply_resume_point(
                     pending: vec![],
                     completed: vec![(call_id, tool_result)],
                 },
+                count_model_calls_in_events(initial_events, turn_id),
                 deps,
             );
             Ok(())
@@ -468,6 +479,7 @@ fn spawn_turn_driver(
     state: &mut SessionState,
     turn_id: TurnId,
     entry: TurnEntry,
+    model_calls: u32,
     deps: &SessionDeps,
 ) {
     // Swap a fresh CancellationToken into the per-session slot. The slot is
@@ -501,6 +513,10 @@ fn spawn_turn_driver(
         exec_ctx,
         strategy: state.strategy.clone(),
         consecutive_tool_errors: 0,
+        // Seeded by the caller (ADR-0038): 0 for a fresh turn, or the model
+        // calls already made (re-derived from the event log) for a resumed
+        // turn, so the iteration budget is honored across pause/resume.
+        model_calls,
     };
     // Pipeline was built once at session open in `Runtime::open_session` and
     // stored in `SessionState`. Clone the Arc here so each turn shares the
@@ -533,6 +549,57 @@ fn spawn_turn_driver(
         turn_id,
         started_at: Instant::now(),
     });
+}
+
+/// Re-derive the per-turn model-call count from already-loaded events (ADR-0038).
+///
+/// Counts `ModelCallStarted` events belonging to `turn_id`. A fresh turn has
+/// none yet (returns 0); a resumed turn returns the calls made before the pause
+/// or crash, so the in-memory iteration counter on `TurnCtx` is reconstructed
+/// and the `max_turns` budget is honored across the resume boundary rather than
+/// reset. The counter carries the count within a `TurnDriver` task; this runs
+/// once per spawn, not per inner-loop iteration.
+///
+/// Synchronous on purpose: the resume coordinator already loaded the turn's
+/// events (`initial_events`), so seeding from them adds no store read and — on
+/// the crash-resume path — no extra `await` before the turn driver spawns.
+fn count_model_calls_in_events(
+    events: &[cogito_protocol::ConversationEvent],
+    turn_id: TurnId,
+) -> u32 {
+    u32::try_from(
+        events
+            .iter()
+            .filter(|e| {
+                e.turn_id == Some(turn_id)
+                    && matches!(
+                        e.payload,
+                        cogito_protocol::event::EventPayload::ModelCallStarted { .. }
+                    )
+            })
+            .count(),
+    )
+    .unwrap_or(u32::MAX)
+}
+
+/// Re-derive the model-call count by replaying the store (ADR-0038). Used by the
+/// live job-completion resume path, which does not hold the turn's events in
+/// memory. A read error stops the scan early (mirrors H11's history load): a
+/// truncated count can only under-count, never over-count.
+async fn count_model_calls_from_store(
+    store: &dyn ConversationStore,
+    session_id: SessionId,
+    turn_id: TurnId,
+) -> u32 {
+    let mut stream = store.replay(session_id, 0);
+    let mut events = Vec::new();
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(ev) => events.push(ev),
+            Err(_) => break,
+        }
+    }
+    count_model_calls_in_events(&events, turn_id)
 }
 
 /// Apply a mid-session provider swap (ADR-0028). Replaces only the
@@ -688,6 +755,13 @@ async fn handle_command(
                 }
             }
 
+            // Re-derive the iteration count from the store for the live
+            // job-completion resume (ADR-0038); no events are held in memory
+            // here. The Arc/copy avoid borrowing `state` across the await.
+            let store = Arc::clone(&state.store);
+            let session_id = state.session_id;
+            let model_calls =
+                count_model_calls_from_store(store.as_ref(), session_id, turn_id).await;
             spawn_turn_driver(
                 state,
                 turn_id,
@@ -695,6 +769,7 @@ async fn handle_command(
                     pending: vec![],
                     completed: vec![(call_id, tool_result)],
                 },
+                model_calls,
                 deps,
             );
             None
@@ -850,7 +925,7 @@ async fn try_start_turn(state: &mut SessionState, trigger: TurnTrigger, deps: &S
         }
     }
 
-    spawn_turn_driver(state, turn_id, TurnEntry::FreshLikeInit, deps);
+    spawn_turn_driver(state, turn_id, TurnEntry::FreshLikeInit, 0, deps);
 }
 
 /// Record the terminal event after a turn finishes.

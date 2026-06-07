@@ -28,6 +28,12 @@ pub async fn transit(
         .record_model_call_started(ctx.turn_id, ctx.strategy.model_params.model.clone())
         .await;
 
+    // Count this model call toward the per-turn iteration budget (ADR-0038).
+    // Incremented in lockstep with the `ModelCallStarted` event just written,
+    // so a resumed turn re-derives the same count from the log.
+    let mut ctx = ctx;
+    ctx.model_calls = ctx.model_calls.saturating_add(1);
+
     match deps.model.stream(input, ctx.exec_ctx.clone()).await {
         Ok(stream) => TurnState::ModelCalling {
             ctx,
