@@ -121,6 +121,7 @@ async fn tool_call_completes_via_second_model_call() -> Result<(), Box<dyn std::
         exec_ctx,
         strategy: HarnessStrategy::default_with_model("mock"),
         consecutive_tool_errors: 0,
+        model_calls: 0,
     };
 
     let outcome = enter_turn(TurnEntry::FreshLikeInit, ctx, deps).await;
@@ -222,6 +223,7 @@ async fn invalid_tool_args_persist_error_result() -> Result<(), Box<dyn std::err
         exec_ctx: ExecCtx::open_ended(session_id, turn_id),
         strategy: HarnessStrategy::default_with_model("mock"),
         consecutive_tool_errors: 0,
+        model_calls: 0,
     };
 
     let outcome = enter_turn(TurnEntry::FreshLikeInit, ctx, deps).await;

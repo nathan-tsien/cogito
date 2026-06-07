@@ -1650,6 +1650,28 @@
           }
         },
         {
+          "description": "The turn exhausted its iteration budget: the number of model calls issued reached `HarnessStrategy::max_turns` (ADR-0038). The turn ends cleanly; a consumer may resume the session or submit a follow-up turn with a higher budget. Distinct from `TurnTimedOut` (wall-clock) and from the internal consecutive-tool-error guard.",
+          "type": "object",
+          "required": [
+            "kind",
+            "turns"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "max_turns_exceeded"
+              ]
+            },
+            "turns": {
+              "description": "Number of model calls issued before the budget stopped the turn (equal to the configured `max_turns`).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          }
+        },
+        {
           "description": "An H09 hook returned `HookDecision::Reject`.",
           "type": "object",
           "required": [

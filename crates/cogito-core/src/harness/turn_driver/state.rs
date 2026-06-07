@@ -42,6 +42,15 @@ pub struct TurnCtx {
     /// When it reaches [`MAX_CONSECUTIVE_TOOL_ERRORS`] the FSM transitions to
     /// `Failed` rather than sending another request to the model.
     pub consecutive_tool_errors: u32,
+    /// Number of model calls (inner-loop iterations) issued so far this turn.
+    /// Incremented when `ModelCallStarted` is recorded (in the `PromptBuilt`
+    /// transition) and never reset within a turn. When it reaches
+    /// [`HarnessStrategy::max_turns`] the FSM transitions to `Failed` with
+    /// `TurnFailureReason::MaxTurnsExceeded` instead of issuing another model
+    /// call (ADR-0038). On resume the count is re-derived from the event log
+    /// (the number of `ModelCallStarted` events in the turn) so the budget is
+    /// honored across pause/resume.
+    pub model_calls: u32,
 }
 
 /// One state in the H01 FSM.

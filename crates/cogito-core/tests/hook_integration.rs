@@ -104,6 +104,7 @@ async fn sensitive_content_hook_rejects_tool_with_aws_key() -> Result<(), Box<dy
         exec_ctx: ExecCtx::open_ended(session_id, turn_id),
         strategy: HarnessStrategy::default_with_model("mock"),
         consecutive_tool_errors: 0,
+        model_calls: 0,
     };
 
     // Hook rejects pre-dispatch; the FSM converts the rejection to a

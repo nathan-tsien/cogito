@@ -86,6 +86,7 @@ async fn hook_panic_in_pre_prompt_yields_turn_failed() -> Result<(), Box<dyn std
         exec_ctx: ExecCtx::open_ended(session_id, turn_id),
         strategy: HarnessStrategy::default_with_model("mock"),
         consecutive_tool_errors: 0,
+        model_calls: 0,
     };
 
     let outcome = enter_turn(TurnEntry::FreshLikeInit, ctx, deps).await;

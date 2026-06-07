@@ -65,6 +65,16 @@ pub enum TurnFailureReason {
     },
     /// `tokio::time::timeout` fired around the turn task.
     TurnTimedOut,
+    /// The turn exhausted its iteration budget: the number of model calls
+    /// issued reached `HarnessStrategy::max_turns` (ADR-0038). The turn ends
+    /// cleanly; a consumer may resume the session or submit a follow-up turn
+    /// with a higher budget. Distinct from `TurnTimedOut` (wall-clock) and from
+    /// the internal consecutive-tool-error guard.
+    MaxTurnsExceeded {
+        /// Number of model calls issued before the budget stopped the turn
+        /// (equal to the configured `max_turns`).
+        turns: u32,
+    },
     /// An H09 hook returned `HookDecision::Reject`.
     HookRejected {
         /// Name of the hook that rejected the turn.

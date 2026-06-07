@@ -52,6 +52,10 @@ required-features = ["test-tools"]
 name = "mid_pause_user_input"
 required-features = ["test-tools"]
 
+[[test]]
+name = "max_turns_survives_resume"
+required-features = ["test-tools"]
+
 # `run_tests_happy_path` exercises the production `RunTestsTool` (not gated
 # on `test-tools`) against a tiny fixture crate under `tests/fixtures/`.
 # Marked with `harness = true` (the default) so test runner flags such as

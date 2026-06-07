@@ -50,6 +50,7 @@ fn all_failure_reasons_roundtrip() -> serde_json::Result<()> {
             hook_name: "sensitive-content".into(),
             message: "regex matched".into(),
         },
+        TurnFailureReason::MaxTurnsExceeded { turns: 16 },
     ];
     for r in reasons {
         let json = serde_json::to_string(&r)?;
