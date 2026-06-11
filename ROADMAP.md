@@ -21,13 +21,15 @@
 > (`write_file` / `list_dir` / `edit` / `grep` / `glob`), and skill-bundle
 > reachability + dependency descriptor (ADR-0029/0032/0033, ADR-0023
 > finalized). Sprint 13 (v0.2 硬化 + tag `v0.2.0`) closed the version.
-> **Post-v0.2.0 hardening — additive patch snapshots `v0.2.1`/`v0.2.2`/`v0.2.3`.**
+> **Post-v0.2.0 hardening — additive patch snapshots `v0.2.1`/`v0.2.2`/`v0.2.3`/`v0.2.4`.**
 > Interstitial Runtime/harness-surface releases between v0.2 and v0.3, each
 > additive with no `SCHEMA_VERSION` bump: `v0.2.1` (session-registry lifecycle
 > ADR-0034 + injectable `MetricsRecorder` ADR-0036), `v0.2.2` (local execution
 > safety ADR-0037), `v0.2.3` (harness loop control — iteration budget ADR-0038 +
-> HITL-over-suspension-seam ADR-0039). See the "Post-v0.2.0 hardening" subsection
-> below. Next theme: v0.3 (Distributed Collaboration).
+> HITL-over-suspension-seam ADR-0039), `v0.2.4` (turn-lifecycle event correctness
+> — single-emit `TurnCompleted` + turn-level `max_tokens` signal ADR-0040). See
+> the "Post-v0.2.0 hardening" subsection below. Next theme: v0.3 (Distributed
+> Collaboration).
 
 ## Version plan
 
@@ -372,6 +374,16 @@ small, additive Runtime/harness-surface change with no `ConversationEvent`
     `JobStatus::AwaitingInput` (reported only by `JobManager::status()`, off the
     resume path). Specifies the durable-`JobManager` contract a multi-replica
     consumer must satisfy. Implemented PR #67.
+- **`v0.2.4` (2026-06-11):** turn-lifecycle event correctness (issue #69).
+  - [x] **Single-emit `TurnCompleted`** — the H01 FSM transition is the sole
+    writer of the terminal event; the session loop's `Completed` hook is a no-op
+    (symmetric with the `Failed` path), ending the double persist + broadcast per
+    completed turn. Guarded by an exactly-one-`TurnCompleted` regression test.
+  - [x] **ADR-0040** (turn-level `max_tokens` signal) — `StreamEvent::TurnCompleted`
+    carries `stop_reason: Option<StopReason>` (additive, serde-default) + a
+    `tracing::warn!` on truncation, so a truncated turn is distinguishable from a
+    clean end-of-turn without scanning `ModelCallCompleted`. No new outcome
+    variant; persisted event unchanged. Implemented PR #70.
 
 ### v0.3 · Distributed Collaboration
 
