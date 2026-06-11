@@ -266,6 +266,7 @@ pub(crate) mod tests {
             subagent_call_id: None,
         });
         app.apply_stream_event(&StreamEvent::TurnCompleted {
+            stop_reason: None,
             subagent_call_id: None,
         });
         assert!(!app.turn_in_progress);
@@ -341,6 +342,7 @@ pub(crate) mod tests {
         });
         assert!(app.current_turn_thinking);
         app.apply_stream_event(&StreamEvent::TurnCompleted {
+            stop_reason: None,
             subagent_call_id: None,
         });
         assert!(!app.current_turn_thinking);

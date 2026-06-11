@@ -110,24 +110,18 @@ fn skill_strategy() -> HarnessStrategy {
     strategy
 }
 
-/// Wait for a turn to fully settle. The actor writes two `TurnCompleted`
-/// broadcasts per turn (H01's FSM event plus the actor's terminal hook); only
-/// after the second has `state.in_flight = None`, so a back-to-back
-/// `submit_user_text` is not dropped by `try_start_turn`'s guard. Mirrors
+/// Wait for a turn's single `TurnCompleted` broadcast. Since ISSUE#69 part 2
+/// was fixed, exactly one is emitted per turn (H01's FSM transition); the
+/// actor's terminal hook no longer re-records it. A back-to-back
+/// `submit_user_text` is still safe: the single-threaded actor parks a trigger
+/// arriving mid-retirement in the single-slot `pending_user_input` queue and
+/// drains it, so it is never dropped. Mirrors
 /// `h11_skill_injection::wait_for_turn_completed`.
-async fn wait_two_turn_completed(
-    events: &mut tokio::sync::broadcast::Receiver<StreamEvent>,
-) -> bool {
+async fn wait_turn_completed(events: &mut tokio::sync::broadcast::Receiver<StreamEvent>) -> bool {
     tokio::time::timeout(Duration::from_secs(5), async {
-        let mut seen = 0u8;
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted { .. }) => {
-                    seen += 1;
-                    if seen == 2 {
-                        return true;
-                    }
-                }
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }
@@ -218,7 +212,7 @@ async fn open_session_with_injects_session_skills() -> Result<(), Box<dyn std::e
     let mut events = handle.subscribe();
     handle.submit_user_text("hello").await?;
     assert!(
-        wait_two_turn_completed(&mut events).await,
+        wait_turn_completed(&mut events).await,
         "turn did not complete"
     );
 
@@ -266,7 +260,7 @@ async fn update_session_swaps_injected_skills() -> Result<(), Box<dyn std::error
 
     // Turn 1: default "foo" provider.
     handle.submit_user_text("first").await?;
-    assert!(wait_two_turn_completed(&mut events).await, "turn 1 stalled");
+    assert!(wait_turn_completed(&mut events).await, "turn 1 stalled");
 
     // Swap to "baz" between turns.
     handle
@@ -278,7 +272,7 @@ async fn update_session_swaps_injected_skills() -> Result<(), Box<dyn std::error
 
     // Turn 2: the rebuilt pipeline must inject "baz", not "foo".
     handle.submit_user_text("second").await?;
-    assert!(wait_two_turn_completed(&mut events).await, "turn 2 stalled");
+    assert!(wait_turn_completed(&mut events).await, "turn 2 stalled");
 
     let out = handle.shutdown(Duration::from_secs(5)).await?;
     assert!(matches!(out, ShutdownOutcome::Clean { .. }));

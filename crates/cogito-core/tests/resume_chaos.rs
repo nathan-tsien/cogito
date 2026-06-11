@@ -1299,7 +1299,7 @@ async fn skill_run_to_completion(
         .submit_user_text(&extract_user_text(scenario))
         .await
         .expect("submit_user_text turn 1");
-    wait_for_turn_completed_twice(&handle).await;
+    wait_for_turn_completed(&handle).await;
 
     // Turn 2: follow-up. The SkillInjector re-derives "foo" from turn 1's
     // recorded assistant text and writes SkillActivated + SystemPromptInjected
@@ -1308,7 +1308,7 @@ async fn skill_run_to_completion(
         .submit_user_text("follow up")
         .await
         .expect("submit_user_text turn 2");
-    wait_for_turn_completed_twice(&handle).await;
+    wait_for_turn_completed(&handle).await;
 
     let events = read_log(store.as_ref(), session_id).await;
     let terminal = terminal_payload(&events).clone();
@@ -1325,24 +1325,22 @@ async fn skill_run_to_completion(
     GoldenRun { events, terminal }
 }
 
-/// Wait for the session actor to fully process two `TurnCompleted` events
-/// (the FSM emission + the actor's terminal hook), so the next
-/// `submit_user_text` is not silently dropped by `try_start_turn`'s guard.
-/// Mirrors `h11_skill_injection::wait_for_turn_completed`.
-async fn wait_for_turn_completed_twice(handle: &SessionHandle) {
+/// Wait for a turn's single `TurnCompleted` broadcast. Since ISSUE#69 part 2
+/// was fixed, exactly one is emitted per turn (the FSM transition is the sole
+/// emitter; the actor's terminal hook no longer re-records it). A subsequent
+/// `submit_user_text` is still safe: the single-threaded session actor parks a
+/// trigger arriving mid-retirement in the single-slot `pending_user_input`
+/// queue and drains it on retirement, so it is never dropped. Mirrors
+/// `h11_skill_injection::wait_for_turn_completed`.
+async fn wait_for_turn_completed(handle: &SessionHandle) {
     let mut events_rx = handle.subscribe();
     let _ = tokio::time::timeout(Duration::from_secs(5), async {
-        let mut seen = 0u8;
         loop {
             match events_rx.recv().await {
-                Ok(StreamEvent::TurnCompleted { .. }) => {
-                    seen += 1;
-                    if seen == 2 {
-                        return;
-                    }
-                }
+                // Stop on the turn's terminal broadcast; a stream error (lagged
+                // or closed) likewise ends the wait — the timeout wrapper caps it.
+                Ok(StreamEvent::TurnCompleted { .. }) | Err(_) => return,
                 Ok(_) => {}
-                Err(_) => return,
             }
         }
     })
@@ -1428,15 +1426,14 @@ async fn skill_run_with_y_fault(
         loop {
             let events = read_log(inner1.as_ref(), session_id).await;
             // Count distinct turns by TurnStarted events; require >= 2 to
-            // confirm turn 2 has at least begun (the dual-TurnCompleted
-            // dance means raw terminal counts don't reflect turn count).
+            // confirm turn 2 has at least begun.
             let turns_started = events
                 .iter()
                 .filter(|e| matches!(e.payload, EventPayload::TurnStarted { .. }))
                 .count();
-            // Done condition: turn 2 also terminated (i.e. >= 2 TurnStarted
-            // AND >= 4 TurnCompleted/Failed total, since each turn writes
-            // two of them).
+            // Done condition: both turns terminated (i.e. >= 2 TurnStarted
+            // AND >= 2 terminals, one per turn since ISSUE#69 part 2 made
+            // TurnCompleted single-emit).
             let terminal_count = events
                 .iter()
                 .filter(|e| {
@@ -1448,7 +1445,7 @@ async fn skill_run_with_y_fault(
                     )
                 })
                 .count();
-            let both_turns_done = turns_started >= 2 && terminal_count >= 4;
+            let both_turns_done = turns_started >= 2 && terminal_count >= 2;
             if both_turns_done || wrapper1.written_count() > crash_after_n {
                 break;
             }
@@ -1493,9 +1490,9 @@ async fn skill_run_with_y_fault(
         // turn 1 has flushed before we kick off turn 2.
         tokio::time::sleep(Duration::from_millis(20)).await;
         let _ = handle2.submit_user_text("follow up").await;
-        // Wait for the SECOND TurnCompleted broadcast (turn 2). Since
-        // wait_for_terminal_with_store short-circuits on any prior terminal,
-        // we poll the log instead.
+        // Wait until both turns have terminated (turn 2's TurnCompleted is the
+        // second terminal). Since wait_for_terminal_with_store short-circuits
+        // on any prior terminal, we poll the log instead.
         let deadline3 = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
             let events = read_log(store2.as_ref(), session_id).await;
@@ -1514,7 +1511,8 @@ async fn skill_run_with_y_fault(
                     )
                 })
                 .count();
-            if ts >= 2 && tc >= 4 {
+            // One terminal per turn since ISSUE#69 part 2 (single-emit).
+            if ts >= 2 && tc >= 2 {
                 break;
             }
             if tokio::time::Instant::now() >= deadline3 {
@@ -2448,7 +2446,7 @@ async fn spec_swap_run_to_completion() -> GoldenRun {
         .submit_user_text("say hi")
         .await
         .expect("submit turn 1");
-    wait_for_turn_completed_twice(&handle).await;
+    wait_for_turn_completed(&handle).await;
 
     // Swap providers between turns. Effective at the next turn boundary.
     handle
@@ -2461,7 +2459,7 @@ async fn spec_swap_run_to_completion() -> GoldenRun {
         .submit_user_text("follow up")
         .await
         .expect("submit turn 2");
-    wait_for_turn_completed_twice(&handle).await;
+    wait_for_turn_completed(&handle).await;
 
     let events = read_log(store.as_ref(), session_id).await;
     let terminal = terminal_payload(&events).clone();
@@ -2569,9 +2567,9 @@ async fn spec_swap_run_with_y_fault(
                 )
             })
             .count();
-        // Both turns done = >= 2 TurnStarted and >= 4 terminals (each turn
-        // writes a TurnCompleted twice via the FSM-emit + actor-hook dance).
-        let both_done = turns_started >= 2 && terminal_count >= 4;
+        // Both turns done = >= 2 TurnStarted and >= 2 terminals (one terminal
+        // per turn since ISSUE#69 part 2 made TurnCompleted single-emit).
+        let both_done = turns_started >= 2 && terminal_count >= 2;
         if both_done || wrapper1.written_count() > crash_after_n {
             break;
         }
@@ -2628,7 +2626,8 @@ async fn spec_swap_run_with_y_fault(
                     )
                 })
                 .count();
-            if ts >= 2 && tc >= 4 {
+            // One terminal per turn since ISSUE#69 part 2 (single-emit).
+            if ts >= 2 && tc >= 2 {
                 break;
             }
             if tokio::time::Instant::now() >= deadline3 {
@@ -2665,9 +2664,17 @@ async fn session_spec_mutated_then_resume() {
         .filter(|&b| b > turn1_total)
         .max()
         .expect("turn 2 must contribute a ResumeFromModelCompleted boundary");
+    // turn2_boundary is turn 2's terminal (EndTurn) ModelCallCompleted position.
+    // The fault store writes-then-panics, so crashing here lands just after turn
+    // 2's TurnCompleted is persisted; resume must reopen the complete log and
+    // preserve the swapped-spec footprint without corrupting or duplicating the
+    // terminal. Since ISSUE#69 part 2 made TurnCompleted single-emit, exactly one
+    // TurnCompleted trails the model call, so this boundary sits at total-1 (the
+    // duplicate that used to add slack is gone). Reject only boundary == total
+    // (a crash after the very last event, where resume would be a no-op).
     assert!(
-        turn2_boundary < total.saturating_sub(1),
-        "turn 2 boundary {turn2_boundary} lands too close to the end; \
+        turn2_boundary < total,
+        "turn 2 boundary {turn2_boundary} is at/after the log end; \
          no resume work would happen (golden_len={total})"
     );
 

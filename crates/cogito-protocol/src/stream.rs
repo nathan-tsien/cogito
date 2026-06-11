@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::gateway::StopReason;
+
 /// Real-time event observable via `SessionHandle::subscribe()`.
 ///
 /// **Serde representation note**: internally-tagged with `tag = "kind"`.
@@ -35,9 +37,20 @@ pub enum StreamEvent {
     /// The turn was cancelled by `SessionHandle::cancel_turn`.
     TurnCancelled,
 
-    /// The turn reached terminal Completed state (model returned
-    /// `stop_reason` = `end_turn` without further tool calls).
+    /// The turn reached terminal `Completed` state (no further tool calls).
+    ///
+    /// `Completed` does not imply the model finished cleanly: a turn whose
+    /// final model call was cut off by `max_tokens` also lands here, carrying
+    /// truncated text as the final answer. Inspect `stop_reason` to tell the
+    /// cases apart (ADR-0040).
     TurnCompleted {
+        /// The turn's terminal stop reason — the final model call's
+        /// `stop_reason`. `Some(StopReason::MaxTokens)` flags a truncated
+        /// turn, letting a live subscriber detect truncation at the turn
+        /// boundary without scanning `ModelCallCompleted` events. `None` only
+        /// on replay-reconstructed or legacy events (ADR-0040).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stop_reason: Option<StopReason>,
         /// See `TurnStarted::subagent_call_id`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subagent_call_id: Option<String>,

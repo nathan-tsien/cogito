@@ -62,12 +62,28 @@ pub async fn transit(
     }
 
     if pending.is_empty() && errors.is_empty() {
+        // This is the turn's final model call (no tool calls remain), so
+        // output.stop_reason is the reason the turn ended. A MaxTokens cutoff
+        // still completes the turn with truncated text as the final answer;
+        // surface it so consumers can tell truncation from a clean end-of-turn
+        // (ADR-0040, ISSUE#69 part 1).
+        if output.stop_reason == cogito_protocol::gateway::StopReason::MaxTokens {
+            tracing::warn!(
+                turn_id = %ctx.turn_id,
+                "turn completed on max_tokens: assistant output was truncated; \
+                 the final answer is incomplete"
+            );
+        }
         // Write TurnCompleted before returning the terminal state (ADR-0003).
         let _ = deps
             .step
             .lock()
             .await
-            .record_turn_completed(ctx.turn_id, cogito_protocol::turn::TurnOutcome::Completed)
+            .record_turn_completed(
+                ctx.turn_id,
+                cogito_protocol::turn::TurnOutcome::Completed,
+                output.stop_reason,
+            )
             .await;
         deps.hooks.post_turn();
         return TurnState::Completed {

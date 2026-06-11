@@ -43,6 +43,10 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
             EventPayload::TurnStarted { .. } => {
                 if in_turn {
                     out.push(StreamEvent::TurnCompleted {
+                        // Replay reconstruction does not thread the terminal
+                        // stop_reason (ADR-0040); read the adjacent
+                        // ModelCallCompleted if the flag is needed on replay.
+                        stop_reason: None,
                         subagent_call_id: None,
                     });
                 }
@@ -53,6 +57,7 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
             }
             EventPayload::TurnCompleted { .. } => {
                 out.push(StreamEvent::TurnCompleted {
+                    stop_reason: None,
                     subagent_call_id: None,
                 });
                 in_turn = false;
@@ -118,6 +123,7 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
     }
     if in_turn {
         out.push(StreamEvent::TurnCompleted {
+            stop_reason: None,
             subagent_call_id: None,
         });
     }

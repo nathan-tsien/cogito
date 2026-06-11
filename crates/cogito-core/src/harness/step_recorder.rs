@@ -347,12 +347,21 @@ impl StepRecorder {
 
     /// Record successful turn completion and broadcast
     /// [`StreamEvent::TurnCompleted`].
+    ///
+    /// `stop_reason` is the turn's terminal stop reason (the final model call's
+    /// `stop_reason`); it rides on the broadcast so a live subscriber can flag a
+    /// `MaxTokens`-truncated turn without scanning `ModelCallCompleted`
+    /// (ADR-0040). It is deliberately *not* persisted onto
+    /// `EventPayload::TurnCompleted` — the same value already sits in the
+    /// adjacent `ModelCallCompleted` event.
     pub async fn record_turn_completed(
         &mut self,
         turn_id: TurnId,
         outcome: TurnOutcome,
+        stop_reason: cogito_protocol::gateway::StopReason,
     ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnCompleted {
+            stop_reason: Some(stop_reason),
             subagent_call_id: None,
         });
         self.append(Some(turn_id), EventPayload::TurnCompleted { outcome })
@@ -995,8 +1004,12 @@ mod tests {
         let turn = TurnId::new();
         rec.record_turn_started(turn, vec![ContentBlock::Text { text: "hi".into() }], vec![])
             .await?;
-        rec.record_turn_completed(turn, TurnOutcome::Completed)
-            .await?;
+        rec.record_turn_completed(
+            turn,
+            TurnOutcome::Completed,
+            cogito_protocol::gateway::StopReason::EndTurn,
+        )
+        .await?;
 
         assert_eq!(store.latest_seq(sid).await?, Some(2));
         Ok(())
@@ -1038,8 +1051,12 @@ mod tests {
         .await?;
         rec.on_text_delta(turn_a, "answer one".into());
         rec.on_text_block_complete().await?;
-        rec.record_turn_completed(turn_a, TurnOutcome::Completed)
-            .await?;
+        rec.record_turn_completed(
+            turn_a,
+            TurnOutcome::Completed,
+            cogito_protocol::gateway::StopReason::EndTurn,
+        )
+        .await?;
 
         let turn_b = TurnId::new();
         rec.record_turn_started(
@@ -1050,8 +1067,12 @@ mod tests {
         .await?;
         rec.on_text_delta(turn_b, "answer two".into());
         rec.on_text_block_complete().await?;
-        rec.record_turn_completed(turn_b, TurnOutcome::Completed)
-            .await?;
+        rec.record_turn_completed(
+            turn_b,
+            TurnOutcome::Completed,
+            cogito_protocol::gateway::StopReason::EndTurn,
+        )
+        .await?;
 
         // Seqs: 0=SessionStarted 1=TurnStarted(a) 2=AssistantMsg 3=TurnCompleted
         //       4=TurnStarted(b) 5=AssistantMsg 6=TurnCompleted

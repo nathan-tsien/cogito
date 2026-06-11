@@ -24,6 +24,7 @@ fn lifecycle_events_round_trip() -> serde_json::Result<()> {
         StreamEvent::TurnResumed,
         StreamEvent::TurnCancelled,
         StreamEvent::TurnCompleted {
+            stop_reason: Some(cogito_protocol::gateway::StopReason::EndTurn),
             subagent_call_id: None,
         },
         StreamEvent::TurnFailed {

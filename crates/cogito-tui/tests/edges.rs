@@ -147,6 +147,7 @@ fn unicode_in_tool_args_renders_without_corruption() {
         error_message: None,
     });
     app.apply_stream_event(&StreamEvent::TurnCompleted {
+        stop_reason: None,
         subagent_call_id: None,
     });
     // Tools render inline now; the args are only shown when the tool

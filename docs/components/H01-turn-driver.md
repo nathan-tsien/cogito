@@ -374,6 +374,40 @@ resumed by *another* TurnDriver task that starts at
 The per-session loop coordinates that handoff via mailbox-injected
 `JobCompleted`.
 
+### Terminal-event write ownership
+
+The FSM transition that produces a terminal `TurnOutcome` is the **sole**
+writer of that turn's terminal event, written *before* the terminal state is
+returned (ADR-0003 write-before-transition):
+
+- `model_completed::transit` writes `TurnCompleted` before returning
+  `TurnState::Completed`.
+- The failing transition writes `TurnFailed` before returning `TurnState::Failed`.
+
+`session_loop::on_turn_complete` therefore must **not** re-record the terminal
+event for the `Completed` / `Failed` outcomes — it treats them as no-ops and
+only performs actor bookkeeping (clearing `in_flight`, draining the pending-input
+slot). Re-recording would persist the terminal event twice and broadcast it
+twice; consumers would see duplicate pairs in the `ConversationStore` and on the
+broadcast channel, and any event-log-derived accounting (turn counts, replay
+assertions) would double-count. This was the `double-turn-completed` bug
+(ISSUE#69 part 2); `session_e2e.rs::completed_turn_emits_exactly_one_turn_completed_event`
+and its `…_turn_failed_…` sibling guard against regressions. The `Paused` and
+`Cancelled` outcomes are different: their terminal event *is* written by
+`on_turn_complete` (the FSM returns the outcome without writing it).
+
+### Truncation signal on `Completed`
+
+`Completed` does not imply the model finished cleanly. When `output.stop_reason`
+on the final model call is `MaxTokens`, the turn still reaches `Completed` with
+truncated text as `final_assistant_content` — there is no partial-output
+recovery. `model_completed::transit` carries that `stop_reason` onto the
+broadcast `StreamEvent::TurnCompleted` (so a live subscriber can flag truncation
+at the turn boundary) and emits a `tracing::warn!`. It is *not* treated as a
+failure: the model produced output, just incomplete, and a consumer can escalate
+from the signal. See ADR-0040 (ISSUE#69 part 1) for the rationale and the
+deferred strategy-policy / replay-parity options.
+
 ### References
 
 See `docs/superpowers/specs/2026-05-18-runtime-h01-execution-model-design.md`

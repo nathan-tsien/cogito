@@ -959,17 +959,14 @@ async fn on_turn_complete(
 
     let mut rec = state.recorder.lock().await;
     let result: Result<(), _> = match outcome {
-        // TODO(double-turn-completed): the TurnDriver's model_completed::transit
-        // already writes TurnCompleted via record_turn_completed before returning
-        // TurnOutcome::Completed. Calling record_turn_completed again here
-        // produces a duplicate persisted event AND a duplicate broadcast.
-        // Fix in a separate change; tests/cancel_after_first_turn.rs currently
-        // drains 2x TurnCompleted to tolerate this — that workaround must drop
-        // to 1 when this is corrected.
-        TurnOutcome::Completed => rec
-            .record_turn_completed(turn_id, TurnOutcome::Completed)
-            .await
-            .map(|_| ()),
+        // Terminal outcomes whose terminal event the FSM transition already
+        // recorded and broadcast before returning: Completed
+        // (model_completed::transit writes TurnCompleted — ISSUE#69 part 2) and
+        // Failed (the failing transition writes TurnFailed). Re-recording here
+        // would duplicate both the persisted event and the broadcast, so this
+        // arm is a no-op. The in_flight reset and pending-input drain below
+        // still run regardless of this arm's result.
+        TurnOutcome::Completed | TurnOutcome::Failed { .. } => Ok(()),
         // JobSubmitted must precede TurnPaused per H08's
         // write-before-transition contract. If the cache lookup misses, this
         // is an internal-invariant violation — fail the turn loudly rather
@@ -1015,8 +1012,6 @@ async fn on_turn_complete(
             .record_turn_failed(turn_id, TurnFailureReason::TurnTimedOut)
             .await
             .map(|_| ()),
-        // FSM transition already recorded the TurnFailed event.
-        TurnOutcome::Failed { .. } => Ok(()),
         // Non-exhaustive guard for future variants added in later sprints.
         _ => rec
             .record_turn_failed(

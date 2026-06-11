@@ -124,28 +124,19 @@ async fn cancel_turn_works_after_first_turn() -> Result<(), Box<dyn std::error::
 
     let mut events = handle.subscribe();
 
-    // Turn 1: drive a fast completion. We submit and then wait until the
-    // actor has fully retired the turn (in_flight = None) before we submit
-    // turn 2 — otherwise the second `submit_user_text` races against the
-    // actor's `on_turn_complete` reset and `try_start_turn` may silently
-    // drop the trigger. The actor's `on_turn_complete` emits a *second*
-    // `TurnCompleted` (besides the one the TurnDriver emits from its own
-    // FSM transition), so draining to TWO `TurnCompleted` broadcast events
-    // guarantees the actor has cleared in_flight.
+    // Turn 1: drive a fast completion, then wait for its single
+    // `TurnCompleted` broadcast (one per turn since ISSUE#69 part 2 was
+    // fixed — the TurnDriver's FSM transition is the sole emitter). The
+    // back-to-back turn-2 submit below is safe even if the actor has not
+    // yet run `on_turn_complete`: the session actor is single-threaded and
+    // a trigger arriving while `in_flight` is still set is parked in the
+    // single-slot `pending_user_input` queue and drained when the turn
+    // retires, so it is never dropped.
     handle.submit_user_text("first").await?;
-    // NOTE: turn 1's TurnCompleted is currently broadcast twice (see
-    // TODO(double-turn-completed) in runtime/session_loop.rs). When that
-    // bug is fixed, change the expected count to 1.
-    let saw_two_completes = tokio::time::timeout(Duration::from_secs(5), async {
-        let mut completed = 0u32;
+    let saw_complete = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted { .. }) => {
-                    completed += 1;
-                    if completed == 2 {
-                        return true;
-                    }
-                }
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }
@@ -153,10 +144,7 @@ async fn cancel_turn_works_after_first_turn() -> Result<(), Box<dyn std::error::
     })
     .await
     .unwrap_or(false);
-    assert!(
-        saw_two_completes,
-        "turn 1 did not complete + retire within 5s"
-    );
+    assert!(saw_complete, "turn 1 did not complete within 5s");
 
     // Turn 2: gateway parks until ctx.cancel fires. Submit, then wait for
     // `TurnStarted` to be broadcast so we know the gateway has actually
