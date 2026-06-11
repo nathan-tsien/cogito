@@ -117,6 +117,7 @@ fn single_text_turn_renders_user_and_agent_lines() {
         subagent_call_id: None,
     });
     app.apply_stream_event(&StreamEvent::TurnCompleted {
+        stop_reason: None,
         subagent_call_id: None,
     });
     let out = draw(&app, None);

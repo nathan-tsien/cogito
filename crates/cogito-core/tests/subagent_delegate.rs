@@ -140,6 +140,7 @@ async fn wait_parent_done(rx: &mut tokio::sync::broadcast::Receiver<StreamEvent>
             match rx.recv().await {
                 Ok(StreamEvent::TurnCompleted {
                     subagent_call_id: None,
+                    ..
                 }) => return true,
                 Ok(StreamEvent::TurnFailed {
                     subagent_call_id: None,

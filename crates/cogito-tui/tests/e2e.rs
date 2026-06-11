@@ -123,6 +123,7 @@ fn typing_and_model_response_render_into_chat() {
         subagent_call_id: None,
     });
     app.apply_stream_event(&StreamEvent::TurnCompleted {
+        stop_reason: None,
         subagent_call_id: None,
     });
 
@@ -187,6 +188,7 @@ fn tool_lifecycle_renders_inline() {
         error_message: None,
     });
     app.apply_stream_event(&StreamEvent::TurnCompleted {
+        stop_reason: None,
         subagent_call_id: None,
     });
     let out = draw(&app);

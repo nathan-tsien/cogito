@@ -279,25 +279,17 @@ async fn h05_each_turn_writes_its_own_tool_filter_event() -> Result<(), Box<dyn 
     // Subscribe once before any turns to capture all broadcast events.
     let mut events = handle.subscribe();
 
-    // Submit turn 1 and wait for its TurnCompleted broadcasts. The session
-    // loop emits two StreamEvent::TurnCompleted per turn (once from
-    // TurnDriver's record_turn_completed, once from session_loop's
-    // on_turn_complete). We drain both so turn 2 is submitted only after
-    // in_flight is cleared on the session side.
+    // Submit turn 1 and wait for its single TurnCompleted broadcast. Since
+    // ISSUE#69 part 2 was fixed, exactly one is emitted per turn (the
+    // TurnDriver's FSM transition; session_loop.on_turn_complete no longer
+    // re-records it). Submitting turn 2 back-to-back is still safe: the
+    // single-threaded actor parks a trigger arriving mid-retirement in the
+    // single-slot pending_user_input queue and drains it, so it is never lost.
     handle.submit_user_text("turn 1").await?;
     let turn1_ok = tokio::time::timeout(Duration::from_secs(5), async {
-        let mut completed_count = 0u32;
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted { .. }) => {
-                    completed_count += 1;
-                    // Drain both TurnCompleted broadcasts before proceeding
-                    // (TurnDriver emits one; session_loop.on_turn_complete emits another).
-                    // Two is the stable count for a simple EndTurn turn.
-                    if completed_count >= 2 {
-                        return true;
-                    }
-                }
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(StreamEvent::TurnFailed { reason, .. }) => {
                     panic!("turn 1 failed: {reason:?}");
                 }
@@ -308,13 +300,10 @@ async fn h05_each_turn_writes_its_own_tool_filter_event() -> Result<(), Box<dyn 
     })
     .await
     .unwrap_or(false);
-    assert!(
-        turn1_ok,
-        "turn 1 did not produce two TurnCompleted events within 5s"
-    );
+    assert!(turn1_ok, "turn 1 did not complete within 5s");
 
-    // Submit turn 2 only after both TurnCompleted broadcasts for turn 1 were
-    // received, guaranteeing that the session's in_flight is cleared.
+    // Submit turn 2. If turn 1's actor-side retirement has not run yet, the
+    // trigger is queued and drained on retirement (single-slot, never lost).
     handle.submit_user_text("turn 2").await?;
     let turn2_ok = tokio::time::timeout(Duration::from_secs(5), async {
         loop {

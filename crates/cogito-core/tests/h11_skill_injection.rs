@@ -113,28 +113,21 @@ fn skill_strategy() -> HarnessStrategy {
     strategy
 }
 
-/// Wait until the session actor has fully processed a `TurnCompleted` —
-/// i.e., both the FSM-emitted broadcast event AND the actor's own
-/// `on_turn_complete` follow-up have fired. Only after the second event
-/// has `state.in_flight = None`, so a subsequent `submit_user_text` will
-/// not be silently dropped by `try_start_turn`'s guard.
+/// Wait for a turn's single `TurnCompleted` broadcast. Since ISSUE#69 part 2
+/// was fixed, exactly one `TurnCompleted` is emitted per turn (by H01's FSM
+/// transition; the actor's `on_turn_complete` no longer re-records it).
 ///
-/// See `session_e2e.rs::failed_turn_emits_exactly_one_turn_failed_event`
-/// for the rationale behind the dual `TurnCompleted` write on the
-/// non-failed path (one from H01's FSM, one from the actor terminal hook).
+/// A subsequent back-to-back `submit_user_text` is safe even before the actor
+/// runs `on_turn_complete`: the session actor is single-threaded, so a trigger
+/// arriving while `in_flight` is still set is parked in the single-slot
+/// `pending_user_input` queue and drained on retirement — never dropped.
 async fn wait_for_turn_completed(
     events: &mut tokio::sync::broadcast::Receiver<StreamEvent>,
 ) -> bool {
     tokio::time::timeout(Duration::from_secs(5), async {
-        let mut seen = 0u8;
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnCompleted { .. }) => {
-                    seen += 1;
-                    if seen == 2 {
-                        return true;
-                    }
-                }
+                Ok(StreamEvent::TurnCompleted { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }

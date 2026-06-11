@@ -388,6 +388,7 @@ mod tests {
                 subagent_call_id: None,
             },
             StreamEvent::TurnCompleted {
+                stop_reason: None,
                 subagent_call_id: None,
             },
         ]);
@@ -411,6 +412,7 @@ mod tests {
                 error_message: None,
             },
             StreamEvent::TurnCompleted {
+                stop_reason: None,
                 subagent_call_id: None,
             },
         ]);
@@ -770,6 +772,7 @@ mod tests {
                 chunk: "grep.".into(),
             },
             StreamEvent::TurnCompleted {
+                stop_reason: None,
                 subagent_call_id: None,
             },
         ]);
@@ -790,6 +793,7 @@ mod tests {
                 subagent_call_id: None,
             },
             StreamEvent::TurnCompleted {
+                stop_reason: None,
                 subagent_call_id: None,
             },
         ]);
@@ -849,6 +853,7 @@ mod tests {
                 subagent_call_id: None,
             },
             StreamEvent::TurnCompleted {
+                stop_reason: None,
                 subagent_call_id: None,
             },
         ]);

@@ -361,6 +361,7 @@ mod tests {
                 subagent_call_id: None,
             },
             StreamEvent::TurnCompleted {
+                stop_reason: None,
                 subagent_call_id: None,
             },
         ]);
@@ -643,6 +644,7 @@ mod tree_tests {
             },
             StreamEvent::ThinkingDelta { chunk: "y".into() },
             StreamEvent::TurnCompleted {
+                stop_reason: None,
                 subagent_call_id: None,
             },
         ]);

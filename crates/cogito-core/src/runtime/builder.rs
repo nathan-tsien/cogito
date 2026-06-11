@@ -803,7 +803,8 @@ fn tag_subagent(
         S::TurnStarted { .. } => S::TurnStarted {
             subagent_call_id: Some(call_id.to_string()),
         },
-        S::TurnCompleted { .. } => S::TurnCompleted {
+        S::TurnCompleted { stop_reason, .. } => S::TurnCompleted {
+            stop_reason,
             subagent_call_id: Some(call_id.to_string()),
         },
         S::TurnFailed { reason, .. } => S::TurnFailed {

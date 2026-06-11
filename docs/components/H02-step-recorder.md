@@ -113,7 +113,7 @@ All `record_*` methods return `Result<EventId, StoreError>` so any caller that n
 | `record_tool_result` | `turn_id, call_id: String, result: ToolResult` | `Result<EventId, StoreError>` | H08 after tool dispatch completes. |
 | `record_turn_paused` | `turn_id, job_id: JobId` | `Result<EventId, StoreError>` | H01 when turn pauses on async job. |
 | `record_job_completed` | `turn_id, job_id: JobId, outcome: JobOutcome` | `Result<EventId, StoreError>` | H01 when previously-awaited job finishes. |
-| `record_turn_completed` | `turn_id, outcome: TurnOutcome` | `Result<EventId, StoreError>` | H01 on successful turn completion. |
+| `record_turn_completed` | `turn_id, outcome: TurnOutcome, stop_reason: StopReason` | `Result<EventId, StoreError>` | H01 on successful turn completion. `stop_reason` (the final model call's) rides on the broadcast `TurnCompleted` to flag a `MaxTokens`-truncated turn (ADR-0040); it is not persisted onto the event. |
 | `record_turn_failed` | `turn_id, reason: TurnFailureReason` | `Result<EventId, StoreError>` | H01 on FSM transition to `Failed`. |
 
 ## Open design questions
