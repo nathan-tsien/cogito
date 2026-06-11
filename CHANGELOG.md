@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-06-11
+
+**Turn-lifecycle event correctness.** Two fixes to how a turn's terminal event
+is recorded and surfaced. Additive: one optional, serde-default field on a
+broadcast event; no new enum variant, no `SCHEMA_VERSION` bump, no
+persisted-event change.
+
+### Fixed
+
+- **`TurnCompleted` recorded exactly once.** A completed turn was persisted and
+  broadcast twice — the H01 FSM transition wrote `TurnCompleted`, then the
+  session loop's terminal hook wrote it again — so every completed turn landed
+  as a duplicate pair in the `ConversationStore` and on the broadcast channel,
+  forcing embedding consumers to dedupe and making any event-log-derived
+  accounting (turn counts, replay assertions) double-count. The FSM transition
+  is now the sole writer of the terminal event, symmetric with the
+  already-correct `Failed` path; the session loop's `Completed` arm is a no-op.
+  Guarded by a new exactly-one-`TurnCompleted` regression test mirroring the
+  existing exactly-one-`TurnFailed` one.
+
+### Added
+
+- **Turn-level `max_tokens` truncation signal (ADR-0040).** A turn whose final
+  model call was cut off by `max_tokens` still completes, but was
+  indistinguishable from a clean end-of-turn at the turn boundary — the
+  `stop_reason` lived only in the `ModelCallCompleted` event and was never
+  surfaced live, so a truncated half-answer was presented as final with no
+  flag. `StreamEvent::TurnCompleted` now carries
+  `stop_reason: Option<StopReason>` (optional, serde-default — the same shape as
+  `subagent_call_id`, fully backward-compatible), letting a subscriber detect
+  truncation without scanning model-call events, and the harness emits a
+  `tracing::warn!` on truncation. No new `TurnOutcome`/`TurnFailureReason`
+  variant — truncation is a completion caveat, not a failure, and the partial
+  text stays as the final answer; the persisted event is unchanged (the
+  `stop_reason` is already in the adjacent `ModelCallCompleted`). Strategy-level
+  policy (fail / auto-continue) and replay-parity persistence are deferred to a
+  future ADR.
+
+### Docs / decisions
+
+- **ADR-0040** (turn-level truncation signal) — Accepted, implemented.
+
 ## [0.2.3] - 2026-06-07
 
 **Harness loop control.** Two additive changes that give the harness an honest
