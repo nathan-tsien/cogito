@@ -136,6 +136,65 @@ prompt cache。命名 subagent 永远 fresh 启动。
 - 内置 agent 提示词原文与 Task 工具 usage notes 原文来自逆向,多个独立来源相互印证,
   但可能随版本漂移。
 
+### 1.9 补充调研(2026-06-13):Agent Teams — 与 subagent 并列的形态
+
+主来源: 官方文档 <https://code.claude.com/docs/en/agent-teams>;
+Anthropic Opus 4.6 发布公告 <https://www.anthropic.com/news/claude-opus-4-6>;
+工具原语拆解 <https://alexop.dev/posts/from-tasks-to-swarms-agent-teams-in-claude-code/>;
+SendMessage 提示词提取 <https://github.com/Piebald-AI/claude-code-system-prompts>。
+
+**定位**: 实验特性(research preview),Claude Code v2.1.32+,2026-02-05 随
+Opus 4.6 发布;`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 启用,默认关闭。
+它**不是 subagent 的升级版,而是并列的另一种多 agent 形态**: subagent 是
+父雇的临时工(派活→交报告→走人),team 是常驻项目组(共享任务板、组员互发
+消息、自己认领任务)。
+
+**四个核心机制**:
+
+1. **Teammate = 完整独立 session,不是工具调用。** 各有自己的进程与
+   context window,启动加载正常项目上下文(CLAUDE.md、MCP、skills)+ lead
+   的 spawn prompt,不继承 lead 对话历史。lead(主 session)终身固定,
+   负责建队/派活/审计划/汇总/解散。
+2. **通信 = 信箱 + SendMessage,any-to-any。** 消息写入每个 agent 的
+   收件箱,**作为新 user turn 注入收件方对话**;idle 的 teammate 收到消息
+   自动唤醒。拓扑任意对任意 —— lead↔teammate、**teammate↔teammate 直连**
+   (与 subagent 最本质的区别: subagent 只向父汇报,彼此永不对话)。消息
+   类型含 direct、broadcast(逐收件人投递,昂贵)、shutdown_request/response
+   (优雅退场)、plan_approval(teammate 在只读 plan mode 提交计划等 lead
+   批准)。
+3. **协调 = 共享任务列表,自认领。** 任务落盘
+   (`~/.claude/tasks/{team}/`),状态机 pending → in_progress → completed,
+   支持依赖(blocker 完成自动解锁下游);teammate 干完自认领下一个无主且
+   未阻塞的任务,**认领用文件锁防竞态**(官方原文)。lead 可用
+   `TeammateIdle` / `TaskCreated` / `TaskCompleted` hooks 做质量门(退出码
+   2 = 打回)。源文件级无编辑锁 —— 官方明确警告两个 teammate 改同一文件会
+   互相覆盖,要按文件所有权拆活。
+4. **生命周期 = 常驻直到解散。** teammate 在 turn 之间 idle(不是退出),
+   等消息唤醒;完成时通知 lead;解散经 shutdown_request + 清理共享目录。
+
+**官方 subagent vs team 对照表**(docs 原版):
+
+| 维度 | Subagents | Agent teams |
+|---|---|---|
+| 通信 | 只向父汇报,互相不说话 | teammate 直接互发消息 |
+| 协调 | 父驱动一切 | 共享任务列表,自协调 |
+| 生命周期 | session 内无状态工人,只有结果有意义 | 常驻交互式 session,可中途直接对话 |
+| 成本 | 低(结果摘要回流) | 高 —— 每 teammate 一个独立实例,token 随人数线性涨 |
+
+**官方适用指引**: teams 适合可并行、读密集的工作(代码评审、调研、竞争性
+假设调试);串行/同文件/强依赖用单 session 或 subagent。推荐 3-5 个
+teammate 起步。
+
+**已知限制**(官方 Limitations + issues): 不能嵌套(teammate 不能再建队);
+`/resume` 不恢复 in-process teammates;一个 lead 同时只能有一个队;idle
+唤醒实践中较脆(issue #24108、#28075);**token 经济性问题** —— lead 被
+idle/ack 回声刷屏可烧掉 13-22% input token(issue #47930)。
+
+**工具原语**(拆解来源,官方未全列): `TeamCreate`、`Task`(带
+`team_name` 参数 spawn teammate)、`TaskCreate`/`TaskUpdate`/`TaskList`、
+`SendMessage`、`TeamDelete`。UNVERIFIED: 收件箱确切路径、`TaskGet` 是否
+存在、broadcast 是否仍是独立消息类型。
+
 ---
 
 ## 2. Codex CLI(OpenAI)
@@ -443,6 +502,13 @@ Manus 闭源,以下区分官方陈述与转述。
    的工具 description,v0.2 已有雏形,可按此标准加强。
 8. **并发护栏不只深度**: Codex 另有 `max_threads`(并发子数)护栏;cogito 草案只有
    深度限制,fan-out 数量护栏值得考虑。
+9. **teams 形态(§1.9)与层级 subagent 共享同一底座原语**: agent teams 的本质是
+   "消息注入对话 + 收件方被唤醒跑一个 turn" —— 与 mailbox(推)是同一原语,只是
+   拓扑从树放宽到图(子↔子直连)、生命周期从"终态收口"放宽到"常驻 idle"、协调从
+   "父驱动"放宽到"共享任务板自认领"。对 cogito 的含义: v0.3 层级树 → v0.4 mailbox
+   → 远期 teams 是一条单调演进链,前期锁定"子是可寻址一等 session"即可不堵死后路;
+   teams 的 token 经济性教训(idle 回声烧 13-22% input,issue #47930)反向印证
+   first-of 单条交付 + 读穿直返零成本的设计价值。
 
 ## 6. 来源清单
 
@@ -451,6 +517,15 @@ Manus 闭源,以下区分官方陈述与转述。
 - <https://weaxsey.org/en/articles/2025-10-12/>(系统提示词/Task schema 逆向)
 - <https://agiflow.io/blog/claude-code-internals-reverse-engineering-prompt-augmentation/>(CLAUDE.md 注入机制)
 - <https://github.com/anthropics/claude-code/issues/11892>(stateless 与 resume 矛盾)
+
+**Claude Code Agent Teams(§1.9 补充)**
+- <https://code.claude.com/docs/en/agent-teams>(官方,主来源)
+- <https://www.anthropic.com/news/claude-opus-4-6>(发布公告)
+- <https://www.anthropic.com/engineering/building-c-compiler>(并行 Claude 团队写 C 编译器案例)
+- <https://alexop.dev/posts/from-tasks-to-swarms-agent-teams-in-claude-code/>(工具原语拆解)
+- <https://github.com/Piebald-AI/claude-code-system-prompts>(SendMessage 提示词提取)
+- <https://www.claudecodecamp.com/p/claude-code-agent-teams-how-they-work-under-the-hood>、<https://blog.gentrit.dev/posts/agent-teams-orchestrating-claude-code>(信箱/idle 机制)
+- Issues: #24108、#28075(idle 唤醒脆)、#47930(idle 回声 token 损耗)、#24246、#28627
 
 **Codex**
 - <https://developers.openai.com/codex/subagents>(官方 subagents 文档)
