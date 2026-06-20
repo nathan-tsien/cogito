@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-06-20
+
+**Stream/log message correlation key (ADR-0041).** A live subscriber could not
+align a streamed assistant message with the *same* message in the persisted
+event log: the broadcast carried no per-message identity, so an embedding
+consumer that assembles the live block stream and also reads history had no
+stable key to fold streaming deltas into the right message, nor to dedupe on
+reconnect — surfacing downstream as a streamed assistant message with an
+empty, unkeyable id stuck on a loading placeholder. Additive and
+backward-compatible: new optional, serde-default fields plus one new broadcast
+variant; no `SCHEMA_VERSION` bump, no persisted-event migration.
+
+### Added
+
+- **Per-message `MessageId`, minted at message-open.** An assistant message
+  (one model call's output) now opens with a new
+  `StreamEvent::AssistantMessageStarted { message_id, .. }`, and the same
+  opaque `message_id` rides on the message's live delta/tool events
+  (`TextDelta` / `ThinkingDelta` / `ToolDispatchStarted` / `ToolDispatchEnded`)
+  and is stamped on its persisted composing events (`AssistantMessageAppended`
+  / `ThinkingBlockRecorded` / `ToolUseRecorded`). A live subscriber and a
+  history projection therefore derive the *same* per-message identity —
+  reconnect/resubscribe dedup, or upserting an in-flight message into a store
+  that is later read back. The id is opaque: it encodes no role or turn
+  structure. The persisted fields are optional + serde-default (the ADR-0019
+  additive precedent), so old logs read back with `None`; no `SCHEMA_VERSION`
+  bump.
+- **Auxiliary `turn_id` on the live stream.** Every turn-scoped `StreamEvent`
+  now carries an optional `turn_id`, so a subscriber can attribute a streamed
+  event to its turn in the persisted log (which already records `turn_id`).
+  This is turn linkage, not a per-message identity — use `message_id` for the
+  latter.
+
+### Changed
+
+- `StreamEvent::TurnPaused` / `TurnResumed` / `TurnCancelled` are now struct
+  variants carrying the optional `turn_id`. The serialized wire form is
+  unchanged when the field is absent (`{"kind":"turn_paused"}`); a `match` on
+  the bare unit variant must widen to `{ .. }`.
+
 ## [0.2.4] - 2026-06-11
 
 **Turn-lifecycle event correctness.** Two fixes to how a turn's terminal event
