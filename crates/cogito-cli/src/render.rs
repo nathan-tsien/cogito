@@ -83,7 +83,7 @@ impl<W: Write> Renderer<W> {
                 self.in_text = false;
                 self.in_thinking = false;
             }
-            StreamEvent::ThinkingDelta { chunk } => {
+            StreamEvent::ThinkingDelta { chunk, .. } => {
                 if !self.in_thinking {
                     // If a thinking block starts after text/tools, the
                     // previous line is already terminated by our helpers,
@@ -110,6 +110,7 @@ impl<W: Write> Renderer<W> {
                 call_id,
                 tool_name,
                 args,
+                ..
             } => {
                 self.tool_timers
                     .insert(call_id.clone(), (Instant::now(), tool_name.clone()));
@@ -121,6 +122,7 @@ impl<W: Write> Renderer<W> {
                 call_id,
                 ok,
                 error_message,
+                ..
             } => {
                 let (name, ms) = match self.tool_timers.remove(call_id) {
                     Some((started, name)) => (name, started.elapsed().as_millis()),
@@ -142,19 +144,19 @@ impl<W: Write> Renderer<W> {
                 self.in_text = false;
                 self.in_thinking = false;
             }
-            StreamEvent::TurnPaused => {
+            StreamEvent::TurnPaused { .. } => {
                 let line = self.paint(DIM, "[paused]");
                 write!(self.out, "\n{line}")?;
                 self.in_text = false;
                 self.in_thinking = false;
             }
-            StreamEvent::TurnResumed => {
+            StreamEvent::TurnResumed { .. } => {
                 let line = self.paint(DIM, "[resumed]");
                 write!(self.out, "\n{line}")?;
                 self.in_text = false;
                 self.in_thinking = false;
             }
-            StreamEvent::TurnCancelled => {
+            StreamEvent::TurnCancelled { .. } => {
                 let line = self.paint(DIM_YELLOW, "[cancelled]");
                 write!(self.out, "\n{line}")?;
                 self.in_text = false;
@@ -378,18 +380,24 @@ mod tests {
         let out = render_events(&[
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::TextDelta {
                 chunk: "hi".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TextDelta {
                 chunk: " there".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TurnCompleted {
                 stop_reason: None,
                 subagent_call_id: None,
+                turn_id: None,
             },
         ]);
         assert_eq!(out, "\nagent: hi there\n");
@@ -400,20 +408,26 @@ mod tests {
         let out = render_events(&[
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "read_file".into(),
                 args: serde_json::json!({"path": "src/main.rs"}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: true,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TurnCompleted {
                 stop_reason: None,
                 subagent_call_id: None,
+                turn_id: None,
             },
         ]);
         assert!(
@@ -432,11 +446,15 @@ mod tests {
                 call_id: "c2".into(),
                 tool_name: "bad_tool".into(),
                 args: serde_json::json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c2".into(),
                 ok: false,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             },
         ]);
         assert!(
@@ -451,6 +469,8 @@ mod tests {
             call_id: "c1".into(),
             tool_name: "query_cameras".into(),
             args: serde_json::json!({"fuzzy_keyword": "深圳"}),
+            turn_id: None,
+            message_id: None,
         }]);
         assert!(
             out.contains(r#"{"fuzzy_keyword":"深圳"}"#),
@@ -470,6 +490,8 @@ mod tests {
             call_id: "c1".into(),
             tool_name: "t".into(),
             args: serde_json::json!({"blob": long}),
+            turn_id: None,
+            message_id: None,
         }]);
         // The output line is `\n[tool] t <preview> …`. Locate the
         // preview substring between the tool name and the trailing
@@ -497,11 +519,15 @@ mod tests {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: serde_json::json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: false,
                 error_message: Some("boom".into()),
+                turn_id: None,
+                message_id: None,
             },
         ]);
         assert!(
@@ -522,11 +548,15 @@ mod tests {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: serde_json::json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: false,
                 error_message: Some(long),
+                turn_id: None,
+                message_id: None,
             },
         ]);
         let indented_line = out
@@ -551,11 +581,15 @@ mod tests {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: serde_json::json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: true,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             },
         ]);
         assert!(
@@ -570,20 +604,28 @@ mod tests {
             StreamEvent::TextDelta {
                 chunk: "a".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: serde_json::json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: true,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TextDelta {
                 chunk: "b".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
         ]);
         let count = out.matches("agent: ").count();
@@ -595,19 +637,23 @@ mod tests {
         let out = render_events(&[StreamEvent::TurnFailed {
             reason: "boom".into(),
             subagent_call_id: None,
+            turn_id: None,
         }]);
         assert_eq!(out, "\n[error] boom");
     }
 
     #[test]
     fn turn_cancelled_prints_marker() {
-        let out = render_events(&[StreamEvent::TurnCancelled]);
+        let out = render_events(&[StreamEvent::TurnCancelled { turn_id: None }]);
         assert_eq!(out, "\n[cancelled]");
     }
 
     #[test]
     fn turn_paused_resumed_print_markers() {
-        let out = render_events(&[StreamEvent::TurnPaused, StreamEvent::TurnResumed]);
+        let out = render_events(&[
+            StreamEvent::TurnPaused { turn_id: None },
+            StreamEvent::TurnResumed { turn_id: None },
+        ]);
         assert_eq!(out, "\n[paused]\n[resumed]");
     }
 
@@ -627,24 +673,32 @@ mod tests {
         let out = render_events_color(&[
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::TextDelta {
                 chunk: "hi".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: serde_json::json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: false,
                 error_message: Some("oops".into()),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TurnFailed {
                 reason: "x".into(),
                 subagent_call_id: None,
+                turn_id: None,
             },
         ]);
         // Every ESC-bracketed open code must be paired with a reset (ESC[0m).
@@ -663,15 +717,20 @@ mod tests {
             StreamEvent::TextDelta {
                 chunk: "hi".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: serde_json::json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TurnFailed {
                 reason: "x".into(),
                 subagent_call_id: None,
+                turn_id: None,
             },
         ]);
         assert!(
@@ -764,16 +823,22 @@ mod tests {
         let out = render_events(&[
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::ThinkingDelta {
                 chunk: "I should ".into(),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ThinkingDelta {
                 chunk: "grep.".into(),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TurnCompleted {
                 stop_reason: None,
                 subagent_call_id: None,
+                turn_id: None,
             },
         ]);
         assert_eq!(out, "\nthinking: I should grep.\n");
@@ -784,17 +849,23 @@ mod tests {
         let out = render_events(&[
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::ThinkingDelta {
                 chunk: "I should grep.".into(),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TextDelta {
                 chunk: "Looking now.".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TurnCompleted {
                 stop_reason: None,
                 subagent_call_id: None,
+                turn_id: None,
             },
         ]);
         assert_eq!(out, "\nthinking: I should grep.\nagent: Looking now.\n");
@@ -804,6 +875,8 @@ mod tests {
     fn thinking_chunks_are_dim_painted_with_color() {
         let out = render_events_color(&[StreamEvent::ThinkingDelta {
             chunk: "reasoning".into(),
+            turn_id: None,
+            message_id: None,
         }]);
         // DIM = "\x1b[2m"; each chunk wraps in DIM ... reset.
         assert!(
@@ -837,24 +910,33 @@ mod tests {
         let out = render_events(&[
             StreamEvent::ThinkingDelta {
                 chunk: "let me check".into(),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: serde_json::json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: true,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TextDelta {
                 chunk: "done".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TurnCompleted {
                 stop_reason: None,
                 subagent_call_id: None,
+                turn_id: None,
             },
         ]);
         assert!(

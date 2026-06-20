@@ -70,7 +70,10 @@ fn assistant_with_tool_use_and_result_round_trip() {
             turn_id,
         ),
         evt(
-            EventPayload::AssistantMessageAppended { text: "ok".into() },
+            EventPayload::AssistantMessageAppended {
+                text: "ok".into(),
+                message_id: None,
+            },
             2,
             turn_id,
         ),
@@ -79,6 +82,7 @@ fn assistant_with_tool_use_and_result_round_trip() {
                 call_id: "c1".into(),
                 tool_name: "read_file".into(),
                 args: serde_json::json!({ "path": "/tmp/x" }),
+                message_id: None,
             },
             3,
             turn_id,

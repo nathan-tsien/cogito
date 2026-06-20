@@ -103,8 +103,8 @@ impl App {
                 self.turn_count = self.turn_count.saturating_add(1);
             }
             StreamEvent::TurnFailed { .. }
-            | StreamEvent::TurnCancelled
-            | StreamEvent::TurnPaused => {
+            | StreamEvent::TurnCancelled { .. }
+            | StreamEvent::TurnPaused { .. } => {
                 self.turn_in_progress = false;
                 self.current_turn_thinking = false;
             }
@@ -255,6 +255,7 @@ pub(crate) mod tests {
         let (mut app, _td) = app_for_pure_test();
         app.apply_stream_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         assert!(app.turn_in_progress);
     }
@@ -264,10 +265,12 @@ pub(crate) mod tests {
         let (mut app, _td) = app_for_pure_test();
         app.apply_stream_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         app.apply_stream_event(&StreamEvent::TurnCompleted {
             stop_reason: None,
             subagent_call_id: None,
+            turn_id: None,
         });
         assert!(!app.turn_in_progress);
         assert_eq!(app.turn_count, 1);
@@ -278,10 +281,12 @@ pub(crate) mod tests {
         let (mut app, _td) = app_for_pure_test();
         app.apply_stream_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         app.apply_stream_event(&StreamEvent::TurnFailed {
             reason: "x".into(),
             subagent_call_id: None,
+            turn_id: None,
         });
         assert!(!app.turn_in_progress);
         assert_eq!(app.turn_count, 0);
@@ -292,11 +297,14 @@ pub(crate) mod tests {
         let (mut app, _td) = app_for_pure_test();
         app.apply_stream_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         assert!(app.current_turn_thinking);
         app.apply_stream_event(&StreamEvent::TextDelta {
             chunk: "hi".into(),
             subagent_call_id: None,
+            turn_id: None,
+            message_id: None,
         });
         assert!(!app.current_turn_thinking);
     }
@@ -306,17 +314,22 @@ pub(crate) mod tests {
         let (mut app, _td) = app_for_pure_test();
         app.apply_stream_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         // First content clears the spinner.
         app.apply_stream_event(&StreamEvent::TextDelta {
             chunk: "calling a tool".into(),
             subagent_call_id: None,
+            turn_id: None,
+            message_id: None,
         });
         assert!(!app.current_turn_thinking);
         app.apply_stream_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c1".into(),
             tool_name: "t".into(),
             args: serde_json::json!({}),
+            turn_id: None,
+            message_id: None,
         });
         assert!(!app.current_turn_thinking);
         // Tool end while the turn is still running re-arms the spinner.
@@ -324,12 +337,16 @@ pub(crate) mod tests {
             call_id: "c1".into(),
             ok: true,
             error_message: None,
+            turn_id: None,
+            message_id: None,
         });
         assert!(app.current_turn_thinking);
         // Next content event clears it again.
         app.apply_stream_event(&StreamEvent::TextDelta {
             chunk: "done".into(),
             subagent_call_id: None,
+            turn_id: None,
+            message_id: None,
         });
         assert!(!app.current_turn_thinking);
     }
@@ -339,20 +356,23 @@ pub(crate) mod tests {
         let (mut app, _td) = app_for_pure_test();
         app.apply_stream_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         assert!(app.current_turn_thinking);
         app.apply_stream_event(&StreamEvent::TurnCompleted {
             stop_reason: None,
             subagent_call_id: None,
+            turn_id: None,
         });
         assert!(!app.current_turn_thinking);
 
         // TurnCancelled also clears it.
         app.apply_stream_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         assert!(app.current_turn_thinking);
-        app.apply_stream_event(&StreamEvent::TurnCancelled);
+        app.apply_stream_event(&StreamEvent::TurnCancelled { turn_id: None });
         assert!(!app.current_turn_thinking);
     }
 
@@ -380,12 +400,15 @@ pub(crate) mod tests {
         app.tools
             .on_event(&cogito_protocol::stream::StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             });
         app.tools
             .on_event(&cogito_protocol::stream::StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: serde_json::json!({}),
+                turn_id: None,
+                message_id: None,
             });
         // Running; populate must not touch the store.
         app.populate_result_preview((0, 0)).await;

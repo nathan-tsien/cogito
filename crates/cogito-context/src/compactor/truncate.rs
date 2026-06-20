@@ -307,7 +307,7 @@ fn event_char_count(event: &ConversationEvent) -> usize {
                 _ => 0,
             })
             .sum(),
-        EventPayload::AssistantMessageAppended { text } => text.len(),
+        EventPayload::AssistantMessageAppended { text, .. } => text.len(),
         EventPayload::ToolUseRecorded {
             args, tool_name, ..
         } => tool_name.len() + args.to_string().len(),

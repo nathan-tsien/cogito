@@ -133,6 +133,7 @@ async fn resume_paused_job_synthesizes_failure_when_job_is_unknown()
                 call_id: async_call_id.clone(),
                 tool_name: "long_tool".into(),
                 args: serde_json::json!({}),
+                message_id: None,
             },
         ),
         evt(

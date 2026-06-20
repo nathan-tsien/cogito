@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::content::ContentBlock;
-use crate::ids::{EventId, SessionId, TurnId};
+use crate::ids::{EventId, MessageId, SessionId, TurnId};
 use crate::job::{JobId, JobOutcome};
 use crate::session::SessionMeta;
 use crate::tool::ToolResult;
@@ -92,6 +92,12 @@ pub enum EventPayload {
     AssistantMessageAppended {
         /// Full text of the completed content block.
         text: String,
+        /// Identity of the assistant message (one model call) this block
+        /// composes. Lets a history projection group a message's events and
+        /// key it identically to the live stream. Additive, serde-default
+        /// (ADR-0041); `None` on events predating the field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_id: Option<MessageId>,
     },
 
     /// The model emitted a `tool_use` content block.
@@ -102,6 +108,10 @@ pub enum EventPayload {
         tool_name: String,
         /// Tool arguments as JSON.
         args: serde_json::Value,
+        /// Identity of the assistant message this `tool_use` block composes.
+        /// See `AssistantMessageAppended::message_id` (ADR-0041).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_id: Option<MessageId>,
     },
 
     /// H08 returned a `ToolResult` for a previously recorded call.
@@ -214,6 +224,10 @@ pub enum EventPayload {
         /// id) that must round-trip verbatim on the next model call.
         /// Schema is provider-specific; cogito does not interpret it.
         provider_opaque: Option<serde_json::Value>,
+        /// Identity of the assistant message this thinking block composes.
+        /// See `AssistantMessageAppended::message_id` (ADR-0041).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_id: Option<MessageId>,
     },
 
     /// An H09 hook returned `HookDecision::Reject` at the named
@@ -381,7 +395,10 @@ mod tests {
 
     #[test]
     fn envelope_uses_adjacent_tagging_in_json() -> serde_json::Result<()> {
-        let event = sample_envelope(EventPayload::AssistantMessageAppended { text: "hi".into() });
+        let event = sample_envelope(EventPayload::AssistantMessageAppended {
+            text: "hi".into(),
+            message_id: None,
+        });
         let json = serde_json::to_string(&event)?;
         // Envelope keys appear at top level; payload is `type` + `data`.
         assert!(
@@ -420,11 +437,15 @@ mod tests {
                 user_input: vec![ContentBlock::Text { text: "go".into() }],
                 activate_skills: vec![],
             },
-            EventPayload::AssistantMessageAppended { text: "ok".into() },
+            EventPayload::AssistantMessageAppended {
+                text: "ok".into(),
+                message_id: None,
+            },
             EventPayload::ToolUseRecorded {
                 call_id: "c1".into(),
                 tool_name: "read_file".into(),
                 args: serde_json::json!({"p": 1}),
+                message_id: None,
             },
             EventPayload::ToolResultRecorded {
                 call_id: "c1".into(),
@@ -467,6 +488,7 @@ mod tests {
             EventPayload::ThinkingBlockRecorded {
                 text: "I should grep for the symbol.".into(),
                 provider_opaque: Some(serde_json::json!({"signature": "abc123"})),
+                message_id: None,
             },
             EventPayload::HookRejected {
                 hook_name: "sensitive-content".into(),
@@ -533,6 +555,7 @@ mod tests {
         let event = sample_envelope(EventPayload::ThinkingBlockRecorded {
             text: "private chain of thought".into(),
             provider_opaque: Some(serde_json::json!({"item_id": "rs_01"})),
+            message_id: None,
         });
         let json = serde_json::to_string(&event)?;
         assert!(
@@ -541,6 +564,36 @@ mod tests {
         );
         let back: ConversationEvent = serde_json::from_str(&json)?;
         assert_eq!(event, back);
+        Ok(())
+    }
+
+    #[test]
+    fn assistant_message_appended_message_id_is_additive() -> serde_json::Result<()> {
+        // ADR-0041: message_id rides when present, is omitted when None, and a
+        // legacy event without the field deserializes to None (no SCHEMA_VERSION
+        // bump — additive, like ADR-0019's ThinkingBlockRecorded).
+        let message_id = MessageId::new();
+        let with = EventPayload::AssistantMessageAppended {
+            text: "hi".into(),
+            message_id: Some(message_id),
+        };
+        let json = serde_json::to_string(&with)?;
+        assert!(json.contains("message_id"), "message_id must ride: {json}");
+        assert_eq!(serde_json::from_str::<EventPayload>(&json)?, with);
+
+        let without = EventPayload::AssistantMessageAppended {
+            text: "hi".into(),
+            message_id: None,
+        };
+        let json_none = serde_json::to_string(&without)?;
+        assert!(
+            !json_none.contains("message_id"),
+            "None must be skipped: {json_none}"
+        );
+
+        // A producer predating the field omits it entirely.
+        let legacy = r#"{"type":"assistant_message_appended","data":{"text":"hi"}}"#;
+        assert_eq!(serde_json::from_str::<EventPayload>(legacy)?, without);
         Ok(())
     }
 

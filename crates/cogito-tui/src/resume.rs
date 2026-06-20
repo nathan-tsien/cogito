@@ -48,10 +48,14 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
                         // ModelCallCompleted if the flag is needed on replay.
                         stop_reason: None,
                         subagent_call_id: None,
+                        // This synthetic close belongs to the previous turn,
+                        // whose id is not threaded through this loop.
+                        turn_id: None,
                     });
                 }
                 out.push(StreamEvent::TurnStarted {
                     subagent_call_id: None,
+                    turn_id: ev.turn_id,
                 });
                 in_turn = true;
             }
@@ -59,6 +63,7 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
                 out.push(StreamEvent::TurnCompleted {
                     stop_reason: None,
                     subagent_call_id: None,
+                    turn_id: ev.turn_id,
                 });
                 in_turn = false;
             }
@@ -66,14 +71,17 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
                 out.push(StreamEvent::TurnFailed {
                     reason: format!("{reason:?}"),
                     subagent_call_id: None,
+                    turn_id: ev.turn_id,
                 });
                 in_turn = false;
             }
-            EventPayload::AssistantMessageAppended { text } => {
+            EventPayload::AssistantMessageAppended { text, .. } => {
                 if !text.is_empty() {
                     out.push(StreamEvent::TextDelta {
                         chunk: text.clone(),
                         subagent_call_id: None,
+                        turn_id: ev.turn_id,
+                        message_id: None,
                     });
                 }
             }
@@ -81,6 +89,8 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
                 if !text.is_empty() {
                     out.push(StreamEvent::ThinkingDelta {
                         chunk: text.clone(),
+                        turn_id: ev.turn_id,
+                        message_id: None,
                     });
                 }
             }
@@ -88,11 +98,14 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
                 call_id,
                 tool_name,
                 args,
+                ..
             } => {
                 out.push(StreamEvent::ToolDispatchStarted {
                     call_id: call_id.clone(),
                     tool_name: tool_name.clone(),
                     args: args.clone(),
+                    turn_id: ev.turn_id,
+                    message_id: None,
                 });
                 // We don't know the end status without scanning forward for the
                 // matching ToolResultRecorded; emit a synthetic "ok" marker. If
@@ -102,6 +115,8 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
                     call_id: call_id.clone(),
                     ok: true,
                     error_message: None,
+                    turn_id: ev.turn_id,
+                    message_id: None,
                 });
             }
             EventPayload::ToolResultRecorded { call_id, result } => {
@@ -115,6 +130,8 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
                         call_id: call_id.clone(),
                         ok: false,
                         error_message: None,
+                        turn_id: ev.turn_id,
+                        message_id: None,
                     });
                 }
             }
@@ -125,6 +142,9 @@ pub fn translate_events(events: &[ConversationEvent]) -> Vec<StreamEvent> {
         out.push(StreamEvent::TurnCompleted {
             stop_reason: None,
             subagent_call_id: None,
+            // Loop ended without an explicit TurnCompleted event; no
+            // event-scoped turn id is in scope for this synthetic close.
+            turn_id: None,
         });
     }
     out
@@ -262,6 +282,7 @@ mod tests {
             }),
             ev(EventPayload::AssistantMessageAppended {
                 text: "hello".into(),
+                message_id: None,
             }),
             ev(EventPayload::TurnCompleted {
                 outcome: TurnOutcome::Completed,
@@ -285,6 +306,7 @@ mod tests {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: serde_json::json!({}),
+                message_id: None,
             }),
             ev(EventPayload::TurnCompleted {
                 outcome: TurnOutcome::Completed,

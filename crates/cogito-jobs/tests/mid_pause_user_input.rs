@@ -146,7 +146,7 @@ async fn mid_pause_user_input_drained_latest_wins() -> Result<(), Box<dyn std::e
     let saw_paused = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnPaused) => return true,
+                Ok(StreamEvent::TurnPaused { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }

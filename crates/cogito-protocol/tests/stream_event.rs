@@ -7,6 +7,8 @@ fn text_delta_round_trips() -> serde_json::Result<()> {
     let event = StreamEvent::TextDelta {
         chunk: "Hello ".into(),
         subagent_call_id: None,
+        turn_id: None,
+        message_id: None,
     };
     let json = serde_json::to_string(&event)?;
     let back: StreamEvent = serde_json::from_str(&json)?;
@@ -19,32 +21,41 @@ fn lifecycle_events_round_trip() -> serde_json::Result<()> {
     let events = [
         StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         },
-        StreamEvent::TurnPaused,
-        StreamEvent::TurnResumed,
-        StreamEvent::TurnCancelled,
+        StreamEvent::TurnPaused { turn_id: None },
+        StreamEvent::TurnResumed { turn_id: None },
+        StreamEvent::TurnCancelled { turn_id: None },
         StreamEvent::TurnCompleted {
             stop_reason: Some(cogito_protocol::gateway::StopReason::EndTurn),
             subagent_call_id: None,
+            turn_id: None,
         },
         StreamEvent::TurnFailed {
             reason: "model gateway timeout".into(),
             subagent_call_id: None,
+            turn_id: None,
         },
         StreamEvent::ToolDispatchStarted {
             call_id: "call_1".into(),
             tool_name: "read_file".into(),
             args: serde_json::json!({"path": "src/main.rs"}),
+            turn_id: None,
+            message_id: None,
         },
         StreamEvent::ToolDispatchEnded {
             call_id: "call_1".into(),
             ok: true,
             error_message: None,
+            turn_id: None,
+            message_id: None,
         },
         StreamEvent::ToolDispatchEnded {
             call_id: "call_2".into(),
             ok: false,
             error_message: Some("permission denied".into()),
+            turn_id: None,
+            message_id: None,
         },
     ];
     for e in events {
@@ -62,6 +73,8 @@ fn text_delta_carries_optional_subagent_call_id() -> serde_json::Result<()> {
     let bare = StreamEvent::TextDelta {
         chunk: "hi".into(),
         subagent_call_id: None,
+        turn_id: None,
+        message_id: None,
     };
     let json = serde_json::to_string(&bare)?;
     assert!(
@@ -72,6 +85,8 @@ fn text_delta_carries_optional_subagent_call_id() -> serde_json::Result<()> {
     let tagged = StreamEvent::TextDelta {
         chunk: "hi".into(),
         subagent_call_id: Some("c1".into()),
+        turn_id: None,
+        message_id: None,
     };
     let back: StreamEvent = serde_json::from_str(&serde_json::to_string(&tagged)?)?;
     assert_eq!(back, tagged);
@@ -84,6 +99,7 @@ fn skill_activation_requested_serde_roundtrip() {
     use cogito_protocol::stream::StreamEvent;
     let ev = StreamEvent::SkillActivationRequested {
         skill_name: "invoice-parser".into(),
+        turn_id: None,
     };
     let json = serde_json::to_string(&ev).unwrap();
     assert!(json.contains("\"kind\":\"skill_activation_requested\""));

@@ -21,13 +21,15 @@
 > (`write_file` / `list_dir` / `edit` / `grep` / `glob`), and skill-bundle
 > reachability + dependency descriptor (ADR-0029/0032/0033, ADR-0023
 > finalized). Sprint 13 (v0.2 硬化 + tag `v0.2.0`) closed the version.
-> **Post-v0.2.0 hardening — additive patch snapshots `v0.2.1`/`v0.2.2`/`v0.2.3`/`v0.2.4`.**
+> **Post-v0.2.0 hardening — additive patch snapshots `v0.2.1`/`v0.2.2`/`v0.2.3`/`v0.2.4`/`v0.2.5`.**
 > Interstitial Runtime/harness-surface releases between v0.2 and v0.3, each
 > additive with no `SCHEMA_VERSION` bump: `v0.2.1` (session-registry lifecycle
 > ADR-0034 + injectable `MetricsRecorder` ADR-0036), `v0.2.2` (local execution
 > safety ADR-0037), `v0.2.3` (harness loop control — iteration budget ADR-0038 +
 > HITL-over-suspension-seam ADR-0039), `v0.2.4` (turn-lifecycle event correctness
-> — single-emit `TurnCompleted` + turn-level `max_tokens` signal ADR-0040). See
+> — single-emit `TurnCompleted` + turn-level `max_tokens` signal ADR-0040),
+> `v0.2.5` (stream/log message correlation key — per-message `MessageId` +
+> auxiliary `turn_id` on `StreamEvent` ADR-0041). See
 > the "Post-v0.2.0 hardening" subsection below. Next theme: v0.3 (Distributed
 > Collaboration).
 
@@ -384,6 +386,16 @@ small, additive Runtime/harness-surface change with no `ConversationEvent`
     `tracing::warn!` on truncation, so a truncated turn is distinguishable from a
     clean end-of-turn without scanning `ModelCallCompleted`. No new outcome
     variant; persisted event unchanged. Implemented PR #70.
+- **`v0.2.5` (2026-06-20):** stream/log message correlation key (issue #74).
+  - [x] **ADR-0041** (per-message correlation id) — a new
+    `StreamEvent::AssistantMessageStarted` carries an opaque `MessageId` minted
+    at message-open (one model call = one assistant message); the same id rides
+    on the message's live delta/tool events and is stamped (additive,
+    serde-default) on its persisted composing events (`AssistantMessageAppended`
+    / `ThinkingBlockRecorded` / `ToolUseRecorded`), so live and history views key
+    a message identically. `turn_id` is added to every turn-scoped `StreamEvent`
+    as the auxiliary turn-linkage field (`turn_id` is too coarse to be a message
+    identity — a turn holds several messages). No `SCHEMA_VERSION` bump.
 
 ### v0.3 · Distributed Collaboration
 

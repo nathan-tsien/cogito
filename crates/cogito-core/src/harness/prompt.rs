@@ -205,19 +205,21 @@ mod tests {
                     EventPayload::ThinkingBlockRecorded {
                         text,
                         provider_opaque,
+                        ..
                     } => {
                         thinking.push(ContentBlock::Thinking {
                             text: text.clone(),
                             provider_opaque: provider_opaque.clone(),
                         });
                     }
-                    EventPayload::AssistantMessageAppended { text } => {
+                    EventPayload::AssistantMessageAppended { text, .. } => {
                         body.push(ContentBlock::Text { text: text.clone() });
                     }
                     EventPayload::ToolUseRecorded {
                         call_id,
                         tool_name,
                         args,
+                        ..
                     } => {
                         body.push(ContentBlock::ToolUse {
                             call_id: call_id.clone(),
@@ -316,12 +318,16 @@ mod tests {
                 EventPayload::ThinkingBlockRecorded {
                     text: "I should grep.".into(),
                     provider_opaque: Some(serde_json::json!({"signature":"sig"})),
+                    message_id: None,
                 },
                 Some(turn_id),
             ),
             evt(
                 2,
-                EventPayload::AssistantMessageAppended { text: "OK.".into() },
+                EventPayload::AssistantMessageAppended {
+                    text: "OK.".into(),
+                    message_id: None,
+                },
                 Some(turn_id),
             ),
             evt(
@@ -330,6 +336,7 @@ mod tests {
                     call_id: "c1".into(),
                     tool_name: "grep".into(),
                     args: serde_json::json!({"pattern":"foo"}),
+                    message_id: None,
                 },
                 Some(turn_id),
             ),

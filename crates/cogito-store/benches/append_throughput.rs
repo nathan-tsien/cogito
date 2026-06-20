@@ -38,6 +38,7 @@ fn build_event(session_id: SessionId, turn_id: TurnId, seq: u64) -> Conversation
                 "param_b": 42,
                 "param_c": [1, 2, 3, 4, 5, 6, 7, 8],
             }),
+            message_id: None,
         },
     }
 }

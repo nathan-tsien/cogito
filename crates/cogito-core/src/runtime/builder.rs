@@ -783,32 +783,65 @@ impl cogito_protocol::subagent::BrainSpawner for RuntimeSpawner {
 fn last_assistant_text(events: &[cogito_protocol::ConversationEvent]) -> Option<String> {
     use cogito_protocol::event::EventPayload;
     events.iter().rev().find_map(|ev| match &ev.payload {
-        EventPayload::AssistantMessageAppended { text } if !text.is_empty() => Some(text.clone()),
+        EventPayload::AssistantMessageAppended { text, .. } if !text.is_empty() => {
+            Some(text.clone())
+        }
         _ => None,
     })
 }
 
 /// Stamp `subagent_call_id` onto the forwarded events that carry it; pass
 /// other variants through unchanged. Broadcast-only - never persisted.
+///
+/// The child's `turn_id` and `message_id` are preserved as-is: they already
+/// name the *child's* turn / assistant message (set by the child recorder),
+/// which is the correlation key a parent subscriber needs to align the
+/// forwarded message with the child's persisted log. Only `subagent_call_id`
+/// is (re)stamped here. (ADR-0011, ADR-0041.)
 fn tag_subagent(
     ev: cogito_protocol::stream::StreamEvent,
     call_id: &str,
 ) -> cogito_protocol::stream::StreamEvent {
     use cogito_protocol::stream::StreamEvent as S;
     match ev {
-        S::TextDelta { chunk, .. } => S::TextDelta {
+        S::TextDelta {
             chunk,
+            turn_id,
+            message_id,
+            ..
+        } => S::TextDelta {
+            chunk,
+            turn_id,
+            subagent_call_id: Some(call_id.to_string()),
+            message_id,
+        },
+        S::AssistantMessageStarted {
+            message_id,
+            turn_id,
+            ..
+        } => S::AssistantMessageStarted {
+            message_id,
+            turn_id,
             subagent_call_id: Some(call_id.to_string()),
         },
-        S::TurnStarted { .. } => S::TurnStarted {
+        S::TurnStarted { turn_id, .. } => S::TurnStarted {
+            turn_id,
             subagent_call_id: Some(call_id.to_string()),
         },
-        S::TurnCompleted { stop_reason, .. } => S::TurnCompleted {
+        S::TurnCompleted {
             stop_reason,
+            turn_id,
+            ..
+        } => S::TurnCompleted {
+            stop_reason,
+            turn_id,
             subagent_call_id: Some(call_id.to_string()),
         },
-        S::TurnFailed { reason, .. } => S::TurnFailed {
+        S::TurnFailed {
+            reason, turn_id, ..
+        } => S::TurnFailed {
             reason,
+            turn_id,
             subagent_call_id: Some(call_id.to_string()),
         },
         other => other,

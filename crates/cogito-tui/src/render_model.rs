@@ -137,7 +137,7 @@ impl ChatModel {
                 }
                 self.in_thinking = false;
             }
-            StreamEvent::ThinkingDelta { chunk } => {
+            StreamEvent::ThinkingDelta { chunk, .. } => {
                 if self.in_thinking {
                     if let Some(ChatLine::AssistantThinking(s)) = self.lines.last_mut() {
                         s.push_str(chunk);
@@ -160,9 +160,9 @@ impl ChatModel {
             // into `_`) to document where ToolDispatchEnded is handled.
             #[allow(clippy::match_same_arms)]
             StreamEvent::ToolDispatchEnded { .. } => {}
-            StreamEvent::TurnPaused => self.push_notice("[paused]"),
-            StreamEvent::TurnResumed => self.push_notice("[resumed]"),
-            StreamEvent::TurnCancelled => self.push_notice("[cancelled]"),
+            StreamEvent::TurnPaused { .. } => self.push_notice("[paused]"),
+            StreamEvent::TurnResumed { .. } => self.push_notice("[resumed]"),
+            StreamEvent::TurnCancelled { .. } => self.push_notice("[cancelled]"),
             StreamEvent::TurnFailed { reason, .. } => self.push_notice(format!("[error] {reason}")),
             // StreamEvent is #[non_exhaustive]; future variants render
             // as no-ops until a renderer is taught about them.
@@ -261,6 +261,7 @@ impl ToolTreeModel {
                 call_id,
                 tool_name,
                 args,
+                ..
             } => {
                 // Defensive: if a tool starts before any TurnStarted
                 // (shouldn't happen post-Sprint 2, but tolerate), open
@@ -287,6 +288,7 @@ impl ToolTreeModel {
                 call_id,
                 ok,
                 error_message,
+                ..
             } => {
                 if let Some(node) = self.find_node_mut(call_id) {
                     let elapsed_ms = node.started_at.elapsed().as_millis();
@@ -351,18 +353,24 @@ mod tests {
         let m = run(&[
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::TextDelta {
                 chunk: "hi ".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TextDelta {
                 chunk: "there".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TurnCompleted {
                 stop_reason: None,
                 subagent_call_id: None,
+                turn_id: None,
             },
         ]);
         assert_eq!(m.lines, vec![ChatLine::AssistantText("hi there".into())]);
@@ -373,9 +381,13 @@ mod tests {
         let m = run(&[
             StreamEvent::ThinkingDelta {
                 chunk: "let me ".into(),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ThinkingDelta {
                 chunk: "check".into(),
+                turn_id: None,
+                message_id: None,
             },
         ]);
         assert_eq!(
@@ -389,10 +401,14 @@ mod tests {
         let m = run(&[
             StreamEvent::ThinkingDelta {
                 chunk: "thinking".into(),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TextDelta {
                 chunk: "answer".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
         ]);
         assert_eq!(
@@ -411,11 +427,15 @@ mod tests {
                 call_id: "c1".into(),
                 tool_name: "read_file".into(),
                 args: json!({"path": "a.rs"}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: true,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             },
         ]);
         assert_eq!(m.lines.len(), 1);
@@ -428,12 +448,13 @@ mod tests {
     #[test]
     fn turn_paused_resumed_cancelled_failed_emit_notices() {
         let m = run(&[
-            StreamEvent::TurnPaused,
-            StreamEvent::TurnResumed,
-            StreamEvent::TurnCancelled,
+            StreamEvent::TurnPaused { turn_id: None },
+            StreamEvent::TurnResumed { turn_id: None },
+            StreamEvent::TurnCancelled { turn_id: None },
             StreamEvent::TurnFailed {
                 reason: "boom".into(),
                 subagent_call_id: None,
+                turn_id: None,
             },
         ]);
         assert_eq!(
@@ -465,11 +486,15 @@ mod tests {
         m.on_event(&StreamEvent::TextDelta {
             chunk: "a".into(),
             subagent_call_id: None,
+            turn_id: None,
+            message_id: None,
         });
         m.push_user_prompt("hi".into());
         m.on_event(&StreamEvent::TextDelta {
             chunk: "b".into(),
             subagent_call_id: None,
+            turn_id: None,
+            message_id: None,
         });
         assert_eq!(
             m.lines,
@@ -500,6 +525,7 @@ mod tree_tests {
     fn turn_started_pushes_empty_group() {
         let m = run(&[StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         }]);
         assert_eq!(m.turns.len(), 1);
         assert_eq!(m.turns[0].turn_idx, 1);
@@ -511,11 +537,14 @@ mod tree_tests {
         let m = run(&[
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "read_file".into(),
                 args: json!({}),
+                turn_id: None,
+                message_id: None,
             },
         ]);
         assert_eq!(m.turns[0].nodes.len(), 1);
@@ -528,16 +557,21 @@ mod tree_tests {
         let m = run(&[
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: true,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             },
         ]);
         assert!(matches!(m.turns[0].nodes[0].status, ToolStatus::Ok { .. }));
@@ -548,16 +582,21 @@ mod tree_tests {
         let m = run(&[
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "t".into(),
                 args: json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: false,
                 error_message: Some("boom".into()),
+                turn_id: None,
+                message_id: None,
             },
         ]);
         match &m.turns[0].nodes[0].status {
@@ -571,26 +610,35 @@ mod tree_tests {
         let m = run(&[
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "a".into(),
                 args: json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c1".into(),
                 ok: true,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c2".into(),
                 tool_name: "b".into(),
                 args: json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::ToolDispatchEnded {
                 call_id: "c2".into(),
                 ok: true,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             },
         ]);
         assert_eq!(m.turns.len(), 1);
@@ -602,19 +650,25 @@ mod tree_tests {
         let m = run(&[
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c1".into(),
                 tool_name: "a".into(),
                 args: json!({}),
+                turn_id: None,
+                message_id: None,
             },
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: "c2".into(),
                 tool_name: "b".into(),
                 args: json!({}),
+                turn_id: None,
+                message_id: None,
             },
         ]);
         assert_eq!(m.turns.len(), 2);
@@ -630,6 +684,8 @@ mod tree_tests {
             call_id: "c1".into(),
             tool_name: "t".into(),
             args: json!({}),
+            turn_id: None,
+            message_id: None,
         }]);
         assert_eq!(m.turns.len(), 1);
         assert_eq!(m.turns[0].nodes.len(), 1);
@@ -641,11 +697,18 @@ mod tree_tests {
             StreamEvent::TextDelta {
                 chunk: "x".into(),
                 subagent_call_id: None,
+                turn_id: None,
+                message_id: None,
             },
-            StreamEvent::ThinkingDelta { chunk: "y".into() },
+            StreamEvent::ThinkingDelta {
+                chunk: "y".into(),
+                turn_id: None,
+                message_id: None,
+            },
             StreamEvent::TurnCompleted {
                 stop_reason: None,
                 subagent_call_id: None,
+                turn_id: None,
             },
         ]);
         assert!(m.turns.is_empty());

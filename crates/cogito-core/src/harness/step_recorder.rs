@@ -22,7 +22,7 @@ use cogito_protocol::context::{
     CompactionReplacement, ContextDecisionErrors, TokenEstimates, ToolFilterOverrideMode,
 };
 use cogito_protocol::event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
-use cogito_protocol::ids::{EventId, SessionId, TurnId};
+use cogito_protocol::ids::{EventId, MessageId, SessionId, TurnId};
 use cogito_protocol::job::{JobId, JobOutcome};
 use cogito_protocol::session::SessionMeta;
 use cogito_protocol::store::{ConversationStore, EventRecorder, StoreError};
@@ -53,6 +53,11 @@ pub struct StepRecorder {
     seq_counter: u64,
     current_text_block: Option<TextBlockBuf>,
     current_thinking_block: Option<ThinkingBlockBuf>,
+    /// Identity of the in-flight assistant message (one model call). Minted
+    /// at `record_model_call_started` and stamped on the message's live and
+    /// persisted events until the next model call replaces it. `None` before
+    /// the first model call of a turn. See ADR-0041.
+    current_message_id: Option<MessageId>,
     /// Mirror of all events persisted through this recorder instance.
     /// Used for invariant checking in `record_context_compacted`.
     history_cache: Vec<ConversationEvent>,
@@ -63,6 +68,9 @@ pub struct StepRecorder {
 struct TextBlockBuf {
     turn_id: TurnId,
     text: String,
+    /// Message identity captured when the block opened, so the flushed
+    /// `AssistantMessageAppended` carries the same id the live deltas did.
+    message_id: Option<MessageId>,
 }
 
 /// In-flight thinking block accumulator. Filled by `on_thinking_delta`
@@ -73,6 +81,8 @@ struct TextBlockBuf {
 struct ThinkingBlockBuf {
     turn_id: TurnId,
     text: String,
+    /// See `TextBlockBuf::message_id`.
+    message_id: Option<MessageId>,
 }
 
 impl StepRecorder {
@@ -96,6 +106,7 @@ impl StepRecorder {
             seq_counter: seq_start,
             current_text_block: None,
             current_thinking_block: None,
+            current_message_id: None,
             history_cache: Vec::new(),
         }
     }
@@ -145,6 +156,7 @@ impl StepRecorder {
         activate_skills: Vec<String>,
     ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnStarted {
+            turn_id: Some(turn_id),
             subagent_call_id: None,
         });
         self.append(
@@ -163,16 +175,20 @@ impl StepRecorder {
     /// signals the block is finished to flush the buffer as a single
     /// `AssistantMessageAppended` event.
     pub fn on_text_delta(&mut self, turn_id: TurnId, chunk: String) {
+        let message_id = self.current_message_id;
         let buf = self.current_text_block.get_or_insert_with(|| TextBlockBuf {
             turn_id,
             text: String::new(),
+            message_id,
         });
         buf.text.push_str(&chunk);
         // Broadcast after the buffer push so the buffer is the source of
         // truth even if the channel has no live subscribers.
         let _ = self.events_tx.send(StreamEvent::TextDelta {
             chunk,
+            turn_id: Some(turn_id),
             subagent_call_id: None,
+            message_id,
         });
     }
 
@@ -189,7 +205,10 @@ impl StepRecorder {
         let event_id = self
             .append(
                 Some(buf.turn_id),
-                EventPayload::AssistantMessageAppended { text: buf.text },
+                EventPayload::AssistantMessageAppended {
+                    text: buf.text,
+                    message_id: buf.message_id,
+                },
             )
             .await?;
         Ok(Some(event_id))
@@ -200,14 +219,20 @@ impl StepRecorder {
     /// [`StepRecorder::on_thinking_block_complete`] when the wire
     /// protocol signals the block is finished.
     pub fn on_thinking_delta(&mut self, turn_id: TurnId, chunk: String) {
+        let message_id = self.current_message_id;
         let buf = self
             .current_thinking_block
             .get_or_insert_with(|| ThinkingBlockBuf {
                 turn_id,
                 text: String::new(),
+                message_id,
             });
         buf.text.push_str(&chunk);
-        let _ = self.events_tx.send(StreamEvent::ThinkingDelta { chunk });
+        let _ = self.events_tx.send(StreamEvent::ThinkingDelta {
+            chunk,
+            turn_id: Some(turn_id),
+            message_id,
+        });
     }
 
     /// Persist the accumulated thinking block as one
@@ -229,6 +254,7 @@ impl StepRecorder {
                 EventPayload::ThinkingBlockRecorded {
                     text: buf.text,
                     provider_opaque,
+                    message_id: buf.message_id,
                 },
             )
             .await?;
@@ -244,10 +270,13 @@ impl StepRecorder {
         tool_name: String,
         args: serde_json::Value,
     ) -> Result<EventId, StoreError> {
+        let message_id = self.current_message_id;
         let _ = self.events_tx.send(StreamEvent::ToolDispatchStarted {
             call_id: call_id.clone(),
             tool_name: tool_name.clone(),
             args: args.clone(),
+            turn_id: Some(turn_id),
+            message_id,
         });
         self.append(
             Some(turn_id),
@@ -255,6 +284,7 @@ impl StepRecorder {
                 call_id,
                 tool_name,
                 args,
+                message_id,
             },
         )
         .await
@@ -280,6 +310,8 @@ impl StepRecorder {
             call_id: call_id.clone(),
             ok,
             error_message,
+            turn_id: Some(turn_id),
+            message_id: self.current_message_id,
         });
         self.append(
             Some(turn_id),
@@ -295,7 +327,9 @@ impl StepRecorder {
         turn_id: TurnId,
         job_id: JobId,
     ) -> Result<EventId, StoreError> {
-        let _ = self.events_tx.send(StreamEvent::TurnPaused);
+        let _ = self.events_tx.send(StreamEvent::TurnPaused {
+            turn_id: Some(turn_id),
+        });
         self.append(Some(turn_id), EventPayload::TurnPaused { job_id })
             .await
     }
@@ -337,7 +371,9 @@ impl StepRecorder {
         job_id: JobId,
         outcome: JobOutcome,
     ) -> Result<EventId, StoreError> {
-        let _ = self.events_tx.send(StreamEvent::TurnResumed);
+        let _ = self.events_tx.send(StreamEvent::TurnResumed {
+            turn_id: Some(turn_id),
+        });
         self.append(
             Some(turn_id),
             EventPayload::JobCompletedRecorded { job_id, outcome },
@@ -362,6 +398,7 @@ impl StepRecorder {
     ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnCompleted {
             stop_reason: Some(stop_reason),
+            turn_id: Some(turn_id),
             subagent_call_id: None,
         });
         self.append(Some(turn_id), EventPayload::TurnCompleted { outcome })
@@ -501,11 +538,25 @@ impl StepRecorder {
 
     /// Record the start of a model gateway call. Called at the
     /// `PromptBuilt → ModelCalling` transition boundary.
+    ///
+    /// This is the assistant-message boundary (ADR-0041): a fresh `MessageId`
+    /// is minted and broadcast as [`StreamEvent::AssistantMessageStarted`], and
+    /// held as `current_message_id` so every event composing this model call's
+    /// output (text/thinking deltas, tool dispatches, and their persisted
+    /// counterparts) carries the same id. It is replaced on the next model
+    /// call, so a multi-call (tool-loop) turn yields one message per call.
     pub async fn record_model_call_started(
         &mut self,
         turn_id: TurnId,
         model: String,
     ) -> Result<EventId, StoreError> {
+        let message_id = MessageId::new();
+        self.current_message_id = Some(message_id);
+        let _ = self.events_tx.send(StreamEvent::AssistantMessageStarted {
+            message_id,
+            turn_id: Some(turn_id),
+            subagent_call_id: None,
+        });
         self.append(Some(turn_id), EventPayload::ModelCallStarted { model })
             .await
     }
@@ -566,6 +617,7 @@ impl StepRecorder {
     ) -> Result<EventId, StoreError> {
         let _ = self.events_tx.send(StreamEvent::TurnFailed {
             reason: format!("{reason:?}"),
+            turn_id: Some(turn_id),
             subagent_call_id: None,
         });
         self.append(Some(turn_id), EventPayload::TurnFailed { reason })
@@ -923,6 +975,118 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn message_bearing_broadcasts_carry_turn_id() -> Result<(), Box<dyn std::error::Error>> {
+        // ADR-0041: a live subscriber must be able to key TurnStarted /
+        // TextDelta / TurnCompleted to the same turn_id the persisted log
+        // carries, so it can fold streamed deltas into the right message.
+        let tmp = tempfile::tempdir()?;
+        let store = fresh_store_in(tmp.path());
+        let (tx, mut rx) = broadcast::channel(64);
+        let sid = SessionId::new();
+        let turn_id = TurnId::new();
+        let mut rec = StepRecorder::new(Arc::clone(&store), tx, sid, 0);
+
+        rec.record_turn_started(
+            turn_id,
+            vec![ContentBlock::Text { text: "go".into() }],
+            vec![],
+        )
+        .await?;
+        rec.on_text_delta(turn_id, "hello".into());
+        rec.record_turn_completed(
+            turn_id,
+            TurnOutcome::Completed,
+            cogito_protocol::gateway::StopReason::EndTurn,
+        )
+        .await?;
+
+        #[allow(clippy::panic)]
+        match rx.try_recv()? {
+            StreamEvent::TurnStarted { turn_id: tid, .. } => assert_eq!(tid, Some(turn_id)),
+            other => panic!("expected TurnStarted, got {other:?}"),
+        }
+        #[allow(clippy::panic)]
+        match rx.try_recv()? {
+            StreamEvent::TextDelta {
+                chunk,
+                turn_id: tid,
+                ..
+            } => {
+                assert_eq!(chunk, "hello");
+                assert_eq!(tid, Some(turn_id));
+            }
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+        #[allow(clippy::panic)]
+        match rx.try_recv()? {
+            StreamEvent::TurnCompleted { turn_id: tid, .. } => assert_eq!(tid, Some(turn_id)),
+            other => panic!("expected TurnCompleted, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn assistant_message_id_minted_and_stamped_live_and_persisted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        // ADR-0041: record_model_call_started mints a MessageId, broadcasts it
+        // on AssistantMessageStarted, and stamps the same id on the message's
+        // live deltas and its persisted AssistantMessageAppended — so a live
+        // subscriber and a history reader key the message identically.
+        let tmp = tempfile::tempdir()?;
+        let store = fresh_store_in(tmp.path());
+        let (tx, mut rx) = broadcast::channel(64);
+        let sid = SessionId::new();
+        let turn_id = TurnId::new();
+        let mut rec = StepRecorder::new(Arc::clone(&store), tx, sid, 0);
+
+        rec.record_model_call_started(turn_id, "m".into()).await?;
+        rec.on_text_delta(turn_id, "hi".into());
+        let appended = rec.on_text_block_complete().await?;
+        assert!(appended.is_some(), "expected an AssistantMessageAppended");
+
+        // The message-open broadcast carries the minted id.
+        #[allow(clippy::panic)]
+        let message_id = match rx.try_recv()? {
+            StreamEvent::AssistantMessageStarted {
+                message_id,
+                turn_id: tid,
+                ..
+            } => {
+                assert_eq!(tid, Some(turn_id));
+                message_id
+            }
+            other => panic!("expected AssistantMessageStarted, got {other:?}"),
+        };
+        // The text delta self-attributes to the same message.
+        #[allow(clippy::panic)]
+        match rx.try_recv()? {
+            StreamEvent::TextDelta {
+                chunk,
+                message_id: mid,
+                ..
+            } => {
+                assert_eq!(chunk, "hi");
+                assert_eq!(mid, Some(message_id), "delta must carry the message id");
+            }
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+        // The persisted AssistantMessageAppended carries the same id, so a
+        // history projection keys the message identically to the live stream.
+        let session_file = std::fs::read_dir(tmp.path())?
+            .next()
+            .ok_or("no session file")?
+            .map_err(|e| format!("{e}"))?
+            .path();
+        let log = tokio::fs::read_to_string(session_file).await?;
+        let needle = format!(r#""message_id":{}"#, serde_json::to_string(&message_id)?);
+        assert!(
+            log.contains("assistant_message_appended") && log.contains(&needle),
+            "persisted AssistantMessageAppended must carry message_id {needle}: {log}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn thinking_block_flush_persists_thinking_block_recorded()
     -> Result<(), Box<dyn std::error::Error>> {
         let tmp = tempfile::tempdir()?;
@@ -946,15 +1110,30 @@ mod tests {
             .await?;
         assert!(id.is_some(), "expected an EventId from flush");
 
-        // Two ThinkingDelta StreamEvents broadcast then nothing more.
+        // Two ThinkingDelta StreamEvents broadcast then nothing more, each
+        // carrying the originating turn id for live/persisted correlation.
         #[allow(clippy::panic)]
         match rx.try_recv()? {
-            StreamEvent::ThinkingDelta { chunk } => assert_eq!(chunk, "I should "),
+            StreamEvent::ThinkingDelta {
+                chunk,
+                turn_id: tid,
+                ..
+            } => {
+                assert_eq!(chunk, "I should ");
+                assert_eq!(tid, Some(turn_id));
+            }
             other => panic!("unexpected stream event: {other:?}"),
         }
         #[allow(clippy::panic)]
         match rx.try_recv()? {
-            StreamEvent::ThinkingDelta { chunk } => assert_eq!(chunk, "grep."),
+            StreamEvent::ThinkingDelta {
+                chunk,
+                turn_id: tid,
+                ..
+            } => {
+                assert_eq!(chunk, "grep.");
+                assert_eq!(tid, Some(turn_id));
+            }
             other => panic!("unexpected stream event: {other:?}"),
         }
 

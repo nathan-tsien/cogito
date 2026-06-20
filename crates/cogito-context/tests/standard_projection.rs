@@ -79,6 +79,7 @@ fn push_completed_turn(
         Some(tid),
         EventPayload::AssistantMessageAppended {
             text: assistant_text.into(),
+            message_id: None,
         },
     ));
     *seq += 1;
@@ -404,6 +405,7 @@ fn covered_compaction_event_is_suppressed() {
             Some(turn_a),
             EventPayload::AssistantMessageAppended {
                 text: "early assistant".into(),
+                message_id: None,
             },
         ),
         // C1: Summary covering (0, 1)
@@ -435,6 +437,7 @@ fn covered_compaction_event_is_suppressed() {
             Some(turn_b),
             EventPayload::AssistantMessageAppended {
                 text: "middle assistant".into(),
+                message_id: None,
             },
         ),
         // C2: Summary covering (2, 4) — includes C1's seq 2
@@ -529,6 +532,7 @@ fn current_turn_events_post_compaction_are_emitted_in_order() {
             Some(early_turn),
             EventPayload::AssistantMessageAppended {
                 text: "early answer".into(),
+                message_id: None,
             },
         ),
         mk(
@@ -569,6 +573,7 @@ fn current_turn_events_post_compaction_are_emitted_in_order() {
             Some(current),
             EventPayload::AssistantMessageAppended {
                 text: "current answer".into(),
+                message_id: None,
             },
         ),
     ];

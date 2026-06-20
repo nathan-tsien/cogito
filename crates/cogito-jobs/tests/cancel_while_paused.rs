@@ -90,7 +90,7 @@ async fn cancel_while_paused_unwinds_to_tool_error_cancelled()
     let saw_paused = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnPaused) => return true,
+                Ok(StreamEvent::TurnPaused { .. }) => return true,
                 Ok(_) => {}
                 Err(_) => return false,
             }

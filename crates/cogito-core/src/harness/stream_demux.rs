@@ -32,7 +32,8 @@ pub fn sigil_emit_for_test(
     state: &mut FenceState,
     chunk: &str,
     broadcast_tx: &broadcast::Sender<StreamEvent>,
-) -> Result<(), broadcast::error::SendError<StreamEvent>> {
+    turn_id: TurnId,
+) {
     let mut seen_this_chunk = std::collections::HashSet::new();
     for hit in find_sigils_outside_code(state, chunk) {
         if !provider.is_registered(&hit.name) {
@@ -42,12 +43,13 @@ pub fn sigil_emit_for_test(
             continue;
         }
         // Broadcast errors only occur when the channel has no live
-        // receivers; subscribers are best-effort by design.
+        // receivers; subscribers are best-effort by design — the send
+        // result is intentionally dropped, so this function cannot fail.
         let _ = broadcast_tx.send(StreamEvent::SkillActivationRequested {
             skill_name: hit.name,
+            turn_id: Some(turn_id),
         });
     }
-    Ok(())
 }
 
 /// Consume the gateway stream to completion.
@@ -89,11 +91,12 @@ where
                 // the delta, so subscribers see SkillActivationRequested
                 // ordered consistently with the surrounding TextDelta.
                 if let Some(provider) = skills {
-                    let _ = sigil_emit_for_test(
+                    sigil_emit_for_test(
                         provider,
                         &mut fence_state,
                         &chunk,
                         recorder.events_tx(),
+                        turn_id,
                     );
                 }
                 // StepRecorder buffers + broadcasts TextDelta internally.

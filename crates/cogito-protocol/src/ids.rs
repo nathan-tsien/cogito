@@ -97,6 +97,14 @@ macro_rules! id_newtype {
 id_newtype!(EventId, "Globally unique event identifier.");
 id_newtype!(SessionId, "Conversation session identifier.");
 id_newtype!(TurnId, "Per-session turn identifier.");
+id_newtype!(
+    MessageId,
+    "Per-assistant-message identifier. Minted when an assistant message opens \
+     (one model call = one message) and carried on both the live \
+     `StreamEvent::AssistantMessageStarted` / delta events and the message's \
+     persisted events, so live and history views key the same message \
+     identically. See ADR-0041."
+);
 
 impl EventId {
     /// Sentinel value returned when the recorder fails while trying to

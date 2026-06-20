@@ -237,8 +237,10 @@ fn replay_into_models(
                     turn_count = turn_count.saturating_add(1);
                 }
                 cogito_protocol::stream::StreamEvent::TurnFailed { .. }
-                | cogito_protocol::stream::StreamEvent::TurnCancelled
-                | cogito_protocol::stream::StreamEvent::TurnPaused => turn_in_progress = false,
+                | cogito_protocol::stream::StreamEvent::TurnCancelled { .. }
+                | cogito_protocol::stream::StreamEvent::TurnPaused { .. } => {
+                    turn_in_progress = false;
+                }
                 _ => {}
             }
         }
