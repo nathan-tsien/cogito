@@ -104,7 +104,10 @@ async fn resume_from_model_completed_fast_paths_to_turn_completed()
             session_id,
             3,
             Some(turn_id),
-            EventPayload::AssistantMessageAppended { text: "ack".into() },
+            EventPayload::AssistantMessageAppended {
+                text: "ack".into(),
+                message_id: None,
+            },
         ),
         evt(
             session_id,
@@ -212,6 +215,7 @@ async fn resume_seeds_iteration_budget_from_log_and_fails_immediately()
                 call_id: call_id.into(),
                 tool_name: "read_file".into(),
                 args: serde_json::json!({ "path": path }),
+                message_id: None,
             },
         )
     };

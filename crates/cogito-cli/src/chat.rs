@@ -779,8 +779,8 @@ async fn run_repl(
                         &e,
                         StreamEvent::TurnCompleted { .. }
                             | StreamEvent::TurnFailed { .. }
-                            | StreamEvent::TurnCancelled
-                            | StreamEvent::TurnPaused
+                            | StreamEvent::TurnCancelled { .. }
+                            | StreamEvent::TurnPaused { .. }
                     );
                     renderer.on_stream_event(&e)?;
                     if terminal {
@@ -903,7 +903,7 @@ async fn replay_history(
                     renderer.replay_user_input(text)?;
                 }
             }
-            EventPayload::AssistantMessageAppended { text } => {
+            EventPayload::AssistantMessageAppended { text, .. } => {
                 renderer.replay_assistant_block(&text)?;
             }
             EventPayload::ThinkingBlockRecorded { text, .. } => {
@@ -913,6 +913,7 @@ async fn replay_history(
                 call_id,
                 tool_name,
                 args,
+                ..
             } => {
                 tool_starts.insert(call_id, (event.ts.timestamp_millis(), tool_name, args));
             }

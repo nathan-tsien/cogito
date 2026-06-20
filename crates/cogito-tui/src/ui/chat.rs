@@ -435,6 +435,8 @@ mod tests {
         chat.on_event(&StreamEvent::TextDelta {
             chunk: "I am cogito.".into(),
             subagent_call_id: None,
+            turn_id: None,
+            message_id: None,
         });
         let tools = empty_tools();
         let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 5);
@@ -463,11 +465,14 @@ mod tests {
         for ev in [
             StreamEvent::TurnStarted {
                 subagent_call_id: None,
+                turn_id: None,
             },
             StreamEvent::ToolDispatchStarted {
                 call_id: call_id.into(),
                 tool_name: name.into(),
                 args: json!({"path": "a.rs"}),
+                turn_id: None,
+                message_id: None,
             },
         ] {
             chat.on_event(&ev);
@@ -493,6 +498,8 @@ mod tests {
                 call_id: "c1".into(),
                 ok: true,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             };
             chat.on_event(&ev);
             tools.on_event(&ev);
@@ -509,6 +516,8 @@ mod tests {
                 call_id: "c1".into(),
                 ok: false,
                 error_message: Some("panicked: assertion failed".into()),
+                turn_id: None,
+                message_id: None,
             };
             chat.on_event(&ev);
             tools.on_event(&ev);
@@ -540,6 +549,8 @@ mod tests {
         chat.on_event(&StreamEvent::TextDelta {
             chunk: "see **bold** here".into(),
             subagent_call_id: None,
+            turn_id: None,
+            message_id: None,
         });
         let tools = empty_tools();
         let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 5);
@@ -554,6 +565,8 @@ mod tests {
         chat.on_event(&StreamEvent::TextDelta {
             chunk: "first line\nsecond line".into(),
             subagent_call_id: None,
+            turn_id: None,
+            message_id: None,
         });
         let tools = empty_tools();
         let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 5);
@@ -568,6 +581,8 @@ mod tests {
         chat.on_event(&StreamEvent::TextDelta {
             chunk: "Plan:\n\n- step **one**\n- step `two`\n\n```\ncode\n```".into(),
             subagent_call_id: None,
+            turn_id: None,
+            message_id: None,
         });
         let tools = empty_tools();
         let out = draw(&chat, &tools, None, &HashSet::new(), false, 0, 40, 12);
@@ -588,6 +603,8 @@ mod tests {
                 call_id: "c1".into(),
                 ok: true,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             };
             chat.on_event(&ev);
             tools.on_event(&ev);

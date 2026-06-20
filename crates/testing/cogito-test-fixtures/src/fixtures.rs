@@ -128,6 +128,7 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
             Some(turn),
             EventPayload::AssistantMessageAppended {
                 text: "Reading /tmp/x now.".into(),
+                message_id: None,
             },
         ),
         envelope(
@@ -137,6 +138,7 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
                 call_id: "toolu_01".into(),
                 tool_name: "read_file".into(),
                 args: serde_json::json!({"path": "/tmp/x"}),
+                message_id: None,
             },
         ),
         envelope(
@@ -212,6 +214,7 @@ pub fn canonical_sample_session() -> Vec<ConversationEvent> {
             EventPayload::ThinkingBlockRecorded {
                 text: "I should grep for the symbol.".into(),
                 provider_opaque: Some(serde_json::json!({"signature": "abc123"})),
+                message_id: None,
             },
         ),
     ]

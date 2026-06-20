@@ -176,8 +176,8 @@ async fn wait_for_terminal_with_store(
                 Ok(
                     StreamEvent::TurnCompleted { .. }
                     | StreamEvent::TurnFailed { .. }
-                    | StreamEvent::TurnCancelled
-                    | StreamEvent::TurnPaused,
+                    | StreamEvent::TurnCancelled { .. }
+                    | StreamEvent::TurnPaused { .. },
                 )
                 | Err(_) => return,
                 Ok(_) => {}
@@ -196,8 +196,8 @@ async fn wait_for_terminal_broadcast(handle: &SessionHandle) {
                 Ok(
                     StreamEvent::TurnCompleted { .. }
                     | StreamEvent::TurnFailed { .. }
-                    | StreamEvent::TurnCancelled
-                    | StreamEvent::TurnPaused,
+                    | StreamEvent::TurnCancelled { .. }
+                    | StreamEvent::TurnPaused { .. },
                 )
                 | Err(_) => return,
                 Ok(_) => {}
@@ -427,6 +427,16 @@ fn nil_job_id() -> cogito_protocol::job::JobId {
     .expect("nil ULID parses as JobId")
 }
 
+/// Nil sentinel `MessageId` used to normalize the per-assistant-message id
+/// (ADR-0041). It is minted fresh per model call (`MessageId::new()`), so
+/// golden and resumed runs carry non-equal ULIDs at the same logical
+/// position — exactly like `EventId` / `JobId`. Normalizing to a fixed
+/// sentinel keeps prefix-immutability comparable; the per-message grouping
+/// is still structurally asserted (same id shared by a message's events).
+fn nil_message_id() -> cogito_protocol::ids::MessageId {
+    cogito_protocol::ids::MessageId::from(ulid::Ulid::nil())
+}
+
 /// Return a canonicalized payload that replaces run-specific ID fields with
 /// stable sentinel values so golden and resumed logs compare equal.
 fn normalize_payload(payload: EventPayload) -> EventPayload {
@@ -481,6 +491,35 @@ fn normalize_payload(payload: EventPayload) -> EventPayload {
         EventPayload::JobCompletedRecorded { outcome, .. } => EventPayload::JobCompletedRecorded {
             job_id: nil_job_id(),
             outcome,
+        },
+        // ADR-0041: the per-message `MessageId` is minted fresh per model
+        // call, so normalize it to a sentinel (like `EventId` / `JobId`)
+        // for prefix-immutability comparison.
+        EventPayload::AssistantMessageAppended { text, .. } => {
+            EventPayload::AssistantMessageAppended {
+                text,
+                message_id: Some(nil_message_id()),
+            }
+        }
+        EventPayload::ToolUseRecorded {
+            call_id,
+            tool_name,
+            args,
+            ..
+        } => EventPayload::ToolUseRecorded {
+            call_id,
+            tool_name,
+            args,
+            message_id: Some(nil_message_id()),
+        },
+        EventPayload::ThinkingBlockRecorded {
+            text,
+            provider_opaque,
+            ..
+        } => EventPayload::ThinkingBlockRecorded {
+            text,
+            provider_opaque,
+            message_id: Some(nil_message_id()),
         },
         // All other variants carry no run-specific IDs inside the payload.
         other => other,
@@ -563,6 +602,7 @@ fn collect_tool_mapping(
                 call_id,
                 tool_name,
                 args,
+                ..
             } => {
                 uses.insert(call_id.clone(), (tool_name.clone(), args.clone()));
             }
@@ -596,7 +636,7 @@ fn collect_assistant_text(events: &[ConversationEvent]) -> String {
     events
         .iter()
         .filter_map(|e| match &e.payload {
-            EventPayload::AssistantMessageAppended { text } => Some(text.clone()),
+            EventPayload::AssistantMessageAppended { text, .. } => Some(text.clone()),
             _ => None,
         })
         .collect::<Vec<_>>()
@@ -2146,7 +2186,7 @@ async fn async_run_with_y_fault(crash_after_n: u64) -> Vec<ConversationEvent> {
                     Ok(
                         StreamEvent::TurnCompleted { .. }
                         | StreamEvent::TurnFailed { .. }
-                        | StreamEvent::TurnCancelled,
+                        | StreamEvent::TurnCancelled { .. },
                     )
                     | Err(_) => return,
                     Ok(_) => {}

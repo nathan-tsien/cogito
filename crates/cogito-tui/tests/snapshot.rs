@@ -111,14 +111,18 @@ fn single_text_turn_renders_user_and_agent_lines() {
     app.chat.push_user_prompt("who are you?".into());
     app.apply_stream_event(&StreamEvent::TurnStarted {
         subagent_call_id: None,
+        turn_id: None,
     });
     app.apply_stream_event(&StreamEvent::TextDelta {
         chunk: "I am cogito.".into(),
         subagent_call_id: None,
+        turn_id: None,
+        message_id: None,
     });
     app.apply_stream_event(&StreamEvent::TurnCompleted {
         stop_reason: None,
         subagent_call_id: None,
+        turn_id: None,
     });
     let out = draw(&app, None);
     assert!(out.contains("▸  who are you?"));

@@ -43,6 +43,8 @@ lifecycle" below for the full state diagram.
 
 1. **Non-text-delta records write immediately.** No buffering, no batching, no coalescing. `record(event).await` returns only after the store has durably accepted the event.
 2. **Text content is persisted at content_block boundary** — see "Text block lifecycle" below. Text deltas accumulate in an in-memory buffer; the buffer is drained to a single `AssistantMessageAppended` event when the demultiplexer signals `text_block_complete`. **No timer-based or size-based batching exists** (AGENTS.md §2). The live `StreamEvent::TextDelta` broadcast is independent of persistence.
+6. **Every turn-scoped live broadcast carries `turn_id`.** Each turn-scoped `StreamEvent` variant (`TurnStarted`, `TextDelta`, `ThinkingDelta`, `ToolDispatchStarted`/`Ended`, `TurnCompleted`/`Failed`/`Paused`/`Resumed`/`Cancelled`, `SkillActivationRequested`) is stamped with `turn_id: Some(turn_id)` — the recorder already receives `turn_id` on every emit method — so a live subscriber can align a streamed event with the same turn in the persisted log (which already carries `turn_id`). Additive, serde-default, broadcast-only; `None` appears only on replay-reconstructed events. See ADR-0041.
+7. **Each assistant message has a stable `message_id`, minted once and used on both streams.** `record_model_call_started` mints a fresh `MessageId` (one model call = one assistant message), holds it as `current_message_id`, and broadcasts `StreamEvent::AssistantMessageStarted` (the message-open event). The same id then rides on the message's live deltas (`TextDelta`/`ThinkingDelta`/`ToolDispatch*`) and is stamped (additive-optional) on its persisted composing events (`AssistantMessageAppended`/`ThinkingBlockRecorded`/`ToolUseRecorded`), so a live subscriber and a history projection key the message identically. The text/thinking buffers capture `current_message_id` at open so a flushed event carries the id that was current when the block began. `current_message_id` is replaced at the next model call (a tool-loop turn yields one message per call). See ADR-0041.
 3. **Append-only.** Records are never updated, never deleted. Compaction / archival is out of scope.
 4. **Sequence is monotonic per session.** `EventSeq` is assigned by the store; H02 surfaces it back to the caller for ordering reference but does not generate it.
 5. **Failure surfaces upward as `RecordError`.** Store-level errors do not become panics or silent drops. H01 treats most `RecordError`s as fatal for the current turn (transition to `Failed`).
@@ -103,7 +105,7 @@ All `record_*` methods return `Result<EventId, StoreError>` so any caller that n
 | `record_context_manage_entered` | `turn_id` | `Result<EventId, StoreError>` | H01 at `Init → ContextManaged` transition start. |
 | `record_context_manage_completed` | `turn_id` | `Result<EventId, StoreError>` | H01 at `ContextManaged → PromptBuilt` transition end. |
 | `record_prompt_composed` | `turn_id, model: String, surface_size: u32` | `Result<EventId, StoreError>` | H01 after H04/H05 produce the `ModelInput`. |
-| `record_model_call_started` | `turn_id, model: String` | `Result<EventId, StoreError>` | H01 at `PromptBuilt → ModelCalling` transition boundary. |
+| `record_model_call_started` | `turn_id, model: String` | `Result<EventId, StoreError>` | H01 at `PromptBuilt → ModelCalling` transition boundary. Mints the assistant message's `MessageId` and broadcasts `AssistantMessageStarted` (ADR-0041). |
 | `on_text_delta` | `turn_id, chunk: String` | `()` | H06 per text-delta chunk; accumulates buffer + broadcasts. Does not write to store. |
 | `on_text_block_complete` | — | `Result<Option<EventId>, StoreError>` | H06 on `content_block_stop` for a text block; drains buffer to `AssistantMessageAppended`. No-op (returns `None`) when no deltas have been buffered. |
 | `on_thinking_delta` | `turn_id, chunk: String` | `()` | H06 per `ThinkingDelta` chunk; accumulates a per-block thinking buffer and broadcasts `StreamEvent::ThinkingDelta`. Does not write to store. (ADR-0019 §3.) |
@@ -133,6 +135,7 @@ All `record_*` methods return `Result<EventId, StoreError>` so any caller that n
 - ARCHITECTURE.md §"State storage planes" P1
 - ADR-0002 (event-sourced conversation log)
 - ADR-0006 §7 (dual-stream rationale: persisted vs live broadcast)
+- ADR-0041 (turn correlation key `turn_id` on the live `StreamEvent`)
 - ADR-0007 (JSONL dev/debug scope; prompt-not-persisted rationale)
 - ADR-0008 (future context management decisions)
 - AGENTS.md §"Inviolable design principles" #2

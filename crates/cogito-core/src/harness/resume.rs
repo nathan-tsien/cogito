@@ -381,6 +381,7 @@ fn resume_from_turn_started(
                     call_id,
                     tool_name,
                     args,
+                    ..
                 } = &e.payload
                 {
                     if !completed_ids.iter().any(|id| id == call_id) {
@@ -439,13 +440,14 @@ fn rebuild_model_output(slice: &[ConversationEvent]) -> Result<ModelOutput, Resu
 
     for e in slice {
         match &e.payload {
-            EventPayload::AssistantMessageAppended { text } => {
+            EventPayload::AssistantMessageAppended { text, .. } => {
                 content.push(cogito_protocol::ContentBlock::Text { text: text.clone() });
             }
             EventPayload::ToolUseRecorded {
                 call_id,
                 tool_name,
                 args,
+                ..
             } => {
                 content.push(cogito_protocol::ContentBlock::ToolUse {
                     call_id: call_id.clone(),
@@ -702,7 +704,10 @@ mod tests {
             ),
             evt(
                 2,
-                EventPayload::AssistantMessageAppended { text: "hi".into() },
+                EventPayload::AssistantMessageAppended {
+                    text: "hi".into(),
+                    message_id: None,
+                },
                 Some(t),
             ),
             evt(
@@ -763,6 +768,7 @@ mod tests {
                     call_id: "c1".into(),
                     tool_name: "read_file".into(),
                     args: serde_json::json!({"p": "/x"}),
+                    message_id: None,
                 },
                 Some(t),
             ),
@@ -816,6 +822,7 @@ mod tests {
                     call_id: "c1".into(),
                     tool_name: "tool_a".into(),
                     args: serde_json::json!({}),
+                    message_id: None,
                 },
                 Some(t),
             ),
@@ -825,6 +832,7 @@ mod tests {
                     call_id: "c2".into(),
                     tool_name: "tool_b".into(),
                     args: serde_json::json!({}),
+                    message_id: None,
                 },
                 Some(t),
             ),
@@ -908,6 +916,7 @@ mod tests {
                     call_id: "c_async".into(),
                     tool_name: "long_tool".into(),
                     args: serde_json::json!({}),
+                    message_id: None,
                 },
                 Some(t),
             ),
@@ -990,6 +999,7 @@ mod tests {
                     call_id: "call_async".into(),
                     tool_name: "run_tests".into(),
                     args: serde_json::json!({}),
+                    message_id: None,
                 },
                 Some(t),
             ),
@@ -1058,6 +1068,7 @@ mod tests {
                     call_id: "c_async".into(),
                     tool_name: "long_tool".into(),
                     args: serde_json::json!({}),
+                    message_id: None,
                 },
                 Some(t),
             ),
@@ -1214,6 +1225,7 @@ mod tests {
                     call_id: "c1".into(),
                     tool_name: "tool_a".into(),
                     args: serde_json::json!({}),
+                    message_id: None,
                 },
                 Some(t),
             ),
@@ -1223,6 +1235,7 @@ mod tests {
                     call_id: "c2".into(),
                     tool_name: "tool_b".into(),
                     args: serde_json::json!({}),
+                    message_id: None,
                 },
                 Some(t),
             ),

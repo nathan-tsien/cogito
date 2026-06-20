@@ -299,6 +299,7 @@ async fn model_channel_activates_from_previous_text_block() {
             prev_turn,
             EventPayload::AssistantMessageAppended {
                 text: "Sure, $invoice-parser please.".into(),
+                message_id: None,
             },
         ),
         make_event(
@@ -377,6 +378,7 @@ async fn model_channel_respects_disable_model_invocation() {
             prev_turn,
             EventPayload::AssistantMessageAppended {
                 text: "I'll use $internal.".into(),
+                message_id: None,
             },
         ),
         make_event(

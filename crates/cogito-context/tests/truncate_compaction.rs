@@ -73,6 +73,7 @@ fn push_completed_turn(
         Some(tid),
         EventPayload::AssistantMessageAppended {
             text: assistant_text.into(),
+            message_id: None,
         },
     ));
     *seq += 1;

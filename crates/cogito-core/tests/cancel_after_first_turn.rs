@@ -178,7 +178,9 @@ async fn cancel_turn_works_after_first_turn() -> Result<(), Box<dyn std::error::
     let got_terminal = tokio::time::timeout(Duration::from_millis(500), async {
         loop {
             match events.recv().await {
-                Ok(StreamEvent::TurnFailed { .. } | StreamEvent::TurnCancelled) => return true,
+                Ok(StreamEvent::TurnFailed { .. } | StreamEvent::TurnCancelled { .. }) => {
+                    return true;
+                }
                 Ok(_) => {}
                 Err(_) => return false,
             }

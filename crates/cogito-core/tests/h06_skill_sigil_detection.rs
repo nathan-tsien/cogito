@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use cogito_protocol::ids::TurnId;
 use cogito_protocol::skill::{SkillContent, SkillMetadata, SkillProvider};
 use cogito_protocol::stream::StreamEvent;
 use tokio::sync::broadcast;
@@ -33,11 +34,17 @@ fn provider() -> Arc<dyn SkillProvider> {
 async fn emits_for_registered_name_outside_fence() {
     let (tx, mut rx) = broadcast::channel(8);
     let mut state = cogito_skills::sigil::FenceState::default();
-    sigil_emit_for_test(&provider(), &mut state, "use $foo please", &tx).unwrap();
+    sigil_emit_for_test(
+        &provider(),
+        &mut state,
+        "use $foo please",
+        &tx,
+        TurnId::new(),
+    );
     let ev = rx.try_recv().unwrap();
     assert!(matches!(
         ev,
-        StreamEvent::SkillActivationRequested { skill_name } if skill_name == "foo"
+        StreamEvent::SkillActivationRequested { skill_name, .. } if skill_name == "foo"
     ));
 }
 
@@ -45,7 +52,13 @@ async fn emits_for_registered_name_outside_fence() {
 async fn does_not_emit_for_unregistered_name() {
     let (tx, mut rx) = broadcast::channel(8);
     let mut state = cogito_skills::sigil::FenceState::default();
-    sigil_emit_for_test(&provider(), &mut state, "use $bar please", &tx).unwrap();
+    sigil_emit_for_test(
+        &provider(),
+        &mut state,
+        "use $bar please",
+        &tx,
+        TurnId::new(),
+    );
     assert!(rx.try_recv().is_err());
 }
 
@@ -53,7 +66,13 @@ async fn does_not_emit_for_unregistered_name() {
 async fn does_not_emit_inside_fenced_code() {
     let (tx, mut rx) = broadcast::channel(8);
     let mut state = cogito_skills::sigil::FenceState::default();
-    sigil_emit_for_test(&provider(), &mut state, "```\n$foo\n```\n", &tx).unwrap();
+    sigil_emit_for_test(
+        &provider(),
+        &mut state,
+        "```\n$foo\n```\n",
+        &tx,
+        TurnId::new(),
+    );
     assert!(rx.try_recv().is_err());
 }
 
@@ -61,10 +80,16 @@ async fn does_not_emit_inside_fenced_code() {
 async fn deduplicates_same_name_in_one_chunk() {
     let (tx, mut rx) = broadcast::channel(8);
     let mut state = cogito_skills::sigil::FenceState::default();
-    sigil_emit_for_test(&provider(), &mut state, "$foo and $foo again", &tx).unwrap();
+    sigil_emit_for_test(
+        &provider(),
+        &mut state,
+        "$foo and $foo again",
+        &tx,
+        TurnId::new(),
+    );
     assert!(matches!(
         rx.try_recv().unwrap(),
-        StreamEvent::SkillActivationRequested { skill_name } if skill_name == "foo"
+        StreamEvent::SkillActivationRequested { skill_name, .. } if skill_name == "foo"
     ));
     assert!(
         rx.try_recv().is_err(),

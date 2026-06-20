@@ -117,14 +117,18 @@ fn typing_and_model_response_render_into_chat() {
     // Simulate model response.
     app.apply_stream_event(&StreamEvent::TurnStarted {
         subagent_call_id: None,
+        turn_id: None,
     });
     app.apply_stream_event(&StreamEvent::TextDelta {
         chunk: "hello!".into(),
         subagent_call_id: None,
+        turn_id: None,
+        message_id: None,
     });
     app.apply_stream_event(&StreamEvent::TurnCompleted {
         stop_reason: None,
         subagent_call_id: None,
+        turn_id: None,
     });
 
     let out = draw(&app);
@@ -176,20 +180,26 @@ fn tool_lifecycle_renders_inline() {
     let (mut app, _td) = e2e_app();
     app.apply_stream_event(&StreamEvent::TurnStarted {
         subagent_call_id: None,
+        turn_id: None,
     });
     app.apply_stream_event(&StreamEvent::ToolDispatchStarted {
         call_id: "c1".into(),
         tool_name: "read_file".into(),
         args: serde_json::json!({"path": "a.rs"}),
+        turn_id: None,
+        message_id: None,
     });
     app.apply_stream_event(&StreamEvent::ToolDispatchEnded {
         call_id: "c1".into(),
         ok: true,
         error_message: None,
+        turn_id: None,
+        message_id: None,
     });
     app.apply_stream_event(&StreamEvent::TurnCompleted {
         stop_reason: None,
         subagent_call_id: None,
+        turn_id: None,
     });
     let out = draw(&app);
     assert!(out.contains("read_file"), "chat lacking tool name:\n{out}");
@@ -201,6 +211,7 @@ fn typing_thinking_response_shows_spinner_then_clears() {
     let (mut app, _td) = e2e_app();
     app.apply_stream_event(&StreamEvent::TurnStarted {
         subagent_call_id: None,
+        turn_id: None,
     });
     // No content yet -> spinner present.
     let out1 = draw(&app);
@@ -208,6 +219,8 @@ fn typing_thinking_response_shows_spinner_then_clears() {
     app.apply_stream_event(&StreamEvent::TextDelta {
         chunk: "hi".into(),
         subagent_call_id: None,
+        turn_id: None,
+        message_id: None,
     });
     let out2 = draw(&app);
     assert!(

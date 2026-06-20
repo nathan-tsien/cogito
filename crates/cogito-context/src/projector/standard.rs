@@ -67,7 +67,7 @@ impl HistoryProjector for StandardProjector {
                     messages.push(ProjectedMessage::User(text));
                 }
 
-                EventPayload::AssistantMessageAppended { text } => {
+                EventPayload::AssistantMessageAppended { text, .. } => {
                     assistant_buf.push_text(text.clone());
                 }
 
@@ -75,6 +75,7 @@ impl HistoryProjector for StandardProjector {
                     call_id,
                     tool_name,
                     args,
+                    ..
                 } => {
                     assistant_buf.push_tool_use(call_id.clone(), tool_name.clone(), args.clone());
                 }
@@ -94,6 +95,7 @@ impl HistoryProjector for StandardProjector {
                 EventPayload::ThinkingBlockRecorded {
                     text,
                     provider_opaque,
+                    ..
                 } => {
                     // Thinking blocks must precede Text/ToolUse in the same assistant message.
                     assistant_buf.prepend_thinking(text.clone(), provider_opaque.clone());
@@ -306,6 +308,7 @@ mod tests {
                 Some(turn1),
                 EventPayload::AssistantMessageAppended {
                     text: "Hi there!".into(),
+                    message_id: None,
                 },
             ),
             make_event(
@@ -321,6 +324,7 @@ mod tests {
                 Some(turn2),
                 EventPayload::AssistantMessageAppended {
                     text: "I am doing well.".into(),
+                    message_id: None,
                 },
             ),
         ];
@@ -370,6 +374,7 @@ mod tests {
                 Some(turn1),
                 EventPayload::AssistantMessageAppended {
                     text: "Old reply".into(),
+                    message_id: None,
                 },
             ),
             // seq 2: compaction covering seq 0-1 (Drop)
@@ -399,6 +404,7 @@ mod tests {
                 Some(turn3),
                 EventPayload::AssistantMessageAppended {
                     text: "New reply".into(),
+                    message_id: None,
                 },
             ),
         ];
@@ -442,6 +448,7 @@ mod tests {
                 Some(turn1),
                 EventPayload::AssistantMessageAppended {
                     text: "Early reply".into(),
+                    message_id: None,
                 },
             ),
             // seq 2: compaction with Summary replacement
@@ -474,6 +481,7 @@ mod tests {
                 Some(turn3),
                 EventPayload::AssistantMessageAppended {
                     text: "Latest reply".into(),
+                    message_id: None,
                 },
             ),
         ];
@@ -565,6 +573,7 @@ mod tests {
                 EventPayload::ThinkingBlockRecorded {
                     text: "Let me reason...".into(),
                     provider_opaque: Some(serde_json::json!({"signature": "sig1"})),
+                    message_id: None,
                 },
             ),
             make_event(
@@ -572,6 +581,7 @@ mod tests {
                 Some(turn1),
                 EventPayload::AssistantMessageAppended {
                     text: "The answer is 42.".into(),
+                    message_id: None,
                 },
             ),
         ];
@@ -620,6 +630,7 @@ mod tests {
                     call_id: "call_abc".into(),
                     tool_name: "list_files".into(),
                     args: serde_json::json!({"path": "/tmp"}),
+                    message_id: None,
                 },
             ),
             make_event(

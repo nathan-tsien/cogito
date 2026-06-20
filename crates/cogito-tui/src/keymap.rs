@@ -381,11 +381,14 @@ mod tests {
         let (mut app, _td) = fresh_app();
         app.tools.on_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c".into(),
             tool_name: "t".into(),
             args: json!({}),
+            turn_id: None,
+            message_id: None,
         });
         dispatch(&mut app, k(KeyCode::Down, KeyModifiers::CONTROL));
         assert_eq!(app.selected, Some((0, 0)));
@@ -396,16 +399,21 @@ mod tests {
         let (mut app, _td) = fresh_app();
         app.tools.on_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c".into(),
             tool_name: "t".into(),
             args: json!({}),
+            turn_id: None,
+            message_id: None,
         });
         app.tools.on_event(&StreamEvent::ToolDispatchEnded {
             call_id: "c".into(),
             ok: true,
             error_message: None,
+            turn_id: None,
+            message_id: None,
         });
         app.selected = Some((0, 0));
         let a = dispatch(&mut app, k(KeyCode::Enter, KeyModifiers::CONTROL));
@@ -425,11 +433,14 @@ mod tests {
         let (mut app, _td) = fresh_app();
         app.tools.on_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c".into(),
             tool_name: "t".into(),
             args: json!({}),
+            turn_id: None,
+            message_id: None,
         });
         app.selected = Some((0, 0));
         let a = dispatch(&mut app, k(KeyCode::Enter, KeyModifiers::CONTROL));
@@ -450,16 +461,21 @@ mod tests {
         let (mut app, _td) = fresh_app();
         app.tools.on_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c".into(),
             tool_name: "t".into(),
             args: json!({}),
+            turn_id: None,
+            message_id: None,
         });
         app.tools.on_event(&StreamEvent::ToolDispatchEnded {
             call_id: "c".into(),
             ok: true,
             error_message: None,
+            turn_id: None,
+            message_id: None,
         });
         let a = dispatch(&mut app, k(KeyCode::Char('1'), KeyModifiers::ALT));
         assert!(matches!(
@@ -485,11 +501,14 @@ mod tests {
         let (mut app, _td) = fresh_app();
         app.tools.on_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c".into(),
             tool_name: "t".into(),
             args: json!({}),
+            turn_id: None,
+            message_id: None,
         });
         let a = dispatch(&mut app, k(KeyCode::Char('1'), KeyModifiers::ALT));
         assert_eq!(a, Action::None);
@@ -501,17 +520,22 @@ mod tests {
         let (mut app, _td) = fresh_app();
         app.tools.on_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         for id in ["c1", "c2"] {
             app.tools.on_event(&StreamEvent::ToolDispatchStarted {
                 call_id: id.into(),
                 tool_name: id.into(),
                 args: json!({}),
+                turn_id: None,
+                message_id: None,
             });
             app.tools.on_event(&StreamEvent::ToolDispatchEnded {
                 call_id: id.into(),
                 ok: true,
                 error_message: None,
+                turn_id: None,
+                message_id: None,
             });
         }
         let a = dispatch(&mut app, k(KeyCode::Char('e'), KeyModifiers::CONTROL));
@@ -525,16 +549,21 @@ mod tests {
         let (mut app, _td) = fresh_app();
         app.tools.on_event(&StreamEvent::TurnStarted {
             subagent_call_id: None,
+            turn_id: None,
         });
         app.tools.on_event(&StreamEvent::ToolDispatchStarted {
             call_id: "c1".into(),
             tool_name: "t".into(),
             args: json!({}),
+            turn_id: None,
+            message_id: None,
         });
         app.tools.on_event(&StreamEvent::ToolDispatchEnded {
             call_id: "c1".into(),
             ok: true,
             error_message: None,
+            turn_id: None,
+            message_id: None,
         });
         app.expanded.insert((0, 0));
         let a = dispatch(&mut app, k(KeyCode::Char('l'), KeyModifiers::CONTROL));

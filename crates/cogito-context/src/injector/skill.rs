@@ -154,7 +154,7 @@ fn collect_model_channel(
         if hit_current {
             continue;
         }
-        if let EventPayload::AssistantMessageAppended { text } = &ev.payload {
+        if let EventPayload::AssistantMessageAppended { text, .. } = &ev.payload {
             // Each AssistantMessageAppended carries one completed text
             // block; H06 resets fence state at TextBlockCompleted, so the
             // projection here must reset per event to match.
