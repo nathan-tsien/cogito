@@ -1842,10 +1842,18 @@ impl ToolProvider for ActivateSkillThenMockProvider {
 }
 
 /// Build the `ScriptedMockModel` for the three-call `tool_activate_skill_then_use`
-/// flow. Matcher order (first-match-wins):
+/// flow.
+///
+/// `ScriptedMockModel` matchers are predicate-based, not consumed: the full
+/// list is re-evaluated left-to-right on every `stream()` call, and the first
+/// matching predicate wins. Scripts are cloned on each call so repeated calls
+/// with the same input are byte-identical (unlike `MockModelGateway` which pops
+/// a FIFO). Declaration order therefore controls priority:
 ///
 /// 1. `LastToolResultContains("MOCK_TOOL_RESULT")` — fires for call 3 (final
-///    reply after `read_file` returned `MOCK_TOOL_RESULT`).
+///    reply after `read_file` returned `MOCK_TOOL_RESULT`). Must be first so it
+///    wins before matcher 2, which would also match if "MOCK_TOOL_RESULT"
+///    happened to appear in the skill XML (it does not, but ordering is robust).
 /// 2. `LastToolResultContains("<skill name=\"foo\"")` — fires for call 2 (the
 ///    `read_file` tool call after `activate_skill` returned the skill body).
 /// 3. `LastUserTextContains("do the task")` — fires for call 1 (the initial
@@ -1928,6 +1936,9 @@ async fn activate_skill_run_to_completion(
         matches!(out, ShutdownOutcome::Clean { .. }),
         "expected Clean shutdown, got {out:?}"
     );
+    // Events are already copied out of the store above; drop the tempdir
+    // explicitly so it is cleaned up before the function returns rather than
+    // at the enclosing scope's end (each run uses its own tempdir).
     drop(tmp);
     GoldenRun { events, terminal }
 }
@@ -2077,9 +2088,23 @@ async fn tool_activate_skill_then_use_resumes() {
     );
 
     // Golden assertions: skill result persisted, no duplicate dispatch.
+    // TODO(post-Sprint-3): these assertions become load-bearing for the
+    // tool-channel persistence/rebuild path once the excluded ToolUse-stop
+    // boundary is exercisable; today they verify a complete turn has no
+    // regression (ToolResultRecorded{s1} is already durable at the one
+    // boundary tested).
     assert_activate_skill_result_persisted(&golden.events);
     assert_no_duplicate_activate_skill_dispatch(&golden.events);
 
+    // TODO(post-Sprint-3): the boundary that would crash between
+    // ToolUseRecorded{call_id="s1"} (activate_skill dispatched) and
+    // ToolResultRecorded{call_id="s1"} (skill body persisted) is NOT
+    // exercised here. That boundary corresponds to the ToolUse-stop
+    // ModelCallCompleted after model-call-1 (script[0]), which
+    // resumable_boundaries() excludes because ResumeFromToolDispatching
+    // has a pre-existing ordering bug (documented in the file-level comment).
+    // The only boundary exercised by this test is the final EndTurn
+    // ModelCallCompleted (after model-call-3, script[2]).
     for &crash_after_n in &boundaries {
         if crash_after_n >= total.saturating_sub(1) {
             continue;
@@ -2100,9 +2125,17 @@ async fn tool_activate_skill_then_use_resumes() {
         assert_final_text_equivalent(&golden.events, &resumed);
 
         // (b) ToolResultRecorded for s1 contains the skill body after resume.
+        // TODO(post-Sprint-3): this becomes load-bearing for the tool-channel
+        // persistence/rebuild path once the ToolUse-stop boundary is
+        // exercisable; at the current EndTurn boundary the ToolResultRecorded
+        // is already durable, so this verifies no-regression only.
         assert_activate_skill_result_persisted(&resumed);
 
         // (c) No duplicate activate_skill dispatch on resume.
+        // TODO(post-Sprint-3): same note as (b) — load-bearing once the
+        // ToolUse-stop boundary (between ToolUseRecorded{s1} and
+        // ToolResultRecorded{s1}) is exercisable; today verifies no-regression
+        // at the already-complete EndTurn boundary.
         assert_no_duplicate_activate_skill_dispatch(&resumed);
     }
 }
