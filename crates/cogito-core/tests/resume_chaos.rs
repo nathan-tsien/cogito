@@ -1771,6 +1771,342 @@ fn assert_turn2_suffix_has_skill_body(events: &[ConversationEvent], name: &str) 
     );
 }
 
+// === ADR-0042: tool_activate_skill_then_use chaos scenario ==================
+//
+// Goal: verify that the H07 tool-channel `activate_skill` path survives a
+// mid-flight crash. The scenario is a single turn with three model calls:
+//
+//   1. Model calls `activate_skill{name: "foo"}`.
+//   2. `activate_skill` returns the skill body (persisted as
+//      `ToolResultRecorded{call_id: "s1"}`).
+//   3. Model makes a real `read_file` tool call (using the skill body).
+//   4. `read_file` returns `MOCK_TOOL_RESULT`.
+//   5. Model emits the final text reply, `EndTurn`.
+//
+// Crash boundary: the single resumable boundary is the `ModelCallCompleted`
+// that closes the final model call (`EndTurn`). Crashing there leaves the
+// turn without a `TurnCompleted`; resume must reconstruct the body from the
+// already-persisted `ToolResultRecorded{call_id: "s1"}` WITHOUT
+// re-dispatching `activate_skill` (the result is already on disk).
+//
+// v0.1 narrowing: only `ResumeFromModelCompleted` boundaries are exercisable
+// (see the file-level comment). The single `EndTurn ModelCallCompleted`
+// satisfies that; there is no boundary inside an in-flight model call.
+
+/// Tool provider used by the `tool_activate_skill_then_use` chaos scenario.
+/// Dispatches `activate_skill` to the real `ActivateSkill` builtin (so the
+/// skill body is returned deterministically from `StaticFooSkillProvider`)
+/// and returns `MOCK_TOOL_RESULT` for every other tool (i.e. `read_file`).
+/// The `read_file` stub must still advertise a descriptor so H05 can surface
+/// it to the model.
+struct ActivateSkillThenMockProvider {
+    activate_skill: cogito_tools::ActivateSkill,
+}
+
+impl ActivateSkillThenMockProvider {
+    fn new(skills: Arc<dyn cogito_protocol::skill::SkillProvider>) -> Self {
+        Self {
+            activate_skill: cogito_tools::ActivateSkill::new(skills),
+        }
+    }
+}
+
+#[async_trait]
+impl ToolProvider for ActivateSkillThenMockProvider {
+    fn list(&self) -> Vec<ToolDescriptor> {
+        use cogito_tools::provider::BuiltinTool as _;
+        vec![
+            self.activate_skill.descriptor(),
+            ToolDescriptor {
+                name: "read_file".into(),
+                description: "stub read_file for activate_skill chaos test".into(),
+                schema: serde_json::json!({
+                    "type": "object",
+                    "properties": { "path": { "type": "string" } },
+                    "required": ["path"]
+                }),
+                execution_class: ExecutionClass::AlwaysSync,
+                outputs_model_visible_multimodal: false,
+            },
+        ]
+    }
+
+    async fn invoke(&self, name: &str, args: serde_json::Value, ctx: ExecCtx) -> InvokeOutcome {
+        if name == "activate_skill" {
+            use cogito_tools::provider::BuiltinTool as _;
+            InvokeOutcome::Sync(self.activate_skill.invoke(args, ctx).await)
+        } else {
+            InvokeOutcome::Sync(ToolResult::text("MOCK_TOOL_RESULT"))
+        }
+    }
+}
+
+/// Build the `ScriptedMockModel` for the three-call `tool_activate_skill_then_use`
+/// flow. Matcher order (first-match-wins):
+///
+/// 1. `LastToolResultContains("MOCK_TOOL_RESULT")` — fires for call 3 (final
+///    reply after `read_file` returned `MOCK_TOOL_RESULT`).
+/// 2. `LastToolResultContains("<skill name=\"foo\"")` — fires for call 2 (the
+///    `read_file` tool call after `activate_skill` returned the skill body).
+/// 3. `LastUserTextContains("do the task")` — fires for call 1 (the initial
+///    `activate_skill` dispatch).
+fn build_activate_skill_chaos_model(scenario: &ChaosScenario) -> ScriptedMockModel {
+    ScriptedMockModel::new(vec![
+        (
+            InputMatcher::LastToolResultContains("MOCK_TOOL_RESULT".into()),
+            OutputScript {
+                events: scenario.model_scripts[2].clone(),
+            },
+        ),
+        (
+            InputMatcher::LastToolResultContains("<skill name=\"foo\"".into()),
+            OutputScript {
+                events: scenario.model_scripts[1].clone(),
+            },
+        ),
+        (
+            InputMatcher::LastUserTextContains(extract_user_text(scenario)),
+            OutputScript {
+                events: scenario.model_scripts[0].clone(),
+            },
+        ),
+    ])
+}
+
+/// Wire a `Runtime` for the `tool_activate_skill_then_use` chaos scenario.
+/// Uses `ActivateSkillThenMockProvider` so `activate_skill` dispatches
+/// to the real builtin and `read_file` returns `MOCK_TOOL_RESULT`.
+fn build_activate_skill_runtime(
+    store: Arc<dyn ConversationStore>,
+    scenario: &ChaosScenario,
+    skills: Arc<dyn cogito_protocol::skill::SkillProvider>,
+) -> Arc<Runtime> {
+    let mock = Arc::new(build_activate_skill_chaos_model(scenario));
+    let tools: Arc<dyn ToolProvider> =
+        Arc::new(ActivateSkillThenMockProvider::new(Arc::clone(&skills)));
+    Runtime::builder()
+        .store(store)
+        .model(mock as Arc<dyn ModelGateway>)
+        .tools(tools)
+        .skills(skills)
+        .strategy(skill_strategy())
+        .build()
+        .expect("runtime builds")
+}
+
+/// Drive the `tool_activate_skill_then_use` scenario to natural completion
+/// without injecting any faults. Returns the golden log + terminal payload.
+async fn activate_skill_run_to_completion(
+    scenario: &ChaosScenario,
+    skills: Arc<dyn cogito_protocol::skill::SkillProvider>,
+) -> GoldenRun {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let store: Arc<dyn ConversationStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let runtime = build_activate_skill_runtime(Arc::clone(&store), scenario, Arc::clone(&skills));
+
+    let session_id = SessionId::new();
+    let handle = runtime
+        .open_session(session_id, OpenMode::New)
+        .await
+        .expect("open New");
+    let _events_rx = handle.subscribe();
+
+    handle
+        .submit_user_text(&extract_user_text(scenario))
+        .await
+        .expect("submit_user_text");
+    wait_for_terminal_broadcast(&handle).await;
+
+    let events = read_log(store.as_ref(), session_id).await;
+    let terminal = terminal_payload(&events).clone();
+
+    let out = handle
+        .shutdown(Duration::from_secs(5))
+        .await
+        .expect("shutdown");
+    assert!(
+        matches!(out, ShutdownOutcome::Clean { .. }),
+        "expected Clean shutdown, got {out:?}"
+    );
+    drop(tmp);
+    GoldenRun { events, terminal }
+}
+
+/// Y-path crash + resume runner for the `tool_activate_skill_then_use`
+/// scenario. Mirrors `run_with_y_fault` but uses
+/// `build_activate_skill_runtime` for both phases so the real `ActivateSkill`
+/// tool is wired throughout.
+async fn activate_skill_run_with_y_fault(
+    scenario: &ChaosScenario,
+    crash_after_n: u64,
+    skills: Arc<dyn cogito_protocol::skill::SkillProvider>,
+) -> Vec<ConversationEvent> {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let session_id = SessionId::new();
+
+    // ----- Phase 1: drive until PanicAt fires inside the actor task. -----
+    let inner1: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let wrapper1: Arc<FaultInjectingStore<JsonlStore>> =
+        Arc::new(FaultInjectingStore::new(Arc::clone(&inner1)));
+    let store1: Arc<dyn ConversationStore> = Arc::clone(&wrapper1) as Arc<dyn ConversationStore>;
+    let runtime1 = build_activate_skill_runtime(store1, scenario, Arc::clone(&skills));
+    let handle1 = runtime1
+        .open_session(session_id, OpenMode::New)
+        .await
+        .expect("open New");
+
+    wrapper1
+        .set_trigger(FaultTrigger::PanicAt {
+            event_no: crash_after_n + 1,
+            message: "activate_skill chaos fault",
+        })
+        .await;
+
+    handle1
+        .submit_user_text(&extract_user_text(scenario))
+        .await
+        .expect("submit_user_text");
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let events = read_log(inner1.as_ref(), session_id).await;
+        let has_terminal = events.iter().any(|e| {
+            matches!(
+                e.payload,
+                EventPayload::TurnCompleted { .. }
+                    | EventPayload::TurnFailed { .. }
+                    | EventPayload::TurnPaused { .. }
+            )
+        });
+        if has_terminal || wrapper1.written_count() > crash_after_n {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    drop(handle1);
+    drop(runtime1);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // ----- Phase 2: fresh Runtime, same on-disk JSONL, Resume mode. -----
+    let inner2: Arc<JsonlStore> = Arc::new(JsonlStore::new(tmp.path().to_path_buf()));
+    let store2: Arc<dyn ConversationStore> = inner2.clone();
+    let runtime2 = build_activate_skill_runtime(Arc::clone(&store2), scenario, Arc::clone(&skills));
+    let handle2 = runtime2
+        .open_session(session_id, OpenMode::Resume)
+        .await
+        .expect("open Resume");
+
+    wait_for_terminal_with_store(&handle2, store2.as_ref(), session_id).await;
+
+    let events = read_log(store2.as_ref(), session_id).await;
+    let _ = handle2.shutdown(Duration::from_secs(5)).await;
+    drop(tmp);
+    events
+}
+
+/// Assert that `ToolResultRecorded{call_id="s1"}` exists in the log and its
+/// result is `Output` containing the skill body marker
+/// `<skill name="foo"`. Proves the `activate_skill` body was persisted
+/// from the tool channel and is readable after resume.
+fn assert_activate_skill_result_persisted(events: &[ConversationEvent]) {
+    let result = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            EventPayload::ToolResultRecorded { call_id, result } if call_id == "s1" => {
+                Some(result.clone())
+            }
+            _ => None,
+        })
+        .expect("expected ToolResultRecorded{call_id=s1} in log");
+    match result {
+        cogito_protocol::tool::ToolResult::Output(blocks) => {
+            let text = blocks
+                .iter()
+                .filter_map(|b| b.as_str())
+                .collect::<Vec<_>>()
+                .join("");
+            assert!(
+                text.contains("<skill name=\"foo\""),
+                "expected ToolResultRecorded for s1 to contain skill body; got: {text}"
+            );
+        }
+        other => panic!("expected ToolResultRecorded for s1 to be Output, got {other:?}"),
+    }
+}
+
+/// Assert that `activate_skill` was dispatched at most once (`call_id` "s1")
+/// in the log. On resume the cached `ToolResultRecorded` is reused; a second
+/// `ToolUseRecorded{call_id="s1"}` would indicate a spurious re-dispatch.
+fn assert_no_duplicate_activate_skill_dispatch(events: &[ConversationEvent]) {
+    let count = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.payload,
+                EventPayload::ToolUseRecorded { call_id, tool_name, .. }
+                    if call_id == "s1" && tool_name == "activate_skill"
+            )
+        })
+        .count();
+    assert_eq!(
+        count, 1,
+        "expected exactly one ToolUseRecorded{{call_id=s1, activate_skill}}, got {count}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tool_activate_skill_then_use_resumes() {
+    let scenario = chaos_scenarios::tool_activate_skill_then_use();
+    let skills: Arc<dyn cogito_protocol::skill::SkillProvider> = Arc::new(StaticFooSkillProvider);
+
+    let golden = activate_skill_run_to_completion(&scenario, Arc::clone(&skills)).await;
+    let total = golden.events.len() as u64;
+    let boundaries = resumable_boundaries(&golden.events);
+
+    eprintln!(
+        "scenario=tool_activate_skill_then_use golden_events={total} \
+         resumable_boundaries={boundaries:?}"
+    );
+    assert!(
+        !boundaries.is_empty(),
+        "tool_activate_skill_then_use produced no resumable boundaries"
+    );
+
+    // Golden assertions: skill result persisted, no duplicate dispatch.
+    assert_activate_skill_result_persisted(&golden.events);
+    assert_no_duplicate_activate_skill_dispatch(&golden.events);
+
+    for &crash_after_n in &boundaries {
+        if crash_after_n >= total.saturating_sub(1) {
+            continue;
+        }
+        let resumed =
+            activate_skill_run_with_y_fault(&scenario, crash_after_n, Arc::clone(&skills)).await;
+        eprintln!(
+            "  activate_skill chaos: crash_after_n={crash_after_n} \
+             resumed_len={} (golden_len={total})",
+            resumed.len()
+        );
+
+        // (a) Turn reaches EndTurn on resume.
+        assert_context_managed_pairing(&resumed);
+        assert_prefix_immutable(&golden.events, &resumed, crash_after_n);
+        assert_terminal_equivalent(&golden.terminal, terminal_payload(&resumed));
+        assert_tool_mapping_equivalent(&golden.events, &resumed);
+        assert_final_text_equivalent(&golden.events, &resumed);
+
+        // (b) ToolResultRecorded for s1 contains the skill body after resume.
+        assert_activate_skill_result_persisted(&resumed);
+
+        // (c) No duplicate activate_skill dispatch on resume.
+        assert_no_duplicate_activate_skill_dispatch(&resumed);
+    }
+}
+
 // TODO(post-Sprint-3): X path with poisoned-actor detection from outside.
 // Today the actor task panic just gets caught by tokio; the test side
 // detects "phase 1 is done" by polling the on-disk log + the wrapper's

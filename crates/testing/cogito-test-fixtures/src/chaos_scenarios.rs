@@ -41,6 +41,7 @@ pub fn all() -> Vec<ChaosScenario> {
         thinking_then_text_then_tool(),
         text_then_skill_then_tool(),
         plugin_skill_then_tool(),
+        tool_activate_skill_then_use(),
     ]
 }
 
@@ -443,6 +444,90 @@ pub fn plugin_skill_then_tool() -> ChaosScenario {
                     usage: Usage {
                         input_tokens: 75,
                         output_tokens: 10,
+                    },
+                },
+            ],
+        ],
+        uses_async_job: false,
+    }
+}
+
+/// Scenario 8: assistant turn 1 calls the `activate_skill` tool (ADR-0042
+/// primary channel), the tool returns the skill body, then the assistant
+/// makes a real tool call; the tool returns; the assistant emits a final
+/// reply. A crash injected around the `activate_skill` boundary must resume
+/// with the body rebuilt from the persisted `ToolResultRecorded`.
+///
+/// The runner lives inline in `cogito-core/tests/resume_chaos.rs` (it needs a
+/// `SkillProvider` exposing the `activate_skill` tool). `model_scripts[0]`
+/// drives call 1 (the `activate_skill` `tool_use`), `model_scripts[1]` drives
+/// call 2 (a `read_file` `tool_use` after the skill body), `model_scripts[2]`
+/// drives call 3 (final reply after the `read_file` result).
+#[must_use]
+pub fn tool_activate_skill_then_use() -> ChaosScenario {
+    ChaosScenario {
+        name: "tool_activate_skill_then_use",
+        user_input: vec![ContentBlock::Text {
+            text: "do the task".into(),
+        }],
+        model_scripts: vec![
+            // Call 1: call activate_skill{name: "foo"}.
+            vec![
+                ModelEvent::ToolUseStarted {
+                    block_index: 0,
+                    call_id: "s1".into(),
+                    tool_name: "activate_skill".into(),
+                },
+                ModelEvent::ToolUseCompleted {
+                    block_index: 0,
+                    call_id: "s1".into(),
+                    tool_name: "activate_skill".into(),
+                    args: serde_json::json!({"name": "foo"}),
+                },
+                ModelEvent::MessageCompleted {
+                    stop_reason: StopReason::ToolUse,
+                    usage: Usage {
+                        input_tokens: 40,
+                        output_tokens: 12,
+                    },
+                },
+            ],
+            // Call 2 (post-skill-body): make a real tool call.
+            vec![
+                ModelEvent::ToolUseStarted {
+                    block_index: 0,
+                    call_id: "c1".into(),
+                    tool_name: "read_file".into(),
+                },
+                ModelEvent::ToolUseCompleted {
+                    block_index: 0,
+                    call_id: "c1".into(),
+                    tool_name: "read_file".into(),
+                    args: serde_json::json!({"path": "/etc/hostname"}),
+                },
+                ModelEvent::MessageCompleted {
+                    stop_reason: StopReason::ToolUse,
+                    usage: Usage {
+                        input_tokens: 60,
+                        output_tokens: 10,
+                    },
+                },
+            ],
+            // Call 3 (post-tool): final reply, EndTurn.
+            vec![
+                ModelEvent::TextDelta {
+                    block_index: 0,
+                    chunk: "Done.".into(),
+                },
+                ModelEvent::TextBlockCompleted {
+                    block_index: 0,
+                    text: "Done.".into(),
+                },
+                ModelEvent::MessageCompleted {
+                    stop_reason: StopReason::EndTurn,
+                    usage: Usage {
+                        input_tokens: 80,
+                        output_tokens: 5,
                     },
                 },
             ],
