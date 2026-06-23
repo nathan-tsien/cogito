@@ -11,7 +11,9 @@ pub mod provider;
 pub(crate) mod skill_scope;
 pub mod workspace;
 
-pub use builtins::{Edit, Glob, Grep, ListDir, ReadFile, WebFetch, WebFetchConfig, WriteFile};
+pub use builtins::{
+    ActivateSkill, Edit, Glob, Grep, ListDir, ReadFile, WebFetch, WebFetchConfig, WriteFile,
+};
 pub use composite::{CompositeToolProvider, NamingPolicy};
 pub use provider::{BuiltinTool, BuiltinToolProvider, BuiltinToolProviderBuilder};
 pub use workspace::LocalWorkspace;
