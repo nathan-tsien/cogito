@@ -425,7 +425,7 @@ pub enum SystemPromptInjectorConfig {
     /// activations from history, reads user-channel names from
     /// `TurnStarted.activate_skills`, emits one `SkillActivated` event
     /// per new activation, and writes a `SystemPromptInjected` event
-    /// whose suffix contains the "Available Skills" registry block plus
+    /// whose suffix contains the "Skills (mandatory)" registry block plus
     /// XML-wrapped activated SKILL.md bodies.
     ///
     /// Requires a `SkillProvider` injected at Runtime build time;

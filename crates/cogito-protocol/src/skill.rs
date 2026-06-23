@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// (typically Runtime construction) and consumed by Brain through
 /// `Arc<dyn SkillProvider>` injection.
 pub trait SkillProvider: Send + Sync {
-    /// Lightweight metadata for the "Available Skills" registry block.
+    /// Lightweight metadata for the "Skills (mandatory)" registry block.
     /// Called once per turn by the `SkillInjector`. MUST be cheap.
     fn list(&self) -> Vec<SkillMetadata>;
 
