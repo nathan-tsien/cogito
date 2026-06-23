@@ -1852,7 +1852,7 @@ impl ToolProvider for ActivateSkillThenMockProvider {
 ///
 /// 1. `LastToolResultContains("MOCK_TOOL_RESULT")` — fires for call 3 (final
 ///    reply after `read_file` returned `MOCK_TOOL_RESULT`). Must be first so it
-///    wins before matcher 2, which would also match if "MOCK_TOOL_RESULT"
+///    wins before matcher 2, which would also match if `MOCK_TOOL_RESULT`
 ///    happened to appear in the skill XML (it does not, but ordering is robust).
 /// 2. `LastToolResultContains("<skill name=\"foo\"")` — fires for call 2 (the
 ///    `read_file` tool call after `activate_skill` returned the skill body).
