@@ -112,6 +112,64 @@ pub enum SkillSource {
     System,
 }
 
+/// Render a skill's body block for delivery to the model. Shared by the
+/// context injector (sigil/slash channel) and the `activate_skill` tool
+/// (tool channel) so every channel delivers byte-identical content.
+///
+/// When `content.root` is `Some`, emits the ADR-0029 `<skill … root="…">`
+/// wrapper plus a one-line resolution hint so relative references in the
+/// body (`scripts/`, `references/`, `assets/`) resolve. When `None`, emits
+/// the wrapper without a `root` attribute.
+///
+// TODO(ADR-0029): the `root` path is interpolated unescaped. Operator-
+// authored skill dirs are trusted in v0.3; a directory name containing
+// `"`, `>`, or a newline would break the tag and inject text into the
+// prompt. Escape (or reject at discovery) before skill roots become
+// tenant-controlled in the SaaS profile (Phase 3).
+#[must_use]
+pub fn render_skill_block(content: &SkillContent) -> String {
+    use std::fmt::Write as _;
+
+    // `SkillSource` is `#[non_exhaustive]`; the wildcard arm is unreachable
+    // within this crate but is required for callers in other crates that may
+    // encounter future variants. Allow the lint locally.
+    #[allow(unreachable_patterns)]
+    let source_kind = match content.source {
+        SkillSource::Repo { .. } => "repo",
+        SkillSource::User => "user",
+        SkillSource::Plugin { .. } => "plugin",
+        SkillSource::System => "system",
+        // Future variants render as "unknown" until explicit support lands.
+        _ => "unknown",
+    };
+    let mut out = String::new();
+    match content.root.as_deref().map(std::path::Path::display) {
+        Some(root) => {
+            let name = &content.name;
+            // Writing into a `String` via `fmt::Write` is infallible.
+            let _ = write!(
+                out,
+                "\n<skill name=\"{name}\" source=\"{source_kind}\" root=\"{root}\">\n"
+            );
+            let _ = writeln!(
+                out,
+                "Bundled files for this skill live under the root path above; \
+                 resolve any relative path in the instructions below against it."
+            );
+        }
+        None => {
+            let _ = write!(
+                out,
+                "\n<skill name=\"{}\" source=\"{source_kind}\">\n",
+                content.name
+            );
+        }
+    }
+    out.push_str(&content.body);
+    out.push_str("\n</skill>\n");
+    out
+}
+
 /// Channel that triggered a `SkillActivated` event.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -121,4 +179,37 @@ pub enum SkillActivationChannel {
     ModelSigil,
     /// User typed `/skill <name>`.
     UserSlash,
+}
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+
+    fn content(root: Option<PathBuf>) -> SkillContent {
+        SkillContent {
+            name: "brainstorming".into(),
+            source: SkillSource::User,
+            body: "Do the brainstorm.".into(),
+            root,
+        }
+    }
+
+    #[test]
+    fn renders_root_attr_and_hint_when_bundled() {
+        let out = render_skill_block(&content(Some(PathBuf::from("/skills/brainstorming"))));
+        assert!(out.contains(
+            r#"<skill name="brainstorming" source="user" root="/skills/brainstorming">"#
+        ));
+        assert!(out.contains("resolve any relative path in the instructions below against it."));
+        assert!(out.contains("Do the brainstorm."));
+        assert!(out.trim_end().ends_with("</skill>"));
+    }
+
+    #[test]
+    fn omits_root_attr_when_no_bundle() {
+        let out = render_skill_block(&content(None));
+        assert!(out.contains(r#"<skill name="brainstorming" source="user">"#));
+        assert!(!out.contains("root="));
+        assert!(out.contains("Do the brainstorm."));
+    }
 }

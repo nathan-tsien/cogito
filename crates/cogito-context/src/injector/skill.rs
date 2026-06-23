@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use cogito_protocol::context::{ContextError, InjectionInput, SystemPromptInjector};
 use cogito_protocol::event::{ConversationEvent, EventPayload};
 use cogito_protocol::ids::{EventId, TurnId};
-use cogito_protocol::skill::{SkillActivationChannel, SkillProvider, SkillSource};
+use cogito_protocol::skill::{SkillActivationChannel, SkillProvider, render_skill_block};
 use cogito_protocol::store::EventRecorder;
 
 /// Per-skill description character cap for the registry block.
@@ -219,8 +219,6 @@ fn build_registry_block(provider: &dyn SkillProvider, cap_chars: usize) -> Strin
 }
 
 fn build_body_blocks(provider: &dyn SkillProvider, names: &[String]) -> String {
-    use std::fmt::Write as _;
-
     if names.is_empty() {
         return String::new();
     }
@@ -229,48 +227,7 @@ fn build_body_blocks(provider: &dyn SkillProvider, names: &[String]) -> String {
         let Some(content) = provider.get(name) else {
             continue;
         };
-        let source_kind = match content.source {
-            SkillSource::Repo { .. } => "repo",
-            SkillSource::User => "user",
-            SkillSource::Plugin { .. } => "plugin",
-            SkillSource::System => "system",
-            // `SkillSource` is `#[non_exhaustive]`; future variants render as
-            // "unknown" until explicit support lands.
-            _ => "unknown",
-        };
-        // Writing into a `String` via `fmt::Write` is infallible; the
-        // `Result` can be safely discarded.
-        //
-        // ADR-0029: when the skill has an on-disk bundle, surface its root
-        // directory as a `root="..."` attribute plus a one-line resolution
-        // hint, so the model can locate bundled files (`scripts/`,
-        // `references/`, `assets/`) referenced relatively in the body.
-        // Skills with no on-disk bundle (`root: None`) emit no path.
-        //
-        // TODO(ADR-0029): the path is interpolated into the pseudo-XML
-        // attribute unescaped. Operator-authored skill dirs are trusted in
-        // v0.1, but a directory name containing `"`, `>`, or a newline would
-        // break the tag and inject text into the system prompt. Escape (or
-        // reject at discovery) before skill roots become tenant-controlled
-        // in the SaaS profile (Phase 3).
-        match content.root.as_deref().map(std::path::Path::display) {
-            Some(root) => {
-                let _ = write!(
-                    out,
-                    "\n<skill name=\"{name}\" source=\"{source_kind}\" root=\"{root}\">\n"
-                );
-                let _ = writeln!(
-                    out,
-                    "Bundled files for this skill live under the root path above; \
-                     resolve any relative path in the instructions below against it."
-                );
-            }
-            None => {
-                let _ = write!(out, "\n<skill name=\"{name}\" source=\"{source_kind}\">\n");
-            }
-        }
-        out.push_str(&content.body);
-        out.push_str("\n</skill>\n");
+        out.push_str(&render_skill_block(&content));
     }
     out
 }
