@@ -412,6 +412,7 @@ covers both the Subagent full upgrade AND Plugin git distribution.
 - [ ] `cogito-cli`: `cogito plugin sync` + `cogito plugin sync --check` + `cogito plugin list` + `cogito plugin update <id>`
 - [ ] Lock-file schema (TOML)
 - [ ] **Carried forward from v0.1/v0.2:** Sprint 4 MCP happy-path integration test — build an in-process streamable-HTTP MCP test-server fixture, then assert `tools/list` + `tools/call` end-to-end through `cogito chat` with bearer auth
+- [ ] **ADR-0042** (skill-activation reliability) — `activate_skill` builtin tool as the primary channel (full SKILL.md body returned as `ToolResult`, persisted by `ToolResultRecorded`); `## Skills (mandatory)` forcing instruction in the injected index; sigil + slash fallbacks retained for embedding consumers on tool-incapable models; `SkillInjector` dedup prevents re-injection of tool-loaded bodies via the sigil path
 - [ ] Tag `v0.3.0`
 
 ### v0.4 · SaaS-ready
