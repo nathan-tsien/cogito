@@ -451,6 +451,7 @@ async fn build_tool_provider(
     cfg: &cogito_config::RuntimeConfig,
     job_mgr: Arc<LocalJobManager>,
     plugin_mcp_servers: Vec<cogito_mcp::McpServerConfig>,
+    skills: Option<Arc<dyn cogito_protocol::skill::SkillProvider>>,
 ) -> Result<Arc<dyn cogito_protocol::tool::ToolProvider>> {
     // Command executor for `bash`. Whether it is sandboxed is a policy
     // decision made here at the Surface layer (ADR-0027): the CLI calls
@@ -459,19 +460,20 @@ async fn build_tool_provider(
     let executor = cogito_sandbox::build_executor(&cfg.tools.sandbox)
         .map_err(|e| anyhow!("build command executor: {e}"))?;
 
-    let builtin: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(
-        BuiltinToolProvider::builder()
-            .with_tool(Arc::new(ReadFile))
-            .with_tool(Arc::new(cogito_tools::WriteFile))
-            .with_tool(Arc::new(cogito_tools::ListDir))
-            .with_tool(Arc::new(cogito_tools::Edit))
-            .with_tool(Arc::new(cogito_tools::Grep))
-            .with_tool(Arc::new(cogito_tools::Glob))
-            .with_tool(Arc::new(cogito_tools::WebFetch::new(
-                cfg.tools.web_fetch.clone(),
-            )))
-            .build(),
-    );
+    let mut builtins = BuiltinToolProvider::builder()
+        .with_tool(Arc::new(ReadFile))
+        .with_tool(Arc::new(cogito_tools::WriteFile))
+        .with_tool(Arc::new(cogito_tools::ListDir))
+        .with_tool(Arc::new(cogito_tools::Edit))
+        .with_tool(Arc::new(cogito_tools::Grep))
+        .with_tool(Arc::new(cogito_tools::Glob))
+        .with_tool(Arc::new(cogito_tools::WebFetch::new(
+            cfg.tools.web_fetch.clone(),
+        )));
+    if let Some(sp) = &skills {
+        builtins = builtins.with_tool(Arc::new(cogito_tools::ActivateSkill::new(sp.clone())));
+    }
+    let builtin: Arc<dyn cogito_protocol::tool::ToolProvider> = Arc::new(builtins.build());
     // `RunTestsTool` and `BashTool` implement `ToolProvider` directly
     // (their dispatch outcome is `InvokeOutcome::Async`/`Adaptive`). The
     // SAME job-manager handle threads through both async tools and
@@ -625,8 +627,14 @@ pub async fn run(args: ChatArgs) -> Result<()> {
     let contributions = cogito_plugin::PluginSet::load(&cfg.plugins, &config_dir)
         .map_err(|e| anyhow!("loading plugins: {e}"))?;
 
-    let tools = build_tool_provider(&cfg, Arc::clone(&job_mgr), contributions.mcp_servers).await?;
     let skills = crate::chat_config::build_skill_provider(&cfg, contributions.skill_roots)?;
+    let tools = build_tool_provider(
+        &cfg,
+        Arc::clone(&job_mgr),
+        contributions.mcp_servers,
+        skills.clone(),
+    )
+    .await?;
 
     // `Arc<LocalJobManager>` -> `Arc<dyn JobManager>` via the unsized
     // coercion impl on `Arc<T>`. The typed `Arc<LocalJobManager>` was

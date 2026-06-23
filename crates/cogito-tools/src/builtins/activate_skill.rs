@@ -108,10 +108,10 @@ mod tests {
     use cogito_protocol::ExecCtx;
     use cogito_protocol::ids::{SessionId, TurnId};
     use cogito_protocol::skill::{SkillContent, SkillMetadata, SkillProvider, SkillSource};
-    use cogito_protocol::tool::{ToolErrorKind, ToolResult};
+    use cogito_protocol::tool::{ToolErrorKind, ToolProvider, ToolResult};
 
     use super::ActivateSkill;
-    use crate::provider::BuiltinTool;
+    use crate::provider::{BuiltinTool, BuiltinToolProvider};
 
     struct FakeProvider {
         metas: Vec<SkillMetadata>,
@@ -219,5 +219,25 @@ mod tests {
             }
             other => panic!("expected Error, got {other:?}"),
         }
+    }
+
+    /// Assert that `BuiltinToolProvider` exposes `activate_skill` in its
+    /// descriptor list when the tool is registered. This mirrors the wiring
+    /// applied in cogito-cli and cogito-tui when a `SkillProvider` is
+    /// present.
+    #[test]
+    fn activate_skill_is_listed_when_registered() {
+        let provider = Arc::new(FakeProvider {
+            metas: vec![meta("brainstorming", false)],
+        });
+        let builtin = BuiltinToolProvider::builder()
+            .with_tool(Arc::new(ActivateSkill::new(provider)))
+            .build();
+        let descriptors = builtin.list();
+        let names: Vec<&str> = descriptors.iter().map(|d| d.name.as_str()).collect();
+        assert!(
+            names.contains(&"activate_skill"),
+            "expected activate_skill in {names:?}"
+        );
     }
 }
