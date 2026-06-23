@@ -189,10 +189,38 @@ fn collect_model_channel(
 }
 
 fn collect_prior_activations(history: &[ConversationEvent]) -> HashSet<String> {
+    use cogito_protocol::tool::ToolResult;
+
     let mut out = HashSet::new();
+    // Pass 1: explicit SkillActivated events (sigil/slash channel).
     for ev in history {
         if let EventPayload::SkillActivated { skill_name, .. } = &ev.payload {
             out.insert(skill_name.clone());
+        }
+    }
+    // Pass 2: successful `activate_skill` tool calls (tool channel). The body
+    // is already in the persisted ToolResultRecorded, so the sigil path must
+    // not re-inject it. A call counts only if its correlated result succeeded.
+    let mut succeeded: HashSet<&str> = HashSet::new();
+    for ev in history {
+        if let EventPayload::ToolResultRecorded { call_id, result } = &ev.payload
+            && matches!(result, ToolResult::Output(_))
+        {
+            succeeded.insert(call_id.as_str());
+        }
+    }
+    for ev in history {
+        if let EventPayload::ToolUseRecorded {
+            call_id,
+            tool_name,
+            args,
+            ..
+        } = &ev.payload
+            && tool_name == "activate_skill"
+            && succeeded.contains(call_id.as_str())
+            && let Some(name) = args.get("name").and_then(|v| v.as_str())
+        {
+            out.insert(name.to_string());
         }
     }
     out
@@ -360,5 +388,82 @@ mod registry_block_tests {
     fn empty_provider_yields_empty_block() {
         let p = P(vec![]);
         assert!(build_registry_block(&p, DESCRIPTION_CAP_CHARS).is_empty());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod dedup_tests {
+    use chrono::Utc;
+    use cogito_protocol::event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
+    use cogito_protocol::ids::{EventId, SessionId};
+    use cogito_protocol::tool::ToolResult;
+
+    use super::collect_prior_activations;
+
+    // Build a minimal ConversationEvent carrying the given payload.
+    // Mirrors the helper in crates/cogito-context/tests/skill_injector.rs.
+    fn ev(seq: u64, payload: EventPayload) -> ConversationEvent {
+        ConversationEvent {
+            schema_version: SCHEMA_VERSION,
+            event_id: EventId::new(),
+            session_id: SessionId::new(),
+            turn_id: None,
+            seq,
+            ts: Utc::now(),
+            payload,
+        }
+    }
+
+    #[test]
+    fn successful_activate_skill_tool_call_counts_as_prior_activation() {
+        let history = vec![
+            ev(
+                0,
+                EventPayload::ToolUseRecorded {
+                    call_id: "c1".into(),
+                    tool_name: "activate_skill".into(),
+                    args: serde_json::json!({"name": "brainstorming"}),
+                    message_id: None,
+                },
+            ),
+            ev(
+                1,
+                EventPayload::ToolResultRecorded {
+                    call_id: "c1".into(),
+                    result: ToolResult::text("...body..."),
+                },
+            ),
+        ];
+        let prior = collect_prior_activations(&history);
+        assert!(prior.contains("brainstorming"));
+    }
+
+    #[test]
+    fn failed_activate_skill_tool_call_does_not_count() {
+        let history = vec![
+            ev(
+                0,
+                EventPayload::ToolUseRecorded {
+                    call_id: "c2".into(),
+                    tool_name: "activate_skill".into(),
+                    args: serde_json::json!({"name": "nope"}),
+                    message_id: None,
+                },
+            ),
+            ev(
+                1,
+                EventPayload::ToolResultRecorded {
+                    call_id: "c2".into(),
+                    result: ToolResult::Error {
+                        kind: cogito_protocol::tool::ToolErrorKind::InvocationFailed,
+                        message: "unknown".into(),
+                        retryable: false,
+                    },
+                },
+            ),
+        ];
+        let prior = collect_prior_activations(&history);
+        assert!(!prior.contains("nope"));
     }
 }
