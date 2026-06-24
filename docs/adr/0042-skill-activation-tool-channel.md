@@ -42,6 +42,18 @@ context-injector presentation). Reliable activation on tool-capable models;
 portability preserved for vLLM/SGLang via sigil. Spec:
 `docs/superpowers/specs/2026-06-23-skill-activation-redesign-design.md`.
 
+Instruction/tool coupling (embedder note): the `## Skills (mandatory)` block
+unconditionally instructs the model to call `activate_skill`, but registering
+that tool is a separate Surface decision — the reference CLI and TUI add it
+(behind `if let Some(skills)`), and an embedder composing its own
+`ToolProvider` could surface the instruction while the tool is absent. This
+degrades gracefully: the same instruction names the `$<name>` sigil fallback,
+and the sigil channel remains active, so a model with no `activate_skill` tool
+still has a working activation path. Embedders that wire a `SkillProvider`
+should also register `activate_skill` (or rely on the sigil fallback). A
+future refinement could derive the instruction's tool mention from the
+turn's actual tool surface rather than emitting it unconditionally.
+
 ## References
 
 - ADR-0020 (superseded §1), ADR-0029, ADR-0033, ADR-0004, ADR-0007.
