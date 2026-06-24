@@ -21,7 +21,7 @@
 > (`write_file` / `list_dir` / `edit` / `grep` / `glob`), and skill-bundle
 > reachability + dependency descriptor (ADR-0029/0032/0033, ADR-0023
 > finalized). Sprint 13 (v0.2 硬化 + tag `v0.2.0`) closed the version.
-> **Post-v0.2.0 hardening — additive patch snapshots `v0.2.1`/`v0.2.2`/`v0.2.3`/`v0.2.4`/`v0.2.5`.**
+> **Post-v0.2.0 hardening — additive patch snapshots `v0.2.1`/`v0.2.2`/`v0.2.3`/`v0.2.4`/`v0.2.5`/`v0.2.6`.**
 > Interstitial Runtime/harness-surface releases between v0.2 and v0.3, each
 > additive with no `SCHEMA_VERSION` bump: `v0.2.1` (session-registry lifecycle
 > ADR-0034 + injectable `MetricsRecorder` ADR-0036), `v0.2.2` (local execution
@@ -29,7 +29,9 @@
 > HITL-over-suspension-seam ADR-0039), `v0.2.4` (turn-lifecycle event correctness
 > — single-emit `TurnCompleted` + turn-level `max_tokens` signal ADR-0040),
 > `v0.2.5` (stream/log message correlation key — per-message `MessageId` +
-> auxiliary `turn_id` on `StreamEvent` ADR-0041). See
+> auxiliary `turn_id` on `StreamEvent` ADR-0041), `v0.2.6` (skill-activation
+> reliability — `activate_skill` tool-call primary channel + `## Skills
+> (mandatory)` forcing instruction ADR-0042). See
 > the "Post-v0.2.0 hardening" subsection below. Next theme: v0.3 (Distributed
 > Collaboration).
 
@@ -396,6 +398,20 @@ small, additive Runtime/harness-surface change with no `ConversationEvent`
     a message identically. `turn_id` is added to every turn-scoped `StreamEvent`
     as the auxiliary turn-linkage field (`turn_id` is too coarse to be a message
     identity — a turn holds several messages). No `SCHEMA_VERSION` bump.
+- **`v0.2.6` (2026-06-24):** skill-activation reliability (ADR-0042).
+  - [x] **ADR-0042** (skill activation — tool-call primary channel) — new
+    `activate_skill` builtin returns a skill's full SKILL.md body as its
+    `ToolResult` (delivered in-turn, persisted by `ToolResultRecorded`),
+    making activation reliable on tool-trained models; the injected index
+    becomes a `## Skills (mandatory)` forcing instruction. Sigil + slash
+    remain always-on fallbacks for tool-incapable models (vLLM/SGLang), so
+    three channels run in parallel. A shared `cogito-protocol::render_skill_block`
+    keeps every channel's body byte-identical; `SkillInjector` dedups against
+    prior successful `activate_skill` calls so a tool-loaded body is never
+    re-injected via the sigil path. Filtering uses existing metadata only —
+    no frontmatter change (honors ADR-0033). Zero Brain (H01–H11) delta; no
+    new event variant; no `SCHEMA_VERSION` bump. Supersedes ADR-0020 §1.
+    Implemented PR #76.
 
 ### v0.3 · Distributed Collaboration
 
@@ -412,7 +428,6 @@ covers both the Subagent full upgrade AND Plugin git distribution.
 - [ ] `cogito-cli`: `cogito plugin sync` + `cogito plugin sync --check` + `cogito plugin list` + `cogito plugin update <id>`
 - [ ] Lock-file schema (TOML)
 - [ ] **Carried forward from v0.1/v0.2:** Sprint 4 MCP happy-path integration test — build an in-process streamable-HTTP MCP test-server fixture, then assert `tools/list` + `tools/call` end-to-end through `cogito chat` with bearer auth
-- [ ] **ADR-0042** (skill-activation reliability) — `activate_skill` builtin tool as the primary channel (full SKILL.md body returned as `ToolResult`, persisted by `ToolResultRecorded`); `## Skills (mandatory)` forcing instruction in the injected index; sigil + slash fallbacks retained for embedding consumers on tool-incapable models; `SkillInjector` dedup prevents re-injection of tool-loaded bodies via the sigil path
 - [ ] Tag `v0.3.0`
 
 ### v0.4 · SaaS-ready
