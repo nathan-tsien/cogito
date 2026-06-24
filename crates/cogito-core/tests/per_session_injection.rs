@@ -226,7 +226,7 @@ async fn open_session_with_injects_session_skills() -> Result<(), Box<dyn std::e
         "expected one injection, got {suffixes:?}"
     );
     assert!(
-        suffixes[0].contains("## Available Skills") && suffixes[0].contains("foo"),
+        suffixes[0].contains("## Skills (mandatory)") && suffixes[0].contains("foo"),
         "session-injected skill 'foo' must appear in the registry block; got: {}",
         suffixes[0],
     );

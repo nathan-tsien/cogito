@@ -22,13 +22,14 @@ use cogito_jobs::{BashTool, LocalJobManager, RunTestsTool};
 use cogito_protocol::ConversationStore;
 use cogito_protocol::ids::SessionId;
 use cogito_protocol::job::{JobManager, LocalJobSubmitter};
+use cogito_protocol::skill::SkillProvider;
 use cogito_protocol::strategy_registry::StrategyRegistry;
 use cogito_protocol::tool::ToolProvider;
 use cogito_sandbox::{EnvPolicy, SandboxConfig, default_safe_env_allowlist};
 use cogito_store::JsonlStore;
 use cogito_tools::{
-    BuiltinToolProvider, CompositeToolProvider, Edit, Glob, Grep, ListDir, NamingPolicy, ReadFile,
-    WebFetch, WriteFile,
+    ActivateSkill, BuiltinToolProvider, CompositeToolProvider, Edit, Glob, Grep, ListDir,
+    NamingPolicy, ReadFile, WebFetch, WriteFile,
 };
 
 use crate::app::App;
@@ -96,10 +97,10 @@ pub async fn build(args: &TuiArgs) -> Result<Built> {
     // ADR-0008 and ADR-0025.
     let job_mgr: Arc<LocalJobManager> = LocalJobManager::new();
 
-    let (tool_provider, mcp_banner_lines) =
-        build_tools_with_banner(&cfg, Arc::clone(&job_mgr)).await?;
-
     let skills = build_skill_provider(&cfg, Vec::new())?;
+
+    let (tool_provider, mcp_banner_lines) =
+        build_tools_with_banner(&cfg, Arc::clone(&job_mgr), skills.clone()).await?;
 
     // `Arc<LocalJobManager>` -> `Arc<dyn JobManager>` via the unsized
     // coercion impl on `Arc<T>`.
@@ -308,6 +309,7 @@ fn resolve_open_mode(args: &TuiArgs) -> Result<OpenMode> {
 async fn build_tools_with_banner(
     cfg: &cogito_config::RuntimeConfig,
     job_mgr: Arc<LocalJobManager>,
+    skills: Option<Arc<dyn SkillProvider>>,
 ) -> Result<(Arc<dyn ToolProvider>, Vec<String>)> {
     // Harden the child env before building the executor: the TUI scrubs
     // model-authored `bash` down to a curated allowlist (ADR-0037).
@@ -315,17 +317,18 @@ async fn build_tools_with_banner(
     let executor = cogito_sandbox::build_executor(&hardened_sandbox)
         .map_err(|e| anyhow!("build command executor: {e}"))?;
 
-    let builtin: Arc<dyn ToolProvider> = Arc::new(
-        BuiltinToolProvider::builder()
-            .with_tool(Arc::new(ReadFile))
-            .with_tool(Arc::new(WriteFile))
-            .with_tool(Arc::new(ListDir))
-            .with_tool(Arc::new(Edit))
-            .with_tool(Arc::new(Grep))
-            .with_tool(Arc::new(Glob))
-            .with_tool(Arc::new(WebFetch::new(cfg.tools.web_fetch.clone())))
-            .build(),
-    );
+    let mut builtins = BuiltinToolProvider::builder()
+        .with_tool(Arc::new(ReadFile))
+        .with_tool(Arc::new(WriteFile))
+        .with_tool(Arc::new(ListDir))
+        .with_tool(Arc::new(Edit))
+        .with_tool(Arc::new(Grep))
+        .with_tool(Arc::new(Glob))
+        .with_tool(Arc::new(WebFetch::new(cfg.tools.web_fetch.clone())));
+    if let Some(sp) = &skills {
+        builtins = builtins.with_tool(Arc::new(ActivateSkill::new(sp.clone())));
+    }
+    let builtin: Arc<dyn ToolProvider> = Arc::new(builtins.build());
     let run_tests: Arc<dyn ToolProvider> = Arc::new(RunTestsTool::new(
         Arc::clone(&job_mgr) as Arc<dyn LocalJobSubmitter>
     ));

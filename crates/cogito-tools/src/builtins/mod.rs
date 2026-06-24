@@ -1,6 +1,7 @@
 //! Builtin tools bundled with `cogito-tools`. Each tool implements the
 //! `BuiltinTool` trait.
 
+pub mod activate_skill;
 pub mod edit;
 pub mod glob;
 pub mod grep;
@@ -10,6 +11,7 @@ pub(crate) mod walk;
 pub mod web_fetch;
 pub mod write_file;
 
+pub use activate_skill::ActivateSkill;
 pub use edit::Edit;
 pub use glob::Glob;
 pub use grep::Grep;

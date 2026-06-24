@@ -14,7 +14,7 @@
 //!   1. A `SkillActivated { skill_name = "foo" }` event lands in the log on
 //!      turn 2 (model-channel activation re-derived from previous-turn text).
 //!   2. Turn 2's `SystemPromptInjected.suffix` contains `<skill name="foo"`
-//!      (the XML-wrapped activated body) and the "Available Skills" registry
+//!      (the XML-wrapped activated body) and the "Skills (mandatory)" registry
 //!      block.
 //!   3. When the model emits `$foo` in both turns, only one `SkillActivated`
 //!      event is recorded (idempotent dedupe against prior activations).
@@ -254,15 +254,15 @@ async fn model_sigil_in_turn1_activates_in_turn2() -> Result<(), Box<dyn std::er
         "turn 2 suffix must contain <skill name=\"foo\">; got: {}",
         suffixes[1],
     );
-    // Both turns should carry the Available Skills registry block.
+    // Both turns should carry the Skills (mandatory) registry block.
     assert!(
-        suffixes[0].contains("## Available Skills"),
-        "turn 1 suffix missing Available Skills block: {}",
+        suffixes[0].contains("## Skills (mandatory)"),
+        "turn 1 suffix missing Skills (mandatory) block: {}",
         suffixes[0],
     );
     assert!(
-        suffixes[1].contains("## Available Skills"),
-        "turn 2 suffix missing Available Skills block: {}",
+        suffixes[1].contains("## Skills (mandatory)"),
+        "turn 2 suffix missing Skills (mandatory) block: {}",
         suffixes[1],
     );
 

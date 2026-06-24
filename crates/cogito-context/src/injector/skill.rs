@@ -10,11 +10,18 @@ use async_trait::async_trait;
 use cogito_protocol::context::{ContextError, InjectionInput, SystemPromptInjector};
 use cogito_protocol::event::{ConversationEvent, EventPayload};
 use cogito_protocol::ids::{EventId, TurnId};
-use cogito_protocol::skill::{SkillActivationChannel, SkillProvider, SkillSource};
+use cogito_protocol::skill::{
+    SkillActivationChannel, SkillProvider, SkillSource, render_skill_block,
+};
 use cogito_protocol::store::EventRecorder;
 
 /// Per-skill description character cap for the registry block.
 const DESCRIPTION_CAP_CHARS: usize = 1024;
+
+/// Max skills listed in the index before truncation (ADR-0042 §6).
+const MAX_LISTED_SKILLS: usize = 50;
+/// Max total characters in the index block before truncation (ADR-0042 §6).
+const MAX_INDEX_CHARS: usize = 8192;
 
 /// `SystemPromptInjector` impl powered by a `SkillProvider`.
 #[derive(Clone)]
@@ -182,22 +189,100 @@ fn collect_model_channel(
 }
 
 fn collect_prior_activations(history: &[ConversationEvent]) -> HashSet<String> {
+    use cogito_protocol::tool::ToolResult;
+
     let mut out = HashSet::new();
+    // Pass 1: explicit SkillActivated events (sigil/slash channel).
     for ev in history {
         if let EventPayload::SkillActivated { skill_name, .. } = &ev.payload {
             out.insert(skill_name.clone());
         }
     }
+    // Pass 2: successful `activate_skill` tool calls (tool channel). The body
+    // is already in the persisted ToolResultRecorded, so the sigil path must
+    // not re-inject it. A call counts only if its correlated result succeeded.
+    let mut succeeded: HashSet<&str> = HashSet::new();
+    for ev in history {
+        if let EventPayload::ToolResultRecorded { call_id, result } = &ev.payload
+            && matches!(result, ToolResult::Output(_))
+        {
+            succeeded.insert(call_id.as_str());
+        }
+    }
+    for ev in history {
+        if let EventPayload::ToolUseRecorded {
+            call_id,
+            tool_name,
+            args,
+            ..
+        } = &ev.payload
+            && tool_name == "activate_skill"
+            && succeeded.contains(call_id.as_str())
+            && let Some(name) = args.get("name").and_then(|v| v.as_str())
+        {
+            out.insert(name.to_string());
+        }
+    }
     out
 }
 
+/// Sort key giving scope precedence Repo > User > Plugin > System.
+fn scope_rank(s: &SkillSource) -> u8 {
+    match s {
+        SkillSource::Repo { .. } => 0,
+        SkillSource::User => 1,
+        SkillSource::Plugin { .. } => 2,
+        SkillSource::System => 3,
+        _ => 4,
+    }
+}
+
+fn scope_header(s: &SkillSource) -> &'static str {
+    match s {
+        SkillSource::Repo { .. } => "### From this repository",
+        SkillSource::User => "### User",
+        SkillSource::Plugin { .. } => "### Plugins",
+        SkillSource::System => "### Built-in",
+        _ => "### Other",
+    }
+}
+
 fn build_registry_block(provider: &dyn SkillProvider, cap_chars: usize) -> String {
-    let metas = provider.list();
+    let mut metas = provider.list();
     if metas.is_empty() {
         return String::new();
     }
-    let mut out = String::from("## Available Skills\n");
+    // Stable sort by scope precedence; preserves discovery order within a scope.
+    metas.sort_by_key(|m| scope_rank(&m.source));
+
+    let total = metas.len();
+    let dropped = total.saturating_sub(MAX_LISTED_SKILLS);
+    if dropped > 0 {
+        metas.truncate(MAX_LISTED_SKILLS);
+        tracing::warn!(
+            dropped,
+            total,
+            limit = MAX_LISTED_SKILLS,
+            "skill index truncated: more skills than the listing cap"
+        );
+    }
+
+    let mut out = String::from(
+        "## Skills (mandatory)\n\
+         Before responding, scan the skills below. If any skill is relevant to \
+         the user's task — even partially — you MUST load it first by calling the \
+         `activate_skill` tool with its name. (If you cannot call tools, write \
+         `$<name>` instead.) Loading injects the skill's full instructions.\n\n",
+    );
+
+    let mut last_rank: Option<u8> = None;
     for m in metas {
+        let rank = scope_rank(&m.source);
+        if last_rank != Some(rank) {
+            out.push_str(scope_header(&m.source));
+            out.push('\n');
+            last_rank = Some(rank);
+        }
         let desc = if m.description.chars().count() > cap_chars {
             let mut t: String = m
                 .description
@@ -215,12 +300,18 @@ fn build_registry_block(provider: &dyn SkillProvider, cap_chars: usize) -> Strin
         out.push_str(&desc);
         out.push('\n');
     }
+
+    if out.len() > MAX_INDEX_CHARS {
+        tracing::warn!(
+            chars = out.len(),
+            limit = MAX_INDEX_CHARS,
+            "skill index block exceeds the char cap; downstream context budget may truncate it"
+        );
+    }
     out
 }
 
 fn build_body_blocks(provider: &dyn SkillProvider, names: &[String]) -> String {
-    use std::fmt::Write as _;
-
     if names.is_empty() {
         return String::new();
     }
@@ -229,48 +320,150 @@ fn build_body_blocks(provider: &dyn SkillProvider, names: &[String]) -> String {
         let Some(content) = provider.get(name) else {
             continue;
         };
-        let source_kind = match content.source {
-            SkillSource::Repo { .. } => "repo",
-            SkillSource::User => "user",
-            SkillSource::Plugin { .. } => "plugin",
-            SkillSource::System => "system",
-            // `SkillSource` is `#[non_exhaustive]`; future variants render as
-            // "unknown" until explicit support lands.
-            _ => "unknown",
-        };
-        // Writing into a `String` via `fmt::Write` is infallible; the
-        // `Result` can be safely discarded.
-        //
-        // ADR-0029: when the skill has an on-disk bundle, surface its root
-        // directory as a `root="..."` attribute plus a one-line resolution
-        // hint, so the model can locate bundled files (`scripts/`,
-        // `references/`, `assets/`) referenced relatively in the body.
-        // Skills with no on-disk bundle (`root: None`) emit no path.
-        //
-        // TODO(ADR-0029): the path is interpolated into the pseudo-XML
-        // attribute unescaped. Operator-authored skill dirs are trusted in
-        // v0.1, but a directory name containing `"`, `>`, or a newline would
-        // break the tag and inject text into the system prompt. Escape (or
-        // reject at discovery) before skill roots become tenant-controlled
-        // in the SaaS profile (Phase 3).
-        match content.root.as_deref().map(std::path::Path::display) {
-            Some(root) => {
-                let _ = write!(
-                    out,
-                    "\n<skill name=\"{name}\" source=\"{source_kind}\" root=\"{root}\">\n"
-                );
-                let _ = writeln!(
-                    out,
-                    "Bundled files for this skill live under the root path above; \
-                     resolve any relative path in the instructions below against it."
-                );
-            }
-            None => {
-                let _ = write!(out, "\n<skill name=\"{name}\" source=\"{source_kind}\">\n");
-            }
-        }
-        out.push_str(&content.body);
-        out.push_str("\n</skill>\n");
+        out.push_str(&render_skill_block(&content));
     }
     out
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod registry_block_tests {
+    use cogito_protocol::skill::{SkillContent, SkillMetadata, SkillProvider, SkillSource};
+
+    use super::{DESCRIPTION_CAP_CHARS, build_registry_block};
+
+    struct P(Vec<SkillMetadata>);
+    impl SkillProvider for P {
+        fn list(&self) -> Vec<SkillMetadata> {
+            self.0.clone()
+        }
+        fn get(&self, _: &str) -> Option<SkillContent> {
+            None
+        }
+        fn is_registered(&self, n: &str) -> bool {
+            self.0.iter().any(|m| m.name == n)
+        }
+    }
+    fn m(name: &str, src: SkillSource) -> SkillMetadata {
+        SkillMetadata {
+            name: name.into(),
+            description: "desc".into(),
+            source: src,
+            disable_model_invocation: false,
+            user_invocable: true,
+            version: None,
+        }
+    }
+
+    #[test]
+    fn includes_mandatory_instruction_and_tool_name() {
+        let p = P(vec![m("a", SkillSource::User)]);
+        let out = build_registry_block(&p, DESCRIPTION_CAP_CHARS);
+        assert!(out.contains("## Skills (mandatory)"));
+        assert!(out.contains("you MUST"));
+        assert!(out.contains("activate_skill"));
+        assert!(out.contains("$<name>"), "mentions sigil fallback");
+    }
+
+    #[test]
+    fn orders_repo_before_user_before_plugin() {
+        let p = P(vec![
+            m("u", SkillSource::User),
+            m("r", SkillSource::Repo { dir: "/x".into() }),
+            m(
+                "p",
+                SkillSource::Plugin {
+                    plugin_id: "acme".into(),
+                },
+            ),
+        ]);
+        let out = build_registry_block(&p, DESCRIPTION_CAP_CHARS);
+        let ri = out.find("- r:").unwrap();
+        let ui = out.find("- u:").unwrap();
+        let pi = out.find("- p:").unwrap();
+        assert!(ri < ui && ui < pi, "repo<user<plugin in:\n{out}");
+    }
+
+    #[test]
+    fn empty_provider_yields_empty_block() {
+        let p = P(vec![]);
+        assert!(build_registry_block(&p, DESCRIPTION_CAP_CHARS).is_empty());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod dedup_tests {
+    use chrono::Utc;
+    use cogito_protocol::event::{ConversationEvent, EventPayload, SCHEMA_VERSION};
+    use cogito_protocol::ids::{EventId, SessionId};
+    use cogito_protocol::tool::ToolResult;
+
+    use super::collect_prior_activations;
+
+    // Build a minimal ConversationEvent carrying the given payload.
+    // Mirrors the helper in crates/cogito-context/tests/skill_injector.rs.
+    fn ev(seq: u64, payload: EventPayload) -> ConversationEvent {
+        ConversationEvent {
+            schema_version: SCHEMA_VERSION,
+            event_id: EventId::new(),
+            session_id: SessionId::new(),
+            turn_id: None,
+            seq,
+            ts: Utc::now(),
+            payload,
+        }
+    }
+
+    #[test]
+    fn successful_activate_skill_tool_call_counts_as_prior_activation() {
+        let history = vec![
+            ev(
+                0,
+                EventPayload::ToolUseRecorded {
+                    call_id: "c1".into(),
+                    tool_name: "activate_skill".into(),
+                    args: serde_json::json!({"name": "brainstorming"}),
+                    message_id: None,
+                },
+            ),
+            ev(
+                1,
+                EventPayload::ToolResultRecorded {
+                    call_id: "c1".into(),
+                    result: ToolResult::text("...body..."),
+                },
+            ),
+        ];
+        let prior = collect_prior_activations(&history);
+        assert!(prior.contains("brainstorming"));
+    }
+
+    #[test]
+    fn failed_activate_skill_tool_call_does_not_count() {
+        let history = vec![
+            ev(
+                0,
+                EventPayload::ToolUseRecorded {
+                    call_id: "c2".into(),
+                    tool_name: "activate_skill".into(),
+                    args: serde_json::json!({"name": "nope"}),
+                    message_id: None,
+                },
+            ),
+            ev(
+                1,
+                EventPayload::ToolResultRecorded {
+                    call_id: "c2".into(),
+                    result: ToolResult::Error {
+                        kind: cogito_protocol::tool::ToolErrorKind::InvocationFailed,
+                        message: "unknown".into(),
+                        retryable: false,
+                    },
+                },
+            ),
+        ];
+        let prior = collect_prior_activations(&history);
+        assert!(!prior.contains("nope"));
+    }
 }

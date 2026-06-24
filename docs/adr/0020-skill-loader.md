@@ -4,6 +4,11 @@
 
 Accepted (Sprint 7, 2026-05-23).
 
+> **Amendment (2026-06-23):** §1 (K5 sigil-primary activation) is superseded
+> by **ADR-0042** — `activate_skill` tool is now the primary channel; sigil +
+> slash remain as fallbacks. The rest of this ADR (scopes, frontmatter,
+> bundled-scripts deferral) stands.
+
 This ADR captures decisions ratified in the
 [2026-05-22 roadmap rebalance spec](../superpowers/specs/2026-05-22-roadmap-rebalance-design.md)
 (§2.5 + §2.6 + §4.1) and finalized during Sprint 7 when the loader was

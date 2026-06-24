@@ -1,6 +1,6 @@
 # H04 · Prompt Composer
 
-> **Status**: Implemented · core in Sprint 2 (system + history + tool schemas); honors `ContextCompacted` / `SystemPromptInjected` projection (Sprint 6) and injects the Available Skills block (Sprint 7). `crates/cogito-core/src/harness/prompt.rs`
+> **Status**: Implemented · core in Sprint 2 (system + history + tool schemas); honors `ContextCompacted` / `SystemPromptInjected` projection (Sprint 6); injects the `## Skills (mandatory)` forcing block with `activate_skill` tool channel (v0.3, ADR-0042). `crates/cogito-core/src/harness/prompt.rs`
 
 ## Role in Harness
 
@@ -119,7 +119,23 @@ Pre-Sprint-6 sessions have no `ContextCompacted` or `SystemPromptInjected` event
 
 See ADR-0008 §"Projection semantics" for the full algorithm, invariants enforced at write time, and cascade compaction rules.
 
+## Skills block
+
+H04 appends a skills section to the system prompt when at least one skill is
+registered. As of v0.3 (ADR-0042) the section heading is `## Skills (mandatory)`
+and carries an imperative instruction: the model MUST call the `activate_skill`
+builtin tool before using a skill. The tool returns the full SKILL.md body as a
+`ToolResult` in-turn, persisted by `ToolResultRecorded`. Sigil (`$SkillName`) and
+slash (`/skill <name>`) remain as always-on fallbacks for models that cannot call
+tools. Skills are grouped by scope (Repo > User > Plugin > System) and ordered
+by precedence within each group; descriptions are capped at the ADR-0020 bound.
+
+Prior to v0.3 (Sprint 7, ADR-0020) this section was titled `## Available Skills`
+with no forcing instruction. That passive form is superseded.
+
 ## References
 
 - ARCHITECTURE.md §"Turn state machine" (Init → PromptBuilt)
 - ADR-0008 §"Projection semantics" (HistoryProjector contract and StandardProjector algorithm)
+- ADR-0020 (skill loader; §1 K5 superseded by ADR-0042)
+- ADR-0042 (skill activation — tool-call primary channel)

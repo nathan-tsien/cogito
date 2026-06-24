@@ -80,7 +80,7 @@ async fn empty_history_emits_registry_block_only() {
             produced_by,
             ..
         } => {
-            assert!(suffix.contains("Available Skills"));
+            assert!(suffix.contains("Skills (mandatory)"));
             assert!(suffix.contains("invoice-parser"));
             assert!(contributors.is_empty(), "no activations on empty history");
             assert_eq!(produced_by, "skill");

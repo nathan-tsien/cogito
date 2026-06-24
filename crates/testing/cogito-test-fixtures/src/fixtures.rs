@@ -271,12 +271,13 @@ pub fn canonical_skill_session() -> Vec<ConversationEvent> {
             payload,
         };
 
-    // System prompt suffix as `SkillInjector` would render it for a
-    // single-skill registry: `## Available Skills` block + one `<skill>`
-    // body block. The literal mirrors the shape spec'd in
-    // `docs/superpowers/plans/2026-05-23-sprint-7-skill-loader.md` Task 23
-    // Step 3.
-    let suffix = "## Available Skills\n- invoice-parser: \
+    // Representative system-prompt suffix in the shape `SkillInjector`
+    // renders: a `## Skills (mandatory)` registry block + one `<skill>` body
+    // block. Synthetic seed data for resume/projection round-trips — it does
+    // not reproduce the live injector's full forcing-instruction text
+    // (ADR-0042); tests here round-trip whatever suffix is seeded, not the
+    // exact header copy.
+    let suffix = "## Skills (mandatory)\n- invoice-parser: \
                   Parse invoice PDFs into structured rows.\n\n\
                   <skill name=\"invoice-parser\" source=\"user\">\n\
                   # body\n\
