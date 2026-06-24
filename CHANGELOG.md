@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-06-24
+
+**Skill-activation reliability — tool-call primary channel (ADR-0042).** Skill
+activation previously depended on the model emitting a `$SkillName` sigil in
+prose, with a passive `## Available Skills` index that carried no instruction
+to act on it. That is out-of-distribution for tool-trained models, so relevant
+skills were silently never activated. This release makes activation reliable
+while preserving multi-model portability. Additive and backward-compatible: a
+new builtin tool, a new `cogito-protocol` helper, and a context-injector
+presentation change — zero Brain (H01–H11) delta, no new event variant, no
+`SCHEMA_VERSION` bump. Supersedes ADR-0020 §1.
+
+### Added
+
+- **`activate_skill` builtin tool — the primary activation channel.** Given a
+  skill name it returns that skill's full `SKILL.md` body as its `ToolResult`,
+  delivered in-turn and persisted natively by `ToolResultRecorded` (so resume
+  rebuilds it for free). Honors `disable-model-invocation`; unknown or disabled
+  skills return structured `ToolResult::Error`, never a panic. Registered at the
+  CLI and TUI surfaces whenever a `SkillProvider` is configured.
+- **`cogito-protocol::render_skill_block`** — a shared renderer used by both the
+  `activate_skill` tool and the existing `SkillInjector`, so every channel
+  delivers byte-identical skill bodies (including the ADR-0029 bundle-root
+  header).
+- **Resume-chaos scenario `tool_activate_skill_then_use`** covering the tool
+  channel.
+
+### Changed
+
+- **The injected skill index is now `## Skills (mandatory)`** with an imperative
+  "you MUST call `activate_skill`" instruction (the `$<name>` sigil is named as
+  the no-tools fallback), plus scope-precedence ordering, scope grouping, and
+  logged (non-silent) listing/character caps. Filtering uses existing metadata
+  only — no `SKILL.md` frontmatter change (honors ADR-0033).
+- **Sigil (`$Name`) and slash (`/skill`) remain always-on fallback channels**, so
+  models without reliable tool-calling (e.g. self-hosted vLLM/SGLang) keep a
+  working activation path. The three channels run in parallel.
+- **`SkillInjector` dedups against prior successful `activate_skill` calls**, so
+  a body already delivered via the tool result is never re-injected via the
+  sigil path.
+
 ## [0.2.5] - 2026-06-20
 
 **Stream/log message correlation key (ADR-0041).** A live subscriber could not

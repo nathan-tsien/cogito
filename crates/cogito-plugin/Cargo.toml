@@ -1,7 +1,7 @@
 [package]
 name = "cogito-plugin"
 description = "Local-path plugin loader for the cogito Agent Runtime: manifest parsing, artifact discovery, and provider contributions (Skills + MCP) for v0.2."
-version = "0.2.5"
+version = "0.2.6"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
